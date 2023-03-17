@@ -32,6 +32,27 @@
 =>
 ((OpName) $left $right (SimplifyFilters $on) $private)
 
+[SimplifyJoinFiltersWithNotNullCols, Normalize]
+(InnerJoin | InnerJoinApply | LeftJoin | LeftJoinApply | SemiJoin
+        | SemiJoinApply | AntiJoin | AntiJoinApply | FullJoin
+    $left:*
+    $right:*
+    $filters:* &
+        (Let
+            ($newFilters $ok):(SimplifyFiltersWithNotNullCols
+                (UnionCols
+                    (NotNullCols $left)
+                    (NotNullCols $right)
+                )
+                $filters
+            )
+            $ok
+        )
+    $private:*
+)
+=>
+((OpName) $left $right $newFilters $private)
+
 # DetectJoinContradiction replaces a Join condition with False if it detects a
 # contradiction in the filter.
 [DetectJoinContradiction, Normalize]
@@ -749,31 +770,6 @@ $left
     (ExtractUnboundConditions $outsideOn $cols)
     (EmptyJoinPrivate)
 )
-
-# RemoveJoinNotNullCondition removes a filter with an IS NOT NULL condition when
-# the given column has a NOT NULL constraint. Only left joins and full joins are
-# matched because filters can be pushed down from the ON conditions of inner and
-# semi joins.
-[RemoveJoinNotNullCondition, Normalize]
-(LeftJoin | FullJoin
-    $left:*
-    $right:*
-    $on:[
-        ...
-        $item:(FiltersItem
-            (IsNot
-                (Variable
-                    $col:* & (IsColNotNull2 $col $left $right)
-                )
-                (Null)
-            )
-        )
-        ...
-    ]
-    $private:*
-)
-=>
-((OpName) $left $right (RemoveFiltersItem $on $item) $private)
 
 # ProjectInnerJoinValues transforms an inner join with a single-row Values
 # operator to a Project operator. This allows decorrelation of e.g.:

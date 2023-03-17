@@ -685,48 +685,46 @@ project
  ├── columns: c0:8!null
  ├── cardinality: [0 - 107]
  ├── volatile
- └── limit
-      ├── columns: c0:8!null c1:9!null
-      ├── cardinality: [0 - 107]
-      ├── volatile
-      ├── select
-      │    ├── columns: c0:8!null c1:9!null
-      │    ├── volatile
-      │    ├── limit hint: 107.00
-      │    ├── project
-      │    │    ├── columns: c0:8!null c1:9!null
-      │    │    ├── immutable
-      │    │    ├── limit hint: 321.00
-      │    │    ├── scan zones
-      │    │    │    ├── columns: crdb_internal.public.zones.zone_id:1!null
-      │    │    │    └── limit hint: 321.00
-      │    │    └── projections
-      │    │         ├── crdb_internal.public.zones.zone_id:1 + 1 [as=c0:8, outer=(1), immutable]
-      │    │         └── crdb_internal.public.zones.zone_id:1 + 2 [as=c1:9, outer=(1), immutable]
-      │    └── filters
-      │         └── le [outer=(8,9), volatile, correlated-subquery]
-      │              ├── case
-      │              │    ├── true
-      │              │    ├── when
-      │              │    │    ├── c1:9 IS NOT NULL
-      │              │    │    └── function: extract
-      │              │    │         ├── case
-      │              │    │         │    ├── true
-      │              │    │         │    ├── when
-      │              │    │         │    │    ├── exists
-      │              │    │         │    │    │    └── select
-      │              │    │         │    │    │         ├── columns: ref_1.config_yaml:12!null
-      │              │    │         │    │    │         ├── outer: (8)
-      │              │    │         │    │    │         ├── scan zones [as=ref_1]
-      │              │    │         │    │    │         │    └── columns: ref_1.config_yaml:12!null
-      │              │    │         │    │    │         └── filters
-      │              │    │         │    │    │              └── c0:8 IS NOT NULL [outer=(8), constraints=(/8: (/NULL - ]; tight)]
-      │              │    │         │    │    └── version()
-      │              │    │         │    └── version()
-      │              │    │         └── '2017-05-10'
-      │              │    └── 1.0
-      │              └── 1.0
-      └── 107
+ ├── limit
+ │    ├── columns: crdb_internal.public.zones.zone_id:1!null
+ │    ├── cardinality: [0 - 107]
+ │    ├── volatile
+ │    ├── select
+ │    │    ├── columns: crdb_internal.public.zones.zone_id:1!null
+ │    │    ├── volatile
+ │    │    ├── limit hint: 107.00
+ │    │    ├── scan zones
+ │    │    │    ├── columns: crdb_internal.public.zones.zone_id:1!null
+ │    │    │    └── limit hint: 321.00
+ │    │    └── filters
+ │    │         └── le [volatile, subquery]
+ │    │              ├── function: extract
+ │    │              │    ├── case
+ │    │              │    │    ├── true
+ │    │              │    │    ├── when
+ │    │              │    │    │    ├── coalesce
+ │    │              │    │    │    │    ├── subquery
+ │    │              │    │    │    │    │    └── project
+ │    │              │    │    │    │    │         ├── columns: column18:18!null
+ │    │              │    │    │    │    │         ├── cardinality: [0 - 1]
+ │    │              │    │    │    │    │         ├── key: ()
+ │    │              │    │    │    │    │         ├── fd: ()-->(18)
+ │    │              │    │    │    │    │         ├── limit
+ │    │              │    │    │    │    │         │    ├── cardinality: [0 - 1]
+ │    │              │    │    │    │    │         │    ├── key: ()
+ │    │              │    │    │    │    │         │    ├── scan zones [as=ref_1]
+ │    │              │    │    │    │    │         │    │    └── limit hint: 1.00
+ │    │              │    │    │    │    │         │    └── 1
+ │    │              │    │    │    │    │         └── projections
+ │    │              │    │    │    │    │              └── true [as=column18:18]
+ │    │              │    │    │    │    └── false
+ │    │              │    │    │    └── version()
+ │    │              │    │    └── version()
+ │    │              │    └── '2017-05-10'
+ │    │              └── 1.0
+ │    └── 107
+ └── projections
+      └── crdb_internal.public.zones.zone_id:1 + 1 [as=c0:8, outer=(1), immutable]
 
 # --------------------------------------------------
 # InlineSelectVirtualColumns

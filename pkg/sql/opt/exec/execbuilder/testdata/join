@@ -822,13 +822,13 @@ vectorized: true
 ·
 • hash join (inner)
 │ columns: (a, b, n, sq)
-│ estimated row count: 6 (missing stats)
+│ estimated row count: 4 (missing stats)
 │ equality: (b) = (sq)
 │
 ├── • filter
 │   │ columns: (a, b)
-│   │ estimated row count: 113 (missing stats)
-│   │ filter: ((a > 1) AND ((a IS NULL) OR (a > 2))) AND ((a IS NULL) OR (a < b))
+│   │ estimated row count: 111 (missing stats)
+│   │ filter: ((a > 1) AND (a > 2)) AND (a < b)
 │   │
 │   └── • scan
 │         columns: (a, b)

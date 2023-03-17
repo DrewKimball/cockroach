@@ -607,21 +607,17 @@ values
 # FoldNonNullIsNotNull
 # --------------------------------------------------
 
-# We could (but do not currently) infer that k IS NOT NULL is always True given
-# that k is declared NOT NULL.
 norm expect=FoldNonNullIsNotNull
 SELECT 1 IS NOT NULL AS r, k IS NOT NULL AS s, i IS NOT NULL AS t FROM a
 ----
 project
  ├── columns: r:9!null s:10!null t:11!null
- ├── fd: ()-->(9)
+ ├── fd: ()-->(9,10)
  ├── scan a
- │    ├── columns: k:1!null i:2
- │    ├── key: (1)
- │    └── fd: (1)-->(2)
+ │    └── columns: i:2
  └── projections
       ├── true [as=r:9]
-      ├── k:1 IS NOT NULL [as=s:10, outer=(1)]
+      ├── true [as=s:10]
       └── i:2 IS NOT NULL [as=t:11, outer=(2)]
 
 norm expect=FoldNonNullIsNotNull

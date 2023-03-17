@@ -295,3 +295,22 @@ $input
     (FoldJSONFieldAccess $projections $jsonCols $col $input)
     $passthrough
 )
+
+[SimplifyProjectionsWithNotNullCols, Normalize]
+(Project
+    $input:*
+    $projections:* &
+        (Let
+            (
+                $newProjections
+                $ok
+            ):(SimplifyProjectionsWithNotNullCols
+                (NotNullCols $input)
+                $projections
+            )
+            $ok
+        )
+    $passthrough:*
+)
+=>
+(Project $input $newProjections $passthrough)

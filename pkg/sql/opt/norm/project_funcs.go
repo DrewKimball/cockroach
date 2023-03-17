@@ -849,3 +849,62 @@ func (c *CustomFuncs) IsStaticTuple(expr opt.ScalarExpr) bool {
 	}
 	return false
 }
+
+func (c *CustomFuncs) SimplifyProjectionsWithNotNullCols(
+	notNullCols opt.ColSet, projections memo.ProjectionsExpr,
+) (newProjections memo.ProjectionsExpr, ok bool) {
+	for i := range projections {
+		if !projections[i].ScalarProps().OuterCols.Intersects(notNullCols) {
+			continue
+		}
+		newProjection, simplified := c.trySimplifyWithNotNullCols(projections[i].Element, notNullCols)
+		if simplified {
+			if newProjections == nil {
+				// Lazily initialize the newProjections slice. Note that we copy in the
+				// old projections here, but will replace any that can be simplified.
+				newProjections = make(memo.ProjectionsExpr, len(projections))
+				copy(newProjections, projections)
+			}
+			newProjections[i] = c.f.ConstructProjectionsItem(
+				newProjection.(opt.ScalarExpr), projections[i].Col,
+			)
+		}
+	}
+	return newProjections, newProjections != nil
+}
+
+// TODO(drewk): can use ExprIsNeverNull for right side of exprs
+func (c *CustomFuncs) trySimplifyWithNotNullCols(
+	expr opt.Expr, notNullCols opt.ColSet,
+) (newExpr opt.Expr, simplified bool) {
+	var replace ReplaceFunc
+	replace = func(e opt.Expr) opt.Expr {
+		switch t := e.(type) {
+		case *memo.IsExpr:
+			if v, ok := t.Left.(*memo.VariableExpr); ok {
+				if notNullCols.Contains(v.Col) && t.Right.Op() == opt.NullOp {
+					return memo.FalseSingleton
+				}
+			}
+		case *memo.IsNotExpr:
+			if v, ok := t.Left.(*memo.VariableExpr); ok {
+				if notNullCols.Contains(v.Col) && t.Right.Op() == opt.NullOp {
+					return memo.TrueSingleton
+				}
+			}
+		case *memo.CoalesceExpr:
+			if len(t.Args) > 0 {
+				if v, ok := t.Args[0].(*memo.VariableExpr); ok {
+					if notNullCols.Contains(v.Col) {
+						return v
+					}
+				}
+			}
+			// Short-circuit
+			return t
+		}
+		return c.f.Replace(e, replace)
+	}
+	newExpr = replace(expr)
+	return newExpr, expr != newExpr
+}

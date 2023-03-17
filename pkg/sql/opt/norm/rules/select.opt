@@ -31,6 +31,21 @@
 =>
 (Select $input (SimplifyFilters $filters))
 
+[SimplifySelectFiltersWithNotNullCols, Normalize]
+(Select
+    $input:*
+    $filters:* &
+        (Let
+            ($newFilters $ok):(SimplifyFiltersWithNotNullCols
+                (NotNullCols $input)
+                $filters
+            )
+            $ok
+        )
+)
+=>
+(Select $input $newFilters)
+
 # ConsolidateSelectFilters consolidates filters that constrain a single
 # variable. For example, filters x >= 5 and x <= 10 would be combined into a
 # single Range operation.
@@ -284,44 +299,6 @@ $input
     )
     (ExtractUnboundConditions $filters $passthrough)
 )
-
-# RemoveNotNullCondition removes a filter with an IS NOT NULL condition
-# when the given column has a NOT NULL constraint.
-[RemoveNotNullCondition, Normalize]
-(Select
-    $input:*
-    $filters:[
-        ...
-        $item:(FiltersItem
-            (IsNot
-                (Variable $col:* & (IsColNotNull $col $input))
-                (Null)
-            )
-        )
-        ...
-    ]
-)
-=>
-(Select $input (RemoveFiltersItem $filters $item))
-
-# SimplifyIsNullCondition replaces a filter with an IS NULL condition with
-# False when the given column has a NOT NULL constraint.
-[SimplifyIsNullCondition, Normalize]
-(Select
-    $input:*
-    $filters:[
-        ...
-        $item:(FiltersItem
-            (Is
-                (Variable $col:* & (IsColNotNull $col $input))
-                (Null)
-            )
-        )
-        ...
-    ]
-)
-=>
-(Select $input [ (FiltersItem (False)) ])
 
 # PushSelectIntoProjectSet pushes filters into a ProjectSet. In particular,
 # the filters that are bound to the input columns of the ProjectSet are

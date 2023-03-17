@@ -417,3 +417,24 @@ func (c *CustomFuncs) addConjuncts(
 	}
 	return filters, true
 }
+
+func (c *CustomFuncs) SimplifyFiltersWithNotNullCols(
+	notNullCols opt.ColSet, filters memo.FiltersExpr,
+) (newFilters memo.FiltersExpr, ok bool) {
+	for i := range filters {
+		if !filters[i].ScalarProps().OuterCols.Intersects(notNullCols) {
+			continue
+		}
+		newFilter, simplified := c.trySimplifyWithNotNullCols(filters[i].Condition, notNullCols)
+		if simplified {
+			if newFilters == nil {
+				// Lazily initialize the newFilters slice. Note that we copy in the
+				// old projections here, but will replace any that can be simplified.
+				newFilters = make(memo.FiltersExpr, len(filters))
+				copy(newFilters, filters)
+			}
+			newFilters[i] = c.f.ConstructFiltersItem(newFilter.(opt.ScalarExpr))
+		}
+	}
+	return newFilters, newFilters != nil
+}

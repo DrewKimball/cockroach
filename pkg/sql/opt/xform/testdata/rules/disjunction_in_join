@@ -1333,12 +1333,13 @@ SELECT * FROM a WHERE (a1, a2) IN (SELECT c1, d1 FROM c, d WHERE c1 IS NULL OR c
 ----
 project
  ├── columns: a1:1!null a2:2!null a3:3!null a4:4!null
- ├── key: (1-4)
+ ├── key: (2-4)
+ ├── fd: (1)==(2), (2)==(1)
  └── inner-join (hash)
       ├── columns: a1:1!null a2:2!null a3:3!null a4:4!null c1:7!null d1:14!null
       ├── multiplicity: left-rows(zero-or-more), right-rows(zero-or-one)
-      ├── key: (3,4,7,14)
-      ├── fd: (1)==(7), (7)==(1), (2)==(14), (14)==(2)
+      ├── key: (3,4,14)
+      ├── fd: (1)==(2,7,14), (2)==(1,7,14), (7)==(1,2,14), (14)==(1,2,7)
       ├── distinct-on
       │    ├── columns: c1:7 d1:14
       │    ├── grouping columns: c1:7 d1:14
@@ -1350,41 +1351,41 @@ project
       │         ├── fd: (11,18)-->(7,14)
       │         ├── union-all
       │         │    ├── columns: c1:7 c.rowid:11!null d1:14 d.rowid:18!null
-      │         │    ├── left columns: c1:34 c.rowid:38 d1:41 d.rowid:45
-      │         │    ├── right columns: c1:48 c.rowid:52 d1:55 d.rowid:59
+      │         │    ├── left columns: c1:22 c.rowid:26 d1:29 d.rowid:33
+      │         │    ├── right columns: c1:36 c.rowid:40 d1:43 d.rowid:47
       │         │    ├── inner-join (cross)
-      │         │    │    ├── columns: c1:34 c.rowid:38!null d1:41 d.rowid:45!null
-      │         │    │    ├── key: (38,45)
-      │         │    │    ├── fd: ()-->(34), (45)-->(41)
+      │         │    │    ├── columns: c1:22 c.rowid:26!null d1:29 d.rowid:33!null
+      │         │    │    ├── key: (26,33)
+      │         │    │    ├── fd: ()-->(22), (33)-->(29)
       │         │    │    ├── scan d
-      │         │    │    │    ├── columns: d1:41 d.rowid:45!null
-      │         │    │    │    ├── key: (45)
-      │         │    │    │    └── fd: (45)-->(41)
+      │         │    │    │    ├── columns: d1:29 d.rowid:33!null
+      │         │    │    │    ├── key: (33)
+      │         │    │    │    └── fd: (33)-->(29)
       │         │    │    ├── select
-      │         │    │    │    ├── columns: c1:34 c.rowid:38!null
-      │         │    │    │    ├── key: (38)
-      │         │    │    │    ├── fd: ()-->(34)
+      │         │    │    │    ├── columns: c1:22 c.rowid:26!null
+      │         │    │    │    ├── key: (26)
+      │         │    │    │    ├── fd: ()-->(22)
       │         │    │    │    ├── scan c
-      │         │    │    │    │    ├── columns: c1:34 c.rowid:38!null
-      │         │    │    │    │    ├── key: (38)
-      │         │    │    │    │    └── fd: (38)-->(34)
+      │         │    │    │    │    ├── columns: c1:22 c.rowid:26!null
+      │         │    │    │    │    ├── key: (26)
+      │         │    │    │    │    └── fd: (26)-->(22)
       │         │    │    │    └── filters
-      │         │    │    │         └── c1:34 IS NULL [outer=(34), constraints=(/34: [/NULL - /NULL]; tight), fd=()-->(34)]
+      │         │    │    │         └── c1:22 IS NULL [outer=(22), constraints=(/22: [/NULL - /NULL]; tight), fd=()-->(22)]
       │         │    │    └── filters (true)
       │         │    └── inner-join (hash)
-      │         │         ├── columns: c1:48!null c.rowid:52!null d1:55!null d.rowid:59!null
-      │         │         ├── key: (52,59)
-      │         │         ├── fd: (52)-->(48), (59)-->(55), (48)==(55), (55)==(48)
+      │         │         ├── columns: c1:36!null c.rowid:40!null d1:43!null d.rowid:47!null
+      │         │         ├── key: (40,47)
+      │         │         ├── fd: (40)-->(36), (47)-->(43), (36)==(43), (43)==(36)
       │         │         ├── scan c
-      │         │         │    ├── columns: c1:48 c.rowid:52!null
-      │         │         │    ├── key: (52)
-      │         │         │    └── fd: (52)-->(48)
+      │         │         │    ├── columns: c1:36 c.rowid:40!null
+      │         │         │    ├── key: (40)
+      │         │         │    └── fd: (40)-->(36)
       │         │         ├── scan d
-      │         │         │    ├── columns: d1:55 d.rowid:59!null
-      │         │         │    ├── key: (59)
-      │         │         │    └── fd: (59)-->(55)
+      │         │         │    ├── columns: d1:43 d.rowid:47!null
+      │         │         │    ├── key: (47)
+      │         │         │    └── fd: (47)-->(43)
       │         │         └── filters
-      │         │              └── c1:48 = d1:55 [outer=(48,55), constraints=(/48: (/NULL - ]; /55: (/NULL - ]), fd=(48)==(55), (55)==(48)]
+      │         │              └── c1:36 = d1:43 [outer=(36,43), constraints=(/36: (/NULL - ]; /43: (/NULL - ]), fd=(36)==(43), (43)==(36)]
       │         └── aggregations
       │              ├── const-agg [as=c1:7, outer=(7)]
       │              │    └── c1:7
@@ -1392,12 +1393,13 @@ project
       │                   └── d1:14
       ├── select
       │    ├── columns: a1:1!null a2:2!null a3:3!null a4:4!null
-      │    ├── key: (1-4)
+      │    ├── key: (2-4)
+      │    ├── fd: (1)==(2), (2)==(1)
       │    ├── scan a
       │    │    ├── columns: a1:1!null a2:2!null a3:3!null a4:4!null
       │    │    └── key: (1-4)
       │    └── filters
-      │         └── (a1:1 IS NULL) OR (a1:1 = a2:2) [outer=(1,2)]
+      │         └── a1:1 = a2:2 [outer=(1,2), constraints=(/1: (/NULL - ]; /2: (/NULL - ]), fd=(1)==(2), (2)==(1)]
       └── filters
            ├── c1:7 = a1:1 [outer=(1,7), constraints=(/1: (/NULL - ]; /7: (/NULL - ]), fd=(1)==(7), (7)==(1)]
            └── d1:14 = a2:2 [outer=(2,14), constraints=(/2: (/NULL - ]; /14: (/NULL - ]), fd=(2)==(14), (14)==(2)]
@@ -4287,17 +4289,16 @@ project
       │    │    ├── fd: (1-4)-->(20)
       │    │    ├── left-join (hash)
       │    │    │    ├── columns: t1.a1:1!null t1.a2:2!null t1.a3:3!null t1.a4:4!null t2.a1:7 t2.a2:8 t2.a3:9 notnull:19
-      │    │    │    ├── fd: (8)-->(19)
       │    │    │    ├── scan a [as=t1]
       │    │    │    │    ├── columns: t1.a1:1!null t1.a2:2!null t1.a3:3!null t1.a4:4!null
       │    │    │    │    └── key: (1-4)
       │    │    │    ├── project
       │    │    │    │    ├── columns: notnull:19!null t2.a1:7!null t2.a2:8!null t2.a3:9!null
-      │    │    │    │    ├── fd: (8)-->(19)
+      │    │    │    │    ├── fd: ()-->(19)
       │    │    │    │    ├── scan a [as=t2]
       │    │    │    │    │    └── columns: t2.a1:7!null t2.a2:8!null t2.a3:9!null
       │    │    │    │    └── projections
-      │    │    │    │         └── t2.a2:8 IS NOT NULL [as=notnull:19, outer=(8)]
+      │    │    │    │         └── true [as=notnull:19]
       │    │    │    └── filters
       │    │    │         ├── (t1.a3:3 = t2.a3:9) OR (t1.a1:1 = t2.a1:7) [outer=(1,3,7,9)]
       │    │    │         └── t1.a2:2 = t2.a2:8 [outer=(2,8), constraints=(/2: (/NULL - ]; /8: (/NULL - ]), fd=(2)==(8), (8)==(2)]
@@ -4305,19 +4306,13 @@ project
       │    │         └── bool-or [as=bool_or:20, outer=(19)]
       │    │              └── notnull:19
       │    └── projections
-      │         └── CASE WHEN bool_or:20 AND (t1.a2:2 IS NOT NULL) THEN true WHEN bool_or:20 IS NULL THEN false ELSE CAST(NULL AS BOOL) END [as=case:21, outer=(2,20)]
+      │         └── CASE WHEN bool_or:20 THEN true WHEN bool_or:20 IS NULL THEN false ELSE CAST(NULL AS BOOL) END [as=case:21, outer=(20)]
       └── filters
            └── or [outer=(2,21), correlated-subquery]
                 ├── case:21
                 └── any: eq
-                     ├── project
-                     │    ├── columns: t3.a2:14!null
-                     │    └── select
-                     │         ├── columns: t3.a1:13!null t3.a2:14!null t3.a3:15!null
-                     │         ├── scan a [as=t3]
-                     │         │    └── columns: t3.a1:13!null t3.a2:14!null t3.a3:15!null
-                     │         └── filters
-                     │              └── ((t3.a3:15 IS DISTINCT FROM CAST(NULL AS INT8)) OR CAST(NULL AS BOOL)) OR ((t3.a1:13 IS DISTINCT FROM CAST(NULL AS INT8)) OR CAST(NULL AS BOOL)) [outer=(13,15)]
+                     ├── scan a [as=t3]
+                     │    └── columns: t3.a2:14!null
                      └── t1.a2:2
 
 # Complex join condition where we can't decorrelate, so the join terms aren't
@@ -4344,17 +4339,16 @@ project
       │    │    ├── fd: (1-4)-->(20)
       │    │    ├── left-join (hash)
       │    │    │    ├── columns: t1.a1:1!null t1.a2:2!null t1.a3:3!null t1.a4:4!null t2.a1:7 t2.a2:8 t2.a3:9 notnull:19
-      │    │    │    ├── fd: (8)-->(19)
       │    │    │    ├── scan a [as=t1]
       │    │    │    │    ├── columns: t1.a1:1!null t1.a2:2!null t1.a3:3!null t1.a4:4!null
       │    │    │    │    └── key: (1-4)
       │    │    │    ├── project
       │    │    │    │    ├── columns: notnull:19!null t2.a1:7!null t2.a2:8!null t2.a3:9!null
-      │    │    │    │    ├── fd: (8)-->(19)
+      │    │    │    │    ├── fd: ()-->(19)
       │    │    │    │    ├── scan a [as=t2]
       │    │    │    │    │    └── columns: t2.a1:7!null t2.a2:8!null t2.a3:9!null
       │    │    │    │    └── projections
-      │    │    │    │         └── t2.a2:8 IS NOT NULL [as=notnull:19, outer=(8)]
+      │    │    │    │         └── true [as=notnull:19]
       │    │    │    └── filters
       │    │    │         ├── (t1.a3:3 = t2.a3:9) OR (t1.a1:1 = t2.a1:7) [outer=(1,3,7,9)]
       │    │    │         └── t1.a2:2 = t2.a2:8 [outer=(2,8), constraints=(/2: (/NULL - ]; /8: (/NULL - ]), fd=(2)==(8), (8)==(2)]
@@ -4362,20 +4356,14 @@ project
       │    │         └── bool-or [as=bool_or:20, outer=(19)]
       │    │              └── notnull:19
       │    └── projections
-      │         └── CASE WHEN bool_or:20 AND (t1.a2:2 IS NOT NULL) THEN true WHEN bool_or:20 IS NULL THEN false ELSE CAST(NULL AS BOOL) END [as=case:21, outer=(2,20)]
+      │         └── CASE WHEN bool_or:20 THEN true WHEN bool_or:20 IS NULL THEN false ELSE CAST(NULL AS BOOL) END [as=case:21, outer=(20)]
       └── filters
            └── or [outer=(2,21), correlated-subquery]
                 ├── NOT case:21
                 └── not
                      └── any: eq
-                          ├── project
-                          │    ├── columns: t3.a2:14!null
-                          │    └── select
-                          │         ├── columns: t3.a1:13!null t3.a2:14!null t3.a3:15!null
-                          │         ├── scan a [as=t3]
-                          │         │    └── columns: t3.a1:13!null t3.a2:14!null t3.a3:15!null
-                          │         └── filters
-                          │              └── ((t3.a3:15 IS DISTINCT FROM CAST(NULL AS INT8)) OR CAST(NULL AS BOOL)) OR ((t3.a1:13 IS DISTINCT FROM CAST(NULL AS INT8)) OR CAST(NULL AS BOOL)) [outer=(13,15)]
+                          ├── scan a [as=t3]
+                          │    └── columns: t3.a2:14!null
                           └── t1.a2:2
 
 # The conjuncts under the top-level disjunct contain no equijoin terms, and

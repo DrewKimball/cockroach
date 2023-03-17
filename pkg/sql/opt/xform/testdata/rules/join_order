@@ -2171,20 +2171,14 @@ Join Tree #1
 --------------------------------------------------------------------------------
   inner-join (hash)
    ├── scan abc
-   ├── select
-   │    ├── scan bx
-   │    └── filters
-   │         └── x IS NOT NULL
+   ├── scan bx
    └── filters
         └── a = x
 Vertexes
   A:
     scan abc
   B:
-    select
-     ├── scan bx
-     └── filters
-          └── x IS NOT NULL
+    scan bx
 Edges
   a = x [inner, ses=AB, tes=AB, rules=()]
 Joining AB
@@ -2197,10 +2191,7 @@ Join Tree #2
   semi-join (hash)
    ├── inner-join (hash)
    │    ├── scan abc
-   │    ├── select
-   │    │    ├── scan bx
-   │    │    └── filters
-   │    │         └── x IS NOT NULL
+   │    ├── scan bx
    │    └── filters
    │         └── a = x
    ├── scan cy
@@ -2210,10 +2201,7 @@ Vertexes
   A:
     scan abc
   B:
-    select
-     ├── scan bx
-     └── filters
-          └── x IS NOT NULL
+    scan bx
   C:
     scan cy
 Edges
@@ -2235,10 +2223,7 @@ Join Tree #3
   inner-join (hash)
    ├── inner-join (hash)
    │    ├── scan abc
-   │    ├── select
-   │    │    ├── scan bx
-   │    │    └── filters
-   │    │         └── x IS NOT NULL
+   │    ├── scan bx
    │    └── filters
    │         └── a = x
    ├── distinct-on
@@ -2249,10 +2234,7 @@ Vertexes
   A:
     scan abc
   B:
-    select
-     ├── scan bx
-     └── filters
-          └── x IS NOT NULL
+    scan bx
   D:
     distinct-on
      └── scan cy
@@ -2284,10 +2266,7 @@ Join Tree #4
    ├── semi-join (hash)
    │    ├── inner-join (hash)
    │    │    ├── scan abc
-   │    │    ├── select
-   │    │    │    ├── scan bx
-   │    │    │    └── filters
-   │    │    │         └── x IS NOT NULL
+   │    │    ├── scan bx
    │    │    └── filters
    │    │         └── a = x
    │    ├── scan cy
@@ -2300,10 +2279,7 @@ Vertexes
   A:
     scan abc
   B:
-    select
-     ├── scan bx
-     └── filters
-          └── x IS NOT NULL
+    scan bx
   C:
     scan cy
   E:
@@ -2368,16 +2344,10 @@ inner-join (hash)
  │         ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
  │         ├── key: (7)
  │         ├── fd: (1)-->(2-4), (7)-->(8), (1)==(8,12), (8)==(1,12), (12)==(1,8)
- │         ├── select
- │         │    ├── columns: bx.b:7!null x:8!null
+ │         ├── scan bx
+ │         │    ├── columns: bx.b:7!null x:8
  │         │    ├── key: (7)
- │         │    ├── fd: (7)-->(8)
- │         │    ├── scan bx
- │         │    │    ├── columns: bx.b:7!null x:8
- │         │    │    ├── key: (7)
- │         │    │    └── fd: (7)-->(8)
- │         │    └── filters
- │         │         └── x:8 IS NOT NULL [outer=(8), constraints=(/8: (/NULL - ]; tight)]
+ │         │    └── fd: (7)-->(8)
  │         ├── inner-join (lookup abc)
  │         │    ├── columns: a:1!null abc.b:2 abc.c:3 abc.d:4 y:12!null
  │         │    ├── key columns: [12] = [1]
