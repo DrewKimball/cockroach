@@ -236,6 +236,51 @@ $input
     (AddColToSet $passthrough $toCol)
 )
 
+# PushColumnRemappingIntoGroupBy is similar to PushColumnRemappingIntoValues,
+# but handles GroupBy operators instead of Values.
+[PushColumnRemappingIntoGroupBy, Normalize]
+(Project
+    $input:(GroupBy | ScalarGroupBy | DistinctOn
+            | UpsertDistinctOn | EnsureDistinctOng
+            | EnsureUpsertDistinctOn
+        $innerInput:*
+        $aggregations:[
+            ...
+            $aggItem:(AggregationsItem $agg:* $innerCol:*)
+            ...
+        ]
+        $private:*
+    )
+    $projections:[
+            ...
+            $item:(ProjectionsItem
+                (Variable $fromCol:*)
+                $toCol:*
+            )
+            ...
+        ] &
+        (SingleColsAreEqual $innerCol $fromCol)
+    $passthrough:* & ^(ContainsCol $passthrough $fromCol)
+)
+=>
+(Project
+    ((OpName $input)
+        $innerInput
+        (ReplaceAggregationsItem
+            $aggregations
+            $aggItem
+            (AggregationsItem $agg $toCol)
+        )
+        $private
+    )
+    (RemapProjectionCols
+        (RemoveProjectionsItem $projections $item)
+        $fromCol
+        $toCol
+    )
+    (AddColToSet $passthrough $toCol)
+)
+
 # PushAssignmentCastsIntoValues pushes assignment cast projections into Values
 # rows.
 #

@@ -977,6 +977,26 @@ func (c *CustomFuncs) MakeAggCols(aggOp opt.Operator, cols opt.ColSet) memo.Aggr
 	return aggs
 }
 
+// ReplaceAggregationsItem returns a new list that is a copy of the given list,
+// except that the given search item has been replaced by the given replace
+// item. If the list contains the search item multiple times, then only the
+// first instance is replaced. If the list does not contain the item, then the
+// method panics.
+func (c *CustomFuncs) ReplaceAggregationsItem(
+	aggs memo.AggregationsExpr, search *memo.AggregationsItem, replace memo.AggregationsItem,
+) memo.AggregationsExpr {
+	newAggs := make([]memo.AggregationsItem, len(aggs))
+	for i := range aggs {
+		if search == &aggs[i] {
+			copy(newAggs, aggs[:i])
+			newAggs[i] = replace
+			copy(newAggs[i+1:], aggs[i+1:])
+			return newAggs
+		}
+	}
+	panic(errors.AssertionFailedf("item to replace is not in the list: %v", search))
+}
+
 // ----------------------------------------------------------------------
 //
 // Join functions

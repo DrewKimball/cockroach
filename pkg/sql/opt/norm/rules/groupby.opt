@@ -203,7 +203,7 @@
     $input:* & (HasStrictKey $input)
     $aggregations:[
         ...
-        $item:(AggregationsItem (AggDistinct $agg:*))
+        $item:(AggregationsItem (AggDistinct $agg:*) $aggCol:*)
         ...
     ]
     $groupingPrivate:* &
@@ -216,7 +216,11 @@
 =>
 ((OpName)
     $input
-    (ReplaceAggregationsItem $aggregations $item $agg)
+    (ReplaceAggregationsItem
+        $aggregations
+        $item
+        (AggregationsItem $agg $aggCol)
+    )
     $groupingPrivate
 )
 
@@ -229,6 +233,7 @@
         ...
         $item:(AggregationsItem
             (AggFilter (AggDistinct $agg:*) $filter:*)
+            $aggCol:*
         )
         ...
     ]
@@ -245,7 +250,7 @@
     (ReplaceAggregationsItem
         $aggregations
         $item
-        (AggFilter $agg $filter)
+        (AggregationsItem (AggFilter $agg $filter) $aggCol)
     )
     $groupingPrivate
 )
@@ -390,7 +395,7 @@
     $input:*
     $aggregations:[
         ...
-        $item:(AggregationsItem (Count $arg:*)) &
+        $item:(AggregationsItem (Count $arg:*) $aggCol:*) &
             (ExprIsNeverNull $arg (NotNullCols $input))
         ...
     ]
@@ -399,7 +404,11 @@
 =>
 ((OpName)
     $input
-    (ReplaceAggregationsItem $aggregations $item (CountRows))
+    (ReplaceAggregationsItem
+        $aggregations
+        $item
+        (AggregationsItem (CountRows) $aggCol)
+    )
     $groupingPrivate
 )
 
@@ -414,6 +423,7 @@
         ...
         $item:(AggregationsItem
                 (RegressionCount $arg1:* $arg2:*)
+                $aggCol:*
             ) &
             (Let
                 ($newArg $ok):(SingleRegressionCountArgument
@@ -430,7 +440,11 @@
 =>
 ((OpName)
     $input
-    (ReplaceAggregationsItem $aggregations $item (Count $newArg))
+    (ReplaceAggregationsItem
+        $aggregations
+        $item
+        (AggregationsItem (Count $newArg) $aggCol)
+    )
     $groupingPrivate
 )
 
