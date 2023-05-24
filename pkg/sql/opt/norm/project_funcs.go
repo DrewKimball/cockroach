@@ -559,6 +559,26 @@ func (c *CustomFuncs) RemapValuesPrivateCols(
 	}
 }
 
+// RemapSetPrivateOutCols returns a SetPrivate based on the given SetPrivate,
+// but with instances of the "from" column replaced with the "to" column.
+func (c *CustomFuncs) RemapSetPrivateOutCols(
+	private *memo.SetPrivate, from, to opt.ColumnID,
+) *memo.SetPrivate {
+	newOutCols := make(opt.ColList, len(private.OutCols))
+	copy(newOutCols, private.OutCols)
+	for i := range newOutCols {
+		if newOutCols[i] == from {
+			newOutCols[i] = to
+		}
+	}
+	return &memo.SetPrivate{
+		LeftCols:  private.LeftCols,
+		RightCols: private.RightCols,
+		OutCols:   newOutCols,
+		Ordering:  private.Ordering.RemapColumns(opt.ColList{from}, opt.ColList{to}),
+	}
+}
+
 // PushColumnRemappingIntoValues folds ProjectionsItems into the passthrough set
 // if all they do is remap output columns from the ValuesExpr input. The Values
 // output columns are replaced by the corresponding columns from the folded

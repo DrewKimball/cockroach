@@ -157,6 +157,42 @@ $input
     (AddColToSet $passthrough $toCol)
 )
 
+# PushColumnRemappingIntoSetOp is similar to PushColumnRemappingIntoValues,
+# but handles Set operators instead of Values.
+[PushColumnRemappingIntoSetOp, Normalize]
+(Project
+    $input:(UnionAll | Union | ExceptAll | Except | IntersectAll
+            | Intersect
+        $left:*
+        $right:*
+        $private:(SetPrivate * * $outCols:*)
+    )
+    $projections:[
+            ...
+            $item:(ProjectionsItem
+                (Variable $fromCol:*)
+                $toCol:*
+            )
+            ...
+        ] &
+        (ContainsCol (ColListToSet $outCols) $fromCol)
+    $passthrough:* & ^(ContainsCol $passthrough $fromCol)
+)
+=>
+(Project
+    ((OpName $input)
+        $left
+        $right
+        (RemapSetPrivateOutCols $private $fromCol $toCol)
+    )
+    (RemapProjectionCols
+        (RemoveProjectionsItem $projections $item)
+        $fromCol
+        $toCol
+    )
+    (AddColToSet $passthrough $toCol)
+)
+
 # PushAssignmentCastsIntoValues pushes assignment cast projections into Values
 # rows.
 #
