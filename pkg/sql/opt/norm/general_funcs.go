@@ -216,6 +216,11 @@ func (c *CustomFuncs) ColsAreEqual(left, right opt.ColSet) bool {
 	return left.Equals(right)
 }
 
+// SingleColsAreEqual returns true if left and right are the same ColumnID.
+func (c *CustomFuncs) SingleColsAreEqual(left, right opt.ColumnID) bool {
+	return left == right
+}
+
 // ColsIntersect returns true if at least one column appears in both the left
 // and right sets.
 func (c *CustomFuncs) ColsIntersect(left, right opt.ColSet) bool {
@@ -815,6 +820,23 @@ func (c *CustomFuncs) RemoveProjectionsItem(
 		}
 	}
 	panic(errors.AssertionFailedf("item to remove is not in the list: %v", search))
+}
+
+// ReplaceProjectionsItem returns a copy of the given ProjectionsExpr with the
+// given 'search' item replaced by the 'replace' item.
+func (c *CustomFuncs) ReplaceProjectionsItem(
+	projections memo.ProjectionsExpr, search *memo.ProjectionsItem, replace memo.ProjectionsItem,
+) memo.ProjectionsExpr {
+	newProjections := make(memo.ProjectionsExpr, len(projections))
+	for i := range projections {
+		if search == &projections[i] {
+			copy(newProjections, projections[:i])
+			newProjections[i] = replace
+			copy(newProjections[i+1:], projections[i+1:])
+			return newProjections
+		}
+	}
+	panic(errors.AssertionFailedf("item to replace is not in the list: %v", search))
 }
 
 // ----------------------------------------------------------------------

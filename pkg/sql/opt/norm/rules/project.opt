@@ -193,6 +193,49 @@ $input
     (AddColToSet $passthrough $toCol)
 )
 
+# PushColumnRemappingIntoProject is similar to PushColumnRemappingIntoValues,
+# but handles Project operators instead of Values.
+[PushColumnRemappingIntoProject, Normalize]
+(Project
+    $input:(Project
+        $innerInput:*
+        $innerProjections:[
+            ...
+            $innerItem:(ProjectionsItem $val:* $innerCol:*)
+            ...
+        ]
+        $innerPassthrough:*
+    )
+    $projections:[
+            ...
+            $item:(ProjectionsItem
+                (Variable $fromCol:*)
+                $toCol:*
+            )
+            ...
+        ] &
+        (SingleColsAreEqual $innerCol $fromCol)
+    $passthrough:* & ^(ContainsCol $passthrough $fromCol)
+)
+=>
+(Project
+    (Project
+        $innerInput
+        (ReplaceProjectionsItem
+            $innerProjections
+            $innerItem
+            (ProjectionsItem $val $toCol)
+        )
+        $innerPassthrough
+    )
+    (RemapProjectionCols
+        (RemoveProjectionsItem $projections $item)
+        $fromCol
+        $toCol
+    )
+    (AddColToSet $passthrough $toCol)
+)
+
 # PushAssignmentCastsIntoValues pushes assignment cast projections into Values
 # rows.
 #
