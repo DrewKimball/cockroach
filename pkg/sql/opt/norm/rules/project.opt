@@ -131,17 +131,31 @@ $input
 # be removed by EliminateProject.
 [PushColumnRemappingIntoValues, Normalize]
 (Project
-    $input:(Values)
-    $projections:*
-    $passthrough:* &
-        (CanPushColumnRemappingIntoValues
-            $projections
-            $passthrough
-            $input
-        )
+    $input:(Values $rows:* $private:(ValuesPrivate $cols:*))
+    $projections:[
+            ...
+            $item:(ProjectionsItem
+                (Variable $fromCol:*)
+                $toCol:*
+            )
+            ...
+        ] &
+        (ContainsCol (ColListToSet $cols) $fromCol)
+    $passthrough:* & ^(ContainsCol $passthrough $fromCol)
 )
 =>
-(PushColumnRemappingIntoValues $input $projections $passthrough)
+(Project
+    (Values
+        $rows
+        (RemapValuesPrivateCols $private $fromCol $toCol)
+    )
+    (RemapProjectionCols
+        (RemoveProjectionsItem $projections $item)
+        $fromCol
+        $toCol
+    )
+    (AddColToSet $passthrough $toCol)
+)
 
 # PushAssignmentCastsIntoValues pushes assignment cast projections into Values
 # rows.

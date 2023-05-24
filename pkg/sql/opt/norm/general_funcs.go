@@ -262,6 +262,11 @@ func (c *CustomFuncs) AddColToSet(set opt.ColSet, col opt.ColumnID) opt.ColSet {
 	return newSet
 }
 
+// ContainsCol returns true if the given column is contained by the given set.
+func (c *CustomFuncs) ContainsCol(set opt.ColSet, col opt.ColumnID) bool {
+	return set.Contains(col)
+}
+
 // SingleColFromSet returns the single column in s. Panics if s does not contain
 // exactly one column.
 func (c *CustomFuncs) SingleColFromSet(s opt.ColSet) opt.ColumnID {
@@ -302,6 +307,11 @@ func (c *CustomFuncs) DuplicateColumnIDs(
 // MakeBoolCol creates a new column of type Bool and returns its ID.
 func (c *CustomFuncs) MakeBoolCol() opt.ColumnID {
 	return c.mem.Metadata().AddColumn("", types.Bool)
+}
+
+// ColListToSet converts the given ColList to a ColSet.
+func (c *CustomFuncs) ColListToSet(list opt.ColList) opt.ColSet {
+	return list.ToSet()
 }
 
 // ----------------------------------------------------------------------
@@ -789,6 +799,22 @@ func (c *CustomFuncs) ProjectExtraCol(
 ) memo.RelExpr {
 	projections := memo.ProjectionsExpr{c.f.ConstructProjectionsItem(extra, extraID)}
 	return c.f.ConstructProject(in, projections, in.Relational().OutputCols)
+}
+
+// RemoveProjectionsItem returns a copy of the given ProjectionsExpr with the
+// given item removed.
+func (c *CustomFuncs) RemoveProjectionsItem(
+	projections memo.ProjectionsExpr, search *memo.ProjectionsItem,
+) memo.ProjectionsExpr {
+	newProjections := make(memo.ProjectionsExpr, len(projections)-1)
+	for i := range projections {
+		if search == &projections[i] {
+			copy(newProjections, projections[:i])
+			copy(newProjections[i:], projections[i+1:])
+			return newProjections
+		}
+	}
+	panic(errors.AssertionFailedf("item to remove is not in the list: %v", search))
 }
 
 // ----------------------------------------------------------------------

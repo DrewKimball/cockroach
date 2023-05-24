@@ -529,24 +529,34 @@ func (c *CustomFuncs) MakeColsForUnnestJSON(
 	return newColIDs
 }
 
-// CanPushColumnRemappingIntoValues returns true if there is at least one
-// ProjectionsItem for which the following conditions hold:
-//
-// 1. The ProjectionsItem remaps an output column from the given ValuesExpr.
-//
-// 2. The Values output column being remapped is not in the passthrough set.
-func (c *CustomFuncs) CanPushColumnRemappingIntoValues(
-	projections memo.ProjectionsExpr, passthrough opt.ColSet, values *memo.ValuesExpr,
-) bool {
-	outputCols := values.Relational().OutputCols
-	for i := range projections {
-		if variable, ok := projections[i].Element.(*memo.VariableExpr); ok {
-			if !passthrough.Contains(variable.Col) && outputCols.Contains(variable.Col) {
-				return true
-			}
+// RemapProjectionCols replaces any references to the given "from" column in the
+// projections list with the "to" column.
+func (c *CustomFuncs) RemapProjectionCols(
+	projections memo.ProjectionsExpr, from, to opt.ColumnID,
+) memo.ProjectionsExpr {
+	var colMap opt.ColMap
+	colMap.Set(int(from), int(to))
+	remapped := c.f.RemapCols(&projections, colMap).(*memo.ProjectionsExpr)
+	return *remapped
+}
+
+// RemapValuesPrivateCols returns a ValuesPrivate based on the given
+// ValuesPrivate, but with instances of the "from" column replaced with the "to"
+// column.
+func (c *CustomFuncs) RemapValuesPrivateCols(
+	private *memo.ValuesPrivate, from, to opt.ColumnID,
+) *memo.ValuesPrivate {
+	newCols := make(opt.ColList, len(private.Cols))
+	copy(newCols, private.Cols)
+	for i := range newCols {
+		if newCols[i] == from {
+			newCols[i] = to
 		}
 	}
-	return false
+	return &memo.ValuesPrivate{
+		Cols: newCols,
+		ID:   private.ID,
+	}
 }
 
 // PushColumnRemappingIntoValues folds ProjectionsItems into the passthrough set
