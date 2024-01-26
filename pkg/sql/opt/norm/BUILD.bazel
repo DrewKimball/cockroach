@@ -6,6 +6,7 @@ go_library(
         "bool_funcs.go",
         "comp_funcs.go",
         "decorrelate_funcs.go",
+        "dispatch_funcs.go",
         "factory.go",
         "fold_constants_funcs.go",
         "general_funcs.go",

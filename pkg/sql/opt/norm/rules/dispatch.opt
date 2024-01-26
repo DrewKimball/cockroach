@@ -1,0 +1,32 @@
+# =============================================================================
+# dispatch.opt contains normalization rules for the Dispatch and Dispatcher
+# expressions.
+# =============================================================================
+
+# RemoveUnusedDispatchBranches prunes branches from a dispatcher when they are
+# not (transitively) reachable via DispatchExpr invocations from the input
+# expression. This can happen after InlineDispatch has acted on a branch.
+[RemoveUnusedDispatchBranches, Normalize]
+(Dispatcher
+    $input:*
+    $private:* &
+        (DispatcherHasUnusedBranches
+            $private
+            $usedBranches:(GetUsedDispatchBranches
+                $input
+                $private
+            )
+        )
+)
+=>
+(Dispatcher
+    $input
+    (RemoveUnusedDispatchBranches $private $usedBranches)
+)
+
+# RemoveDispatcher replaces a Dispatcher with its input expression when all of
+# its branches have been pruned.
+[RemoveDispatcher, Normalize]
+(Dispatcher $input:* $private:* & (CanRemoveDispatcher $private))
+=>
+$input
