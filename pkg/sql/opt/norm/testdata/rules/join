@@ -1222,6 +1222,7 @@ project
  │    │    └── filters
  │    │         └── s:4 >= 'foo' [outer=(4), constraints=(/4: [/'foo' - ]; tight)]
  │    ├── inner-join (cross)
+ │    │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
  │    │    ├── inner-join (cross)
  │    │    │    ├── select
  │    │    │    │    ├── scan xy
@@ -1253,7 +1254,14 @@ project
  │    │    │    │              └── 'foo'
  │    │    │    └── filters (true)
  │    │    ├── select
- │    │    │    ├── scan b
+ │    │    │    ├── cardinality: [0 - 1]
+ │    │    │    ├── key: ()
+ │    │    │    ├── limit
+ │    │    │    │    ├── cardinality: [0 - 1]
+ │    │    │    │    ├── key: ()
+ │    │    │    │    ├── scan b
+ │    │    │    │    │    └── limit hint: 1.00
+ │    │    │    │    └── 1
  │    │    │    └── filters
  │    │    │         └── eq [subquery]
  │    │    │              ├── subquery

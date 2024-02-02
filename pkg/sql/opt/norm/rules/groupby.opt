@@ -667,3 +667,61 @@
         (WindowOrdering $windowPrivate)
     )
 )
+
+# PushGroupByIntoConstJoinInput replaces a GroupBy on top of a join with a
+# Limit 1 on the right input of the join. This is possible when the following
+# conditions are satisfied:
+#
+#  1. The grouping cols form a strict key on the left input of the join, and
+#     only reference columns from the left input.
+#  2. All aggregations are ConstAgg, ConstNotNullAgg, or AnyNotNullAgg. See also
+#     the EliminateGroupBy rule.
+#
+# If these two conditions are satisfied, the GroupBy is effectively just
+# reversing any duplication of left rows left over from the join. Adding a
+# LIMIT 1 to the right input prevents the duplicates from being created in
+# the first place, since it ensures that any left row can only find at most
+# one match.
+[PushGroupByIntoConstJoinInput, Normalize]
+(GroupBy
+    $input:(InnerJoin | LeftJoin
+        $left:*
+        $right:* &
+            ^(HasOuterCols $right) &
+            ^(HasZeroOrOneRow $right) &
+            (ColsAreConst (OutputCols $right) $right)
+        $on:*
+        $joinPrivate:*
+    )
+    $aggs:* & (AreAllAnyNotNullAggs $aggs)
+    $groupingPrivate:* &
+        (ColsAreStrictKey
+            $groupingCols:(GroupingCols $groupingPrivate)
+            $left
+        ) &
+        (ColsAreSubset
+            $groupingCols
+            $leftCols:(OutputCols $left)
+        )
+)
+=>
+(Project
+    ((OpName $input)
+        $left
+        (Limit
+            $right
+            (IntConst 1)
+            (PruneOrdering
+                (ExtractGroupingOrdering $groupingPrivate)
+                $leftCols
+            )
+        )
+        $on
+        $joinPrivate
+    )
+    (ConvertAnyNotNullAggsToProjections $aggs)
+    (IntersectionCols
+        (GroupingOutputCols $groupingPrivate $aggs)
+        (OutputCols $input)
+    )
+)

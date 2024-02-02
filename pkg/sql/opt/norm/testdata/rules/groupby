@@ -4911,3 +4911,278 @@ project
       └── aggregations
            └── sum [as=sum:9, outer=(2)]
                 └── v:2
+
+# --------------------------------------------------
+# PushGroupByIntoConstJoinInput
+# --------------------------------------------------
+
+# Push the GroupBy into the join as a Limit when the aggregate functions produce
+# the same column as their input column and the grouping cols are a key on the
+# left input.
+exprnorm expect=PushGroupByIntoConstJoinInput
+(GroupBy
+    (LeftJoin
+        (Scan [ (Table "a") (Cols "k,i,f,s") ])
+        (Project
+            (Values [] [] [])
+            [
+                (ProjectionsItem (Const 1 "int") (NewColumn "x" "int"))
+                (ProjectionsItem (Const 2 "int") (NewColumn "y" "int"))
+                (ProjectionsItem (Const 3 "int") (NewColumn "z" "int"))
+            ]
+            []
+        )
+        [ ]
+        [ ]
+    )
+    [
+        (AggregationsItem (ConstAgg (Var "i")) (LookupColumn "i"))
+        (AggregationsItem (ConstNotNullAgg (Var "f")) (LookupColumn "f"))
+        (AggregationsItem (AnyNotNullAgg (Var "s")) (LookupColumn "s"))
+        (AggregationsItem (ConstAgg (Var "x")) (LookupColumn "x"))
+        (AggregationsItem (ConstNotNullAgg (Var "y")) (LookupColumn "y"))
+        (AggregationsItem (AnyNotNullAgg (Var "z")) (LookupColumn "z"))
+    ]
+    [ (GroupingCols "k") ]
+)
+----
+error: Values expects 2 arguments
+
+# Case with an InnerJoin.
+exprnorm expect=PushGroupByIntoConstJoinInput
+(GroupBy
+    (InnerJoin
+        (Scan [ (Table "a") (Cols "k,i,f,s") ])
+        (Project
+            (Values [] [] [])
+            [
+                (ProjectionsItem (Const 1 "int") (NewColumn "x" "int"))
+                (ProjectionsItem (Const 2 "int") (NewColumn "y" "int"))
+                (ProjectionsItem (Const 3 "int") (NewColumn "z" "int"))
+            ]
+            []
+        )
+        [ ]
+        [ ]
+    )
+    [
+        (AggregationsItem (ConstAgg (Var "i")) (LookupColumn "i"))
+        (AggregationsItem (ConstNotNullAgg (Var "f")) (LookupColumn "f"))
+        (AggregationsItem (AnyNotNullAgg (Var "s")) (LookupColumn "s"))
+        (AggregationsItem (ConstAgg (Var "x")) (LookupColumn "x"))
+        (AggregationsItem (ConstNotNullAgg (Var "y")) (LookupColumn "y"))
+        (AggregationsItem (AnyNotNullAgg (Var "z")) (LookupColumn "z"))
+    ]
+    [ (GroupingCols "k") ]
+)
+----
+error: Values expects 2 arguments
+
+# Case with nonempty join filters.
+exprnorm expect=PushGroupByIntoConstJoinInput
+(GroupBy
+    (LeftJoin
+        (Scan [ (Table "a") (Cols "k,i,f,s") ])
+        (Project
+            (Values [] [] [])
+            [
+                (ProjectionsItem (Const 1 "int") (NewColumn "x" "int"))
+                (ProjectionsItem (Const 2 "int") (NewColumn "y" "int"))
+                (ProjectionsItem (Const 3 "int") (NewColumn "z" "int"))
+            ]
+            []
+        )
+        [ (Eq (Var "i") (Var "x")) ]
+        [ ]
+    )
+    [
+        (AggregationsItem (ConstAgg (Var "i")) (LookupColumn "i"))
+        (AggregationsItem (ConstNotNullAgg (Var "f")) (LookupColumn "f"))
+        (AggregationsItem (AnyNotNullAgg (Var "s")) (LookupColumn "s"))
+        (AggregationsItem (ConstAgg (Var "x")) (LookupColumn "x"))
+        (AggregationsItem (ConstNotNullAgg (Var "y")) (LookupColumn "y"))
+        (AggregationsItem (AnyNotNullAgg (Var "z")) (LookupColumn "z"))
+    ]
+    [ (GroupingCols "k") ]
+)
+----
+error: Values expects 2 arguments
+
+# Case with the aggregates projecting new columns.
+exprnorm expect=PushGroupByIntoConstJoinInput
+(GroupBy
+    (LeftJoin
+        (Scan [ (Table "a") (Cols "k,i,f,s") ])
+        (Project
+            (Values [] [] [])
+            [
+                (ProjectionsItem (Const 1 "int") (NewColumn "x" "int"))
+                (ProjectionsItem (Const 2 "int") (NewColumn "y" "int"))
+                (ProjectionsItem (Const 3 "int") (NewColumn "z" "int"))
+            ]
+            []
+        )
+        [ ]
+        [ ]
+    )
+    [
+        (AggregationsItem (ConstAgg (Var "i")) (NewColumn "i_agg" "int"))
+        (AggregationsItem (ConstNotNullAgg (Var "f")) (NewColumn "f_agg" "float"))
+        (AggregationsItem (AnyNotNullAgg (Var "s")) (NewColumn "s_agg" "string"))
+        (AggregationsItem (ConstAgg (Var "x")) (NewColumn "x_agg" "int"))
+        (AggregationsItem (ConstNotNullAgg (Var "y")) (NewColumn "y_agg" "int"))
+        (AggregationsItem (AnyNotNullAgg (Var "z")) (NewColumn "z_agg" "int"))
+    ]
+    [ (GroupingCols "k") ]
+)
+----
+error: Values expects 2 arguments
+
+# Case with a compound key on the left input.
+exprnorm expect=PushGroupByIntoConstJoinInput
+(GroupBy
+    (LeftJoin
+        (Scan [ (Table "a") (Cols "k,i,f,s") ])
+        (Project
+            (Values [] [] [])
+            [
+                (ProjectionsItem (Const 1 "int") (NewColumn "x" "int"))
+                (ProjectionsItem (Const 2 "int") (NewColumn "y" "int"))
+                (ProjectionsItem (Const 3 "int") (NewColumn "z" "int"))
+            ]
+            []
+        )
+        [ ]
+        [ ]
+    )
+    [
+        (AggregationsItem (ConstAgg (Var "f")) (LookupColumn "f"))
+        (AggregationsItem (ConstNotNullAgg (Var "j")) (LookupColumn "j"))
+        (AggregationsItem (AnyNotNullAgg (Var "s")) (LookupColumn "s"))
+        (AggregationsItem (ConstAgg (Var "x")) (LookupColumn "x"))
+        (AggregationsItem (ConstNotNullAgg (Var "y")) (LookupColumn "y"))
+        (AggregationsItem (AnyNotNullAgg (Var "z")) (LookupColumn "z"))
+    ]
+    [ (GroupingCols "i,s") ]
+)
+----
+error: Values expects 2 arguments
+
+# Don't push the GroupBy down if there is an aggregate function other than
+# ConstAgg, ConstNotNullAgg, or AnyNotNullAgg.
+exprnorm expect-not=PushGroupByIntoConstJoinInput
+(GroupBy
+    (LeftJoin
+        (Scan [ (Table "a") (Cols "k,i,f,s") ])
+        (Project
+            (Values [] [] [])
+            [
+                (ProjectionsItem (Const 1 "int") (NewColumn "x" "int"))
+                (ProjectionsItem (Const 2 "int") (NewColumn "y" "int"))
+                (ProjectionsItem (Const 3 "int") (NewColumn "z" "int"))
+            ]
+            []
+        )
+        [ ]
+        [ ]
+    )
+    [
+        (AggregationsItem (ConstAgg (Var "i")) (LookupColumn "i"))
+        (AggregationsItem (ConstNotNullAgg (Var "f")) (LookupColumn "f"))
+        (AggregationsItem (AnyNotNullAgg (Var "s")) (LookupColumn "s"))
+        (AggregationsItem (Sum (Var "x")) (LookupColumn "x"))
+        (AggregationsItem (ConstNotNullAgg (Var "y")) (LookupColumn "y"))
+        (AggregationsItem (AnyNotNullAgg (Var "z")) (LookupColumn "z"))
+    ]
+    [ (GroupingCols "k") ]
+)
+----
+error: Values expects 2 arguments
+
+# Don't push the GroupBy down if the grouping columns do not form a key in the
+# left input of the join.
+exprnorm expect-not=PushGroupByIntoConstJoinInput
+(GroupBy
+    (LeftJoin
+        (Scan [ (Table "a") (Cols "k,i,f,s") ])
+        (Project
+            (Values [] [] [])
+            [
+                (ProjectionsItem (Const 1 "int") (NewColumn "x" "int"))
+                (ProjectionsItem (Const 2 "int") (NewColumn "y" "int"))
+                (ProjectionsItem (Const 3 "int") (NewColumn "z" "int"))
+            ]
+            []
+        )
+        [ ]
+        [ ]
+    )
+    [
+        (AggregationsItem (ConstNotNullAgg (Var "f")) (LookupColumn "f"))
+        (AggregationsItem (AnyNotNullAgg (Var "s")) (LookupColumn "s"))
+        (AggregationsItem (ConstAgg (Var "x")) (LookupColumn "x"))
+        (AggregationsItem (ConstNotNullAgg (Var "y")) (LookupColumn "y"))
+        (AggregationsItem (AnyNotNullAgg (Var "z")) (LookupColumn "z"))
+    ]
+    [ (GroupingCols "i") ]
+)
+----
+error: Values expects 2 arguments
+
+# Don't push the GroupBy down if the grouping columns only form a lax key on
+# the join's left input.
+exprnorm expect-not=PushGroupByIntoConstJoinInput
+(GroupBy
+    (LeftJoin
+        (Scan [ (Table "a") (Cols "k,i,f,s") ])
+        (Project
+            (Values [] [] [])
+            [
+                (ProjectionsItem (Const 1 "int") (NewColumn "x" "int"))
+                (ProjectionsItem (Const 2 "int") (NewColumn "y" "int"))
+                (ProjectionsItem (Const 3 "int") (NewColumn "z" "int"))
+            ]
+            []
+        )
+        [ ]
+        [ ]
+    )
+    [
+        (AggregationsItem (AnyNotNullAgg (Var "s")) (LookupColumn "s"))
+        (AggregationsItem (ConstAgg (Var "x")) (LookupColumn "x"))
+        (AggregationsItem (ConstNotNullAgg (Var "y")) (LookupColumn "y"))
+        (AggregationsItem (AnyNotNullAgg (Var "z")) (LookupColumn "z"))
+    ]
+    [ (GroupingCols "i,f") ]
+)
+----
+error: Values expects 2 arguments
+
+# Don't push the GroupBy down if columns from the join's right input are
+# included in the grouping columns.
+exprnorm expect-not=PushGroupByIntoConstJoinInput
+(GroupBy
+    (LeftJoin
+        (Scan [ (Table "a") (Cols "k,i,f,s") ])
+        (Project
+            (Values [] [] [])
+            [
+                (ProjectionsItem (Const 1 "int") (NewColumn "x" "int"))
+                (ProjectionsItem (Const 2 "int") (NewColumn "y" "int"))
+                (ProjectionsItem (Const 3 "int") (NewColumn "z" "int"))
+            ]
+            []
+        )
+        [ ]
+        [ ]
+    )
+    [
+        (AggregationsItem (ConstNotNullAgg (Var "f")) (LookupColumn "f"))
+        (AggregationsItem (AnyNotNullAgg (Var "s")) (LookupColumn "s"))
+        (AggregationsItem (ConstAgg (Var "x")) (LookupColumn "x"))
+        (AggregationsItem (ConstNotNullAgg (Var "y")) (LookupColumn "y"))
+    ]
+    [ (GroupingCols "i,z") ]
+)
+----
+error: Values expects 2 arguments
