@@ -758,10 +758,6 @@ type ExceptionBlock struct {
 // RoutineDefList is a list of UDFDefinitions.
 type RoutineDefList []*UDFDefinition
 
-// DispatcherID uniquely identifies a Dispatcher expression within the scope of
-// a query.
-type DispatcherID uint64
-
 // WindowFrame denotes the definition of a window frame for an individual
 // window function, excluding the OFFSET expressions, if present.
 type WindowFrame struct {

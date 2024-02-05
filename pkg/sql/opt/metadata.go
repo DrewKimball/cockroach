@@ -115,6 +115,10 @@ type Metadata struct {
 	// mutation operators, used to determine the logical properties of WithScan.
 	withBindings map[WithID]Expr
 
+	// dispatchers stores each Dispatcher expression for the query, to allow for
+	// rules that inline Dispatch expressions.
+	dispatchers map[DispatcherID]Expr
+
 	// hoistedUncorrelatedSubqueries is used to track uncorrelated subqueries
 	// that have been hoisted.
 	hoistedUncorrelatedSubqueries map[Expr]struct{}
@@ -1106,6 +1110,25 @@ func (md *Metadata) ForEachWithBinding(fn func(WithID, Expr)) {
 	for id, expr := range md.withBindings {
 		fn(id, expr)
 	}
+}
+
+// DispatcherID uniquely identifies a Dispatcher expression within the scope of
+// a query.
+type DispatcherID uint64
+
+func (md *Metadata) AddDispatcher(id DispatcherID, dispatcher Expr) {
+	if md.dispatchers == nil {
+		md.dispatchers = make(map[DispatcherID]Expr)
+	}
+	md.dispatchers[id] = dispatcher
+}
+
+func (md *Metadata) Dispatcher(id DispatcherID) Expr {
+	res, ok := md.dispatchers[id]
+	if !ok {
+		panic(errors.AssertionFailedf("no dispatcher for DispatcherID %d", id))
+	}
+	return res
 }
 
 // AddHoistedUncorrelatedSubquery marks the given uncorrelated subquery

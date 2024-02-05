@@ -88,7 +88,7 @@ type Builder struct {
 
 	// dispatchers maps from each dispatcher ID to its DispatchChannel, which
 	// allows DispatchExpr instances to communicate with their parent Dispatcher.
-	dispatchers map[memo.DispatcherID]*tree.DispatchChannel
+	dispatchers map[opt.DispatcherID]*tree.DispatchChannel
 
 	// allowAutoCommit is passed through to factory methods for mutation
 	// operators. It allows execution to commit the transaction as part of the

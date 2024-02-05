@@ -1254,7 +1254,7 @@ func (b *Builder) buildDispatcher(
 ) (tree.TypedExpr, error) {
 	dispatcherExpr := scalar.(*memo.DispatcherExpr)
 	if b.dispatchers == nil {
-		b.dispatchers = make(map[memo.DispatcherID]*tree.DispatchChannel)
+		b.dispatchers = make(map[opt.DispatcherID]*tree.DispatchChannel)
 	} else if b.dispatchers[dispatcherExpr.ID] != nil {
 		return nil, errors.AssertionFailedf("conflicting DispatcherID: %d", dispatcherExpr.ID)
 	}

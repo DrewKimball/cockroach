@@ -188,7 +188,7 @@ type Memo struct {
 	curWithID opt.WithID
 
 	// curDispatcherID is the highest currently in-use Dispatcher ID.
-	curDispatcherID DispatcherID
+	curDispatcherID opt.DispatcherID
 
 	newGroupFn func(opt.Expr)
 
@@ -521,7 +521,7 @@ func (m *Memo) NextWithID() opt.WithID {
 }
 
 // NextDispatcherID returns a not-yet-assigned identifier for a Dispatcher.
-func (m *Memo) NextDispatcherID() DispatcherID {
+func (m *Memo) NextDispatcherID() opt.DispatcherID {
 	m.curDispatcherID++
 	return m.curDispatcherID
 }

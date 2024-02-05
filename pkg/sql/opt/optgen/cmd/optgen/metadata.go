@@ -197,7 +197,7 @@ func newMetadata(compiled *lang.CompiledExpr, pkg string) *metadata {
 		"WithID":               {fullName: "opt.WithID", passByVal: true},
 		"UDFDefinition":        {fullName: "memo.UDFDefinition", isPointer: true},
 		"RoutineDefList":       {fullName: "memo.RoutineDefList", passByVal: true},
-		"DispatcherID":         {fullName: "memo.DispatcherID", passByVal: true},
+		"DispatcherID":         {fullName: "opt.DispatcherID", passByVal: true},
 		"Ordering":             {fullName: "opt.Ordering", passByVal: true},
 		"OrderingChoice":       {fullName: "props.OrderingChoice", passByVal: true},
 		"GroupingOrder":        {fullName: "memo.GroupingOrder", passByVal: true},

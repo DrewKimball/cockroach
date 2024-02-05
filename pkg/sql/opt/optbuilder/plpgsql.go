@@ -151,7 +151,7 @@ type plpgsqlBuilder struct {
 
 	// dispatcherID is the ID of the (single) Dispatcher expression that will
 	// coordinate execution of the subroutines.
-	dispatcherID memo.DispatcherID
+	dispatcherID opt.DispatcherID
 
 	// branches is the set of subroutines handled by the Dispatcher expression.
 	branches memo.RoutineDefList
@@ -247,6 +247,7 @@ func (b *plpgsqlBuilder) buildRoutine(body *ast.Block, s *scope) *scope {
 		Branches: b.branches,
 		Typ:      b.returnType,
 	})
+	b.ob.factory.Metadata().AddDispatcher(b.dispatcherID, dispatcher)
 	b.ensureScopeHasExpr(s)
 	b.addBarrierIfVolatile(s, dispatcher)
 	dispatchColName := scopeColName("").WithMetadataName(b.makeIdentifier("dispatcher"))

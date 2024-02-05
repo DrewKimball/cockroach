@@ -777,7 +777,7 @@ func (h *hasher) HashUDFDefinition(val *UDFDefinition) {
 	h.HashUint64(uint64(reflect.ValueOf(val).Pointer()))
 }
 
-func (h *hasher) HashDispatcherID(val DispatcherID) {
+func (h *hasher) HashDispatcherID(val opt.DispatcherID) {
 	h.HashUint64(uint64(val))
 }
 
@@ -1321,7 +1321,7 @@ func (h *hasher) IsUDFDefinitionEqual(l, r *UDFDefinition) bool {
 	return h.IsColListEqual(l.Params, r.Params) && l.IsRecursive == r.IsRecursive
 }
 
-func (h *hasher) IsDispatcherIDEqual(l, r DispatcherID) bool {
+func (h *hasher) IsDispatcherIDEqual(l, r opt.DispatcherID) bool {
 	return l == r
 }
 
