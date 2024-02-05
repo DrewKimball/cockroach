@@ -446,16 +446,13 @@ func (c *CustomFuncs) InlineConstVar(f memo.FiltersExpr) memo.FiltersExpr {
 // there is no need to check those cases.
 func (c *CustomFuncs) IsInlinableUDF(args memo.ScalarListExpr, udfp *memo.UDFCallPrivate) bool {
 	if udfp.Def == nil {
-		panic(errors.AssertionFailedf("expected non-nil UDF definition"))
+		panic(errors.AssertionFailedf("expected non-nil UDFDefinition"))
 	}
 	if udfp.Def.IsRecursive || udfp.Def.Volatility == volatility.Volatile ||
 		len(udfp.Def.Body) != 1 || udfp.Def.SetReturning || udfp.Def.MultiColDataSource {
 		return false
 	}
-	if !args.IsConstantsAndPlaceholdersAndVariables() {
-		return false
-	}
-	return true
+	return args.IsConstantsAndPlaceholdersAndVariables()
 }
 
 // ConvertUDFToSubquery returns a subquery expression that is equivalent to the
@@ -547,4 +544,19 @@ func (c *CustomFuncs) ConvertUDFToSubquery(
 	}
 
 	return res
+}
+
+// IsInlinableDispatch returns true if the DispatchExpr can be converted to a
+// routine call. This is possible as long as the DispatchExpr does not
+// recursively dispatch to its own branch.
+func (c *CustomFuncs) IsInlinableDispatch(dp *memo.DispatchPrivate) bool {
+	dispatcher := c.mem.Metadata().Dispatcher(dp.Dispatcher).(*memo.DispatcherExpr)
+	return !dispatcher.Branches[dp.Branch].IsRecursive
+}
+
+// MakeUDFPrivateFromDispatch returns a UDFCall using the UDFDefinition of the
+// dispatcher branch corresponding to the given DispatchPrivate.
+func (c *CustomFuncs) MakeUDFPrivateFromDispatch(dp *memo.DispatchPrivate) *memo.UDFCallPrivate {
+	dispatcher := c.mem.Metadata().Dispatcher(dp.Dispatcher).(*memo.DispatcherExpr)
+	return &memo.UDFCallPrivate{Def: dispatcher.Branches[dp.Branch]}
 }

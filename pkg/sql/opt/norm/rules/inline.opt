@@ -302,3 +302,12 @@
 (UDFCall $args:* $private:* & (IsInlinableUDF $args $private))
 =>
 (ConvertUDFToSubquery $args $private)
+
+# InlineDispatch converts a DispatchExpr to a UDFCall. This transformation is
+# always valid because a Dispatch expression is logically equivalent to directly
+# evaluating a routine call. This rule does not match when the Dispatch
+# expression is recursive, as a form of tail-call optimization.
+[InlineDispatch, Normalize]
+(Dispatch $args:* $private:* & (IsInlinableDispatch $private))
+=>
+(UDFCall $args (MakeUDFPrivateFromDispatch $private))
