@@ -111,7 +111,7 @@ func (b *Builder) buildInsert(ins *memo.InsertExpr) (_ execPlan, outputCols colO
 		returnOrds,
 		checkOrds,
 		b.allowAutoCommit && len(ins.UniqueChecks) == 0 &&
-			len(ins.FKChecks) == 0 && len(ins.FKCascades) == 0,
+			len(ins.FKChecks) == 0 && len(ins.FKCascades) == 0 && ins.AfterTriggers == nil,
 	)
 	if err != nil {
 		return execPlan{}, colOrdMap{}, err
@@ -127,6 +127,10 @@ func (b *Builder) buildInsert(ins *memo.InsertExpr) (_ execPlan, outputCols colO
 	}
 
 	if err := b.buildFKChecks(ins.FKChecks); err != nil {
+		return execPlan{}, colOrdMap{}, err
+	}
+
+	if err := b.buildAfterTriggers(ins.WithID, ins.AfterTriggers); err != nil {
 		return execPlan{}, colOrdMap{}, err
 	}
 
@@ -151,6 +155,10 @@ func (b *Builder) tryBuildFastPathInsert(
 	// If there are unique checks required, there must be the same number of fast
 	// path unique checks.
 	if len(ins.UniqueChecks) != len(ins.FastPathUniqueChecks) {
+		return execPlan{}, colOrdMap{}, false, nil
+	}
+	// Do not attempt the fast path if there are any triggers.
+	if ins.AfterTriggers != nil {
 		return execPlan{}, colOrdMap{}, false, nil
 	}
 
@@ -441,7 +449,7 @@ func (b *Builder) buildUpdate(upd *memo.UpdateExpr) (_ execPlan, outputCols colO
 		checkOrds,
 		passthroughCols,
 		b.allowAutoCommit && len(upd.UniqueChecks) == 0 &&
-			len(upd.FKChecks) == 0 && len(upd.FKCascades) == 0,
+			len(upd.FKChecks) == 0 && len(upd.FKCascades) == 0 && upd.AfterTriggers == nil,
 	)
 	if err != nil {
 		return execPlan{}, colOrdMap{}, err
@@ -456,6 +464,10 @@ func (b *Builder) buildUpdate(upd *memo.UpdateExpr) (_ execPlan, outputCols colO
 	}
 
 	if err := b.buildFKCascades(upd.WithID, upd.FKCascades); err != nil {
+		return execPlan{}, colOrdMap{}, err
+	}
+
+	if err := b.buildAfterTriggers(upd.WithID, upd.AfterTriggers); err != nil {
 		return execPlan{}, colOrdMap{}, err
 	}
 
@@ -531,7 +543,7 @@ func (b *Builder) buildUpsert(ups *memo.UpsertExpr) (_ execPlan, outputCols colO
 		returnColOrds,
 		checkOrds,
 		b.allowAutoCommit && len(ups.UniqueChecks) == 0 &&
-			len(ups.FKChecks) == 0 && len(ups.FKCascades) == 0,
+			len(ups.FKChecks) == 0 && len(ups.FKCascades) == 0 && ups.AfterTriggers == nil,
 	)
 	if err != nil {
 		return execPlan{}, colOrdMap{}, err
@@ -546,6 +558,10 @@ func (b *Builder) buildUpsert(ups *memo.UpsertExpr) (_ execPlan, outputCols colO
 	}
 
 	if err := b.buildFKCascades(ups.WithID, ups.FKCascades); err != nil {
+		return execPlan{}, colOrdMap{}, err
+	}
+
+	if err := b.buildAfterTriggers(ups.WithID, ups.AfterTriggers); err != nil {
 		return execPlan{}, colOrdMap{}, err
 	}
 
@@ -606,7 +622,8 @@ func (b *Builder) buildDelete(del *memo.DeleteExpr) (_ execPlan, outputCols colO
 		fetchColOrds,
 		returnColOrds,
 		passthroughCols,
-		b.allowAutoCommit && len(del.FKChecks) == 0 && len(del.FKCascades) == 0,
+		b.allowAutoCommit && len(del.FKChecks) == 0 &&
+			len(del.FKCascades) == 0 && del.AfterTriggers == nil,
 	)
 	if err != nil {
 		return execPlan{}, colOrdMap{}, err
@@ -617,6 +634,10 @@ func (b *Builder) buildDelete(del *memo.DeleteExpr) (_ execPlan, outputCols colO
 	}
 
 	if err := b.buildFKCascades(del.WithID, del.FKCascades); err != nil {
+		return execPlan{}, colOrdMap{}, err
+	}
+
+	if err := b.buildAfterTriggers(del.WithID, del.AfterTriggers); err != nil {
 		return execPlan{}, colOrdMap{}, err
 	}
 
@@ -668,6 +689,9 @@ func (b *Builder) tryBuildDeleteRange(del *memo.DeleteExpr) (_ execPlan, ok bool
 	if err := b.buildFKCascades(del.WithID, del.FKCascades); err != nil {
 		return execPlan{}, false, err
 	}
+	if err := b.buildAfterTriggers(del.WithID, del.AfterTriggers); err != nil {
+		return execPlan{}, false, err
+	}
 	return ep, true, nil
 }
 
@@ -700,7 +724,7 @@ func (b *Builder) buildDeleteRange(del *memo.DeleteExpr) (execPlan, error) {
 				autoCommit = true
 			}
 		}
-		if len(del.FKChecks) > 0 || len(del.FKCascades) > 0 {
+		if len(del.FKChecks) > 0 || len(del.FKCascades) > 0 || del.AfterTriggers != nil {
 			autoCommit = false
 		}
 	}
@@ -1065,13 +1089,25 @@ func (b *Builder) buildFKCascades(withID opt.WithID, cascades memo.FKCascades) e
 	if len(cascades) == 0 {
 		return nil
 	}
-	cb, err := makeCascadeBuilder(b, withID)
+	cb, err := makeCascadeTriggerBuilder(b, withID)
 	if err != nil {
 		return err
 	}
 	for i := range cascades {
 		b.cascades = append(b.cascades, cb.setupCascade(&cascades[i]))
 	}
+	return nil
+}
+
+func (b *Builder) buildAfterTriggers(withID opt.WithID, triggers *memo.AfterTriggers) error {
+	if triggers == nil {
+		return nil
+	}
+	tb, err := makeCascadeTriggerBuilder(b, withID)
+	if err != nil {
+		return err
+	}
+	b.triggers = append(b.triggers, tb.setupTriggers(triggers))
 	return nil
 }
 

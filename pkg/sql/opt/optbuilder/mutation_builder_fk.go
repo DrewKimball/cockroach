@@ -7,6 +7,7 @@ package optbuilder
 
 import (
 	"context"
+	"sort"
 
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/concurrency/isolation"
 	"github.com/cockroachdb/cockroach/pkg/server/telemetry"
@@ -16,6 +17,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/privilege"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
 	"github.com/cockroachdb/cockroach/pkg/sql/sqltelemetry"
+	"github.com/cockroachdb/cockroach/pkg/util/intsets"
 	"github.com/cockroachdb/errors"
 )
 
@@ -139,7 +141,7 @@ func (mb *mutationBuilder) buildFKChecksAndCascadesForDelete() {
 		//    there are any "orphaned" rows in the child table.
 		if a := h.fk.DeleteReferenceAction(); a != tree.Restrict && a != tree.NoAction {
 			telemetry.Inc(sqltelemetry.ForeignKeyCascadesUseCounter)
-			var builder memo.CascadeBuilder
+			var builder memo.PostQueryBuilder
 			switch a {
 			case tree.Cascade:
 				// Try the fast builder first; if it cannot be used, use the regular builder.
@@ -176,6 +178,107 @@ func (mb *mutationBuilder) buildFKChecksAndCascadesForDelete() {
 		mb.fkChecks = append(mb.fkChecks, h.buildDeletionCheck(withScanScope.expr, withScanScope.colList()))
 	}
 	telemetry.Inc(sqltelemetry.ForeignKeyChecksUseCounter)
+}
+
+func (mb *mutationBuilder) buildRowLevelAfterTriggers(mutation opt.Operator) {
+	var triggers []cat.Trigger
+	eventsToMatch := mb.getEventsToMatch(mutation)
+	for i := 0; i < mb.tab.TriggerCount(); i++ {
+		trigger := mb.tab.Trigger(i)
+		if !trigger.ForEachRow() || trigger.ActionTime() != tree.TriggerActionTimeAfter {
+			continue
+		}
+		for j := 0; j < trigger.EventCount(); j++ {
+			if eventsToMatch.Contains(trigger.Event(j).EventType) {
+				// The conditions have been met for this trigger to fire.
+				triggers = append(triggers, trigger)
+				break
+			}
+		}
+	}
+	if len(triggers) == 0 {
+		return
+	}
+
+	mb.ensureWithID()
+
+	// Triggers fire in alphabetical order of the name. The names are always
+	// unique within a given table, so a stable sort is not necessary.
+	less := func(i, j int) bool {
+		return triggers[i].Name() < triggers[j].Name()
+	}
+	sort.Slice(triggers, less)
+
+	var visibleColOrds intsets.Fast
+	for i := 0; i < mb.tab.ColumnCount(); i++ {
+		if mb.tab.Column(i).Visibility() == cat.Visible {
+			visibleColOrds.Add(i)
+		}
+	}
+
+	var oldCols, newCols opt.ColList
+	if mutation == opt.DeleteOp || mutation == opt.UpdateOp || mb.canaryColID != 0 {
+		// For DELETE, UPDATE, and UPSERT/ON CONFLICT, we need to provide the old
+		// values for each row.
+		oldCols = make(opt.ColList, 0, visibleColOrds.Len())
+		for i, ok := visibleColOrds.Next(0); ok; i, ok = visibleColOrds.Next(i + 1) {
+			oldCols = append(oldCols, mb.fetchColIDs[i])
+		}
+	}
+	// makeNewCols initializes newCols with the given ColList, using fetchColIDs
+	// for any zero values.
+	makeNewCols := func(cols opt.OptionalColList) {
+		newCols = make(opt.ColList, visibleColOrds.Len())
+		for i, ok := visibleColOrds.Next(0); ok; i, ok = visibleColOrds.Next(i + 1) {
+			col := cols[i]
+			if col == 0 {
+				col = mb.fetchColIDs[i]
+			}
+			newCols = append(newCols, col)
+		}
+	}
+	if mb.canaryColID != 0 {
+		// This is an UPSERT or INSERT with ON CONFLICT, so use the upsertColIDs
+		// which contain both inserted and updated values.
+		makeNewCols(mb.upsertColIDs)
+	} else if mutation == opt.InsertOp {
+		makeNewCols(mb.insertColIDs)
+	} else if mutation == opt.UpdateOp {
+		makeNewCols(mb.updateColIDs)
+	}
+
+	if mb.afterTriggers != nil {
+		panic(errors.AssertionFailedf("afterTriggers already set"))
+	}
+	mb.afterTriggers = &memo.AfterTriggers{
+		Builder:   newRowLevelAfterTriggerBuilder(mutation, mb.tab, triggers),
+		WithID:    mb.withID,
+		OldValues: oldCols,
+		NewValues: newCols,
+		CanaryCol: mb.canaryColID,
+	}
+}
+
+// getEventsToMatch returns the set of trigger events that should be matched for
+// the given mutation operator.
+func (mb *mutationBuilder) getEventsToMatch(mutation opt.Operator) tree.TriggerEventTypeSet {
+	var eventsToMatch tree.TriggerEventTypeSet
+	switch mutation {
+	case opt.InsertOp:
+		eventsToMatch.Add(tree.TriggerEventInsert)
+		if mb.canaryColID != 0 {
+			// This is an UPSERT or INSERT with ON CONFLICT, so rows can be updated in
+			// addition to being inserted.
+			eventsToMatch.Add(tree.TriggerEventUpdate)
+		}
+	case opt.UpdateOp:
+		eventsToMatch.Add(tree.TriggerEventUpdate)
+	case opt.DeleteOp:
+		eventsToMatch.Add(tree.TriggerEventDelete)
+	default:
+		panic(errors.AssertionFailedf("unexpected mutation operator: %v", mutation))
+	}
+	return eventsToMatch
 }
 
 // buildFKChecksForUpdate builds FK check queries for an update.

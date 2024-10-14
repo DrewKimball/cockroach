@@ -9,17 +9,24 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/cockroach/pkg/sql/catalog/descpb"
+	"github.com/cockroachdb/cockroach/pkg/sql/catalog/typedesc"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/cat"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/memo"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/norm"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/props"
+	"github.com/cockroachdb/cockroach/pkg/sql/opt/props/physical"
+	plpgsql "github.com/cockroachdb/cockroach/pkg/sql/plpgsql/parser"
 	"github.com/cockroachdb/cockroach/pkg/sql/privilege"
+	"github.com/cockroachdb/cockroach/pkg/sql/sem/catid"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/eval"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
+	"github.com/cockroachdb/cockroach/pkg/sql/types"
 	"github.com/cockroachdb/cockroach/pkg/util/errorutil"
 	"github.com/cockroachdb/cockroach/pkg/util/intsets"
 	"github.com/cockroachdb/errors"
+	"github.com/lib/pq/oid"
 )
 
 // onDeleteCascadeBuilder is a memo.CascadeBuilder implementation for
@@ -57,7 +64,7 @@ type onDeleteCascadeBuilder struct {
 	childTable       cat.Table
 }
 
-var _ memo.CascadeBuilder = &onDeleteCascadeBuilder{}
+var _ memo.PostQueryBuilder = &onDeleteCascadeBuilder{}
 
 func newOnDeleteCascadeBuilder(
 	mutatedTable cat.Table, fkInboundOrdinal int, childTable cat.Table,
@@ -78,9 +85,10 @@ func (cb *onDeleteCascadeBuilder) Build(
 	factoryI interface{},
 	binding opt.WithID,
 	bindingProps *props.Relational,
-	oldValues, newValues opt.ColList,
+	oldValues, _ opt.ColList,
+	_ opt.ColumnID,
 ) (_ memo.RelExpr, err error) {
-	return buildCascadeHelper(ctx, semaCtx, evalCtx, catalog, factoryI, func(b *Builder) memo.RelExpr {
+	return buildTriggerCascadeHelper(ctx, semaCtx, evalCtx, catalog, factoryI, func(b *Builder) memo.RelExpr {
 		opt.MaybeInjectOptimizerTestingPanic(ctx, evalCtx)
 
 		fk := cb.mutatedTable.InboundForeignKey(cb.fkInboundOrdinal)
@@ -145,7 +153,7 @@ type onDeleteFastCascadeBuilder struct {
 	origFKCols  opt.ColList
 }
 
-var _ memo.CascadeBuilder = &onDeleteFastCascadeBuilder{}
+var _ memo.PostQueryBuilder = &onDeleteFastCascadeBuilder{}
 
 // tryNewOnDeleteFastCascadeBuilder checks if the fast path cascade is
 // applicable to the given mutation, and if yes it returns an instance of
@@ -272,8 +280,9 @@ func (cb *onDeleteFastCascadeBuilder) Build(
 	_ opt.WithID,
 	_ *props.Relational,
 	_, _ opt.ColList,
+	_ opt.ColumnID,
 ) (_ memo.RelExpr, err error) {
-	return buildCascadeHelper(ctx, semaCtx, evalCtx, catalog, factoryI, func(b *Builder) memo.RelExpr {
+	return buildTriggerCascadeHelper(ctx, semaCtx, evalCtx, catalog, factoryI, func(b *Builder) memo.RelExpr {
 		opt.MaybeInjectOptimizerTestingPanic(ctx, evalCtx)
 
 		fk := cb.mutatedTable.InboundForeignKey(cb.fkInboundOrdinal)
@@ -400,7 +409,7 @@ type onDeleteSetBuilder struct {
 	action tree.ReferenceAction
 }
 
-var _ memo.CascadeBuilder = &onDeleteSetBuilder{}
+var _ memo.PostQueryBuilder = &onDeleteSetBuilder{}
 
 func newOnDeleteSetBuilder(
 	mutatedTable cat.Table, fkInboundOrdinal int, childTable cat.Table, action tree.ReferenceAction,
@@ -422,9 +431,10 @@ func (cb *onDeleteSetBuilder) Build(
 	factoryI interface{},
 	binding opt.WithID,
 	bindingProps *props.Relational,
-	oldValues, newValues opt.ColList,
+	oldValues, _ opt.ColList,
+	_ opt.ColumnID,
 ) (_ memo.RelExpr, err error) {
-	return buildCascadeHelper(ctx, semaCtx, evalCtx, catalog, factoryI, func(b *Builder) memo.RelExpr {
+	return buildTriggerCascadeHelper(ctx, semaCtx, evalCtx, catalog, factoryI, func(b *Builder) memo.RelExpr {
 		opt.MaybeInjectOptimizerTestingPanic(ctx, evalCtx)
 
 		fk := cb.mutatedTable.InboundForeignKey(cb.fkInboundOrdinal)
@@ -562,6 +572,267 @@ func (b *Builder) buildDeleteCascadeMutationInput(
 	return outScope
 }
 
+type rowLevelAfterTriggerBuilder struct {
+	mutation     opt.Operator
+	mutatedTable cat.Table
+	triggers     []cat.Trigger
+}
+
+func (tb *rowLevelAfterTriggerBuilder) Build(
+	ctx context.Context,
+	semaCtx *tree.SemaContext,
+	evalCtx *eval.Context,
+	catalog cat.Catalog,
+	factoryI interface{},
+	binding opt.WithID,
+	bindingProps *props.Relational,
+	inColsOld, inColsNew opt.ColList,
+	inCanaryCol opt.ColumnID,
+) (_ memo.RelExpr, err error) {
+	return buildTriggerCascadeHelper(ctx, semaCtx, evalCtx, catalog, factoryI, func(b *Builder) memo.RelExpr {
+		f := b.factory
+		md := f.Metadata()
+
+		typeID := typedesc.TableIDToImplicitTypeOID(descpb.ID(tb.mutatedTable.ID()))
+		tableTyp, err := semaCtx.TypeResolver.ResolveTypeByOID(ctx, typeID)
+		if err != nil {
+			panic(err)
+		}
+
+		colCount := len(inColsOld) + len(inColsNew)
+		if inCanaryCol != 0 {
+			colCount++
+		}
+		inCols := make(opt.ColList, 0, colCount)
+		outCols := make(opt.ColList, 0, colCount)
+		addCols := func(cols opt.ColList, suffix string) opt.ColList {
+			startIdx := len(outCols)
+			for i := range cols {
+				c := tb.mutatedTable.Column(i)
+				oldName := fmt.Sprintf("%s_%s", c.ColName(), suffix)
+				inCols = append(inCols, cols[i])
+				outCols = append(outCols, md.AddColumn(oldName, c.DatumType()))
+			}
+			return outCols[startIdx:len(outCols):len(outCols)]
+		}
+		outColsOld := addCols(inColsOld, "old")
+		outColsNew := addCols(inColsNew, "new")
+
+		var outCanaryCol opt.ColumnID
+		if inCanaryCol != 0 {
+			outCanaryCol = md.AddColumn("canary", types.Bool)
+			inCols = append(inCols, inCanaryCol)
+			outCols = append(outCols, outCanaryCol)
+		}
+
+		md.AddWithBinding(binding, b.factory.ConstructFakeRel(&memo.FakeRelPrivate{
+			Props: bindingProps,
+		}))
+		expr := f.ConstructWithScan(&memo.WithScanPrivate{
+			With:    binding,
+			InCols:  inCols,
+			OutCols: outCols,
+			ID:      md.NextUniqueID(),
+		})
+
+		// Project the old and new values into tuples. These will become the OLD and
+		// NEW arguments to the trigger functions.
+		passThrough := outCols.ToSet()
+		makeTupleCol := func(name string, cols opt.ColList) opt.ColumnID {
+			elemTypes := make([]*types.T, len(cols))
+			elems := make([]opt.ScalarExpr, len(cols))
+			for i, col := range cols {
+				elemTypes[i] = md.ColumnMeta(col).Type
+				elems[i] = f.ConstructVariable(col)
+			}
+			tupleTyp := types.MakeTuple(elemTypes)
+			tupleCol := md.AddColumn(name, tupleTyp)
+			tuple := f.ConstructTuple(elems, tupleTyp)
+			projections := memo.ProjectionsExpr{f.ConstructProjectionsItem(tuple, tupleCol)}
+			expr = f.ConstructProject(expr, projections, passThrough)
+			passThrough.Add(tupleCol)
+			return tupleCol
+		}
+		// TODO: reverse all this new and old ordering.
+		tgOld := opt.ScalarExpr(memo.NullSingleton)
+		tgNew := opt.ScalarExpr(memo.NullSingleton)
+		if len(outColsOld) > 0 {
+			tgOld = f.ConstructVariable(makeTupleCol("old", outColsOld))
+			if outCanaryCol != 0 {
+				// For an UPSERT/ON CONFLICT, the OLD column is non-null only for the
+				// conflicting rows, which are identified by the canary column.
+				tgOld = f.ConstructCase(
+					memo.TrueSingleton,
+					memo.ScalarListExpr{f.ConstructWhen(
+						f.ConstructIsNot(f.ConstructVariable(outCanaryCol), memo.NullSingleton),
+						tgOld,
+					)},
+					memo.NullSingleton,
+				)
+			}
+		}
+		if len(outColsNew) > 0 {
+			tgNew = f.ConstructVariable(makeTupleCol("new", outColsNew))
+		}
+		tgWhen := tree.NewDString("AFTER")
+		tgLevel := tree.NewDString("ROW")
+		tgRelID := tree.NewDOid(oid.Oid(tb.mutatedTable.ID()))
+		tgTableName := tree.NewDString(string(tb.mutatedTable.Name()))
+		fqName, err := b.catalog.FullyQualifiedName(ctx, tb.mutatedTable)
+		if err != nil {
+			panic(err)
+		}
+		tgTableSchema := tree.NewDString(fqName.Schema())
+		var tgOp opt.ScalarExpr
+		switch tb.mutation {
+		case opt.InsertOp:
+			tgOp = f.ConstructConstVal(tree.NewDString("INSERT"), types.String)
+			if outCanaryCol != 0 {
+				tgOp = f.ConstructCase(
+					memo.TrueSingleton,
+					memo.ScalarListExpr{
+						f.ConstructWhen(
+							f.ConstructIs(f.ConstructVariable(outCanaryCol), memo.NullSingleton), tgOp,
+						),
+					},
+					f.ConstructConstVal(tree.NewDString("UPDATE"), types.String),
+				)
+			}
+		case opt.UpdateOp:
+			tgOp = f.ConstructConstVal(tree.NewDString("UPDATE"), types.String)
+		case opt.DeleteOp:
+			tgOp = f.ConstructConstVal(tree.NewDString("DELETE"), types.String)
+		default:
+			panic(errors.AssertionFailedf("unexpected mutation type: %v", tb.mutation))
+		}
+
+		for _, trigger := range tb.triggers {
+			expr = f.ConstructBarrier(expr)
+
+			tgName := tree.NewDName(string(trigger.Name()))
+			tgNumArgs := tree.NewDInt(tree.DInt(len(trigger.FuncArgs())))
+			tgArgV := tree.NewDArray(types.String)
+			for _, arg := range trigger.FuncArgs() {
+				err = tgArgV.Append(arg)
+				if err != nil {
+					panic(err)
+				}
+			}
+			args := memo.ScalarListExpr{tgNew /* NEW */, tgOld, /* OLD */
+				f.ConstructConstVal(tgName, types.Name),    // TG_NAME
+				f.ConstructConstVal(tgWhen, types.String),  // TG_WHEN
+				f.ConstructConstVal(tgLevel, types.String), // TG_LEVEL
+				tgOp,                                    // TG_OP
+				f.ConstructConstVal(tgRelID, types.Oid), // TG_RELIID
+				f.ConstructConstVal(tgTableName, types.String),   // TG_RELNAME
+				f.ConstructConstVal(tgTableName, types.String),   // TG_TABLE_NAME
+				f.ConstructConstVal(tgTableSchema, types.String), // TG_TABLE_SCHEMA
+				f.ConstructConstVal(tgNumArgs, types.Int),        // TG_NARGS
+				f.ConstructConstVal(tgArgV, types.StringArray),   // TG_ARGV
+			}
+
+			triggerFuncScope := b.allocScope()
+			funcRef := &tree.FunctionOID{OID: catid.FuncIDToOID(catid.DescID(trigger.FuncID()))}
+			funcExpr := tree.FuncExpr{Func: tree.ResolvableFunctionReference{FunctionReference: funcRef}}
+			triggerFuncScope.resolveType(&funcExpr, types.Any)
+			def := funcExpr.Func.FunctionReference.(*tree.ResolvedFunctionDefinition)
+			o := funcExpr.ResolvedOverload()
+
+			params := append([]routineParam{
+				{name: triggerColNew, typ: tableTyp, class: tree.RoutineParamIn},
+				{name: triggerColOld, typ: tableTyp, class: tree.RoutineParamIn},
+			}, triggerFuncStaticParams...)
+			paramCols := make(opt.ColList, len(params))
+			for colOrd, param := range params {
+				paramColName := funcParamColName(param.name, colOrd)
+				col := b.synthesizeColumn(triggerFuncScope, paramColName, param.typ, nil /* expr */, nil /* scalar */)
+				col.setParamOrd(colOrd)
+				paramCols[colOrd] = col.id
+			}
+
+			// Parse and build the function body.
+			stmt, err := plpgsql.Parse(trigger.FuncBody())
+			if err != nil {
+				panic(err)
+			}
+			plBuilder := newPLpgSQLBuilder(
+				b, def.Name, stmt.AST.Label, nil /* colRefs */, params, tableTyp,
+				false /* isProc */, true /* buildSQL */, nil, /* outScope */
+			)
+			stmtScope := plBuilder.buildRootBlock(stmt.AST, triggerFuncScope, params)
+
+			// All triggers are called on NULL input.
+			const calledOnNullInput = true
+			triggerFn := f.ConstructUDFCall(args,
+				&memo.UDFCallPrivate{
+					Def: &memo.UDFDefinition{
+						Name:              def.Name,
+						Typ:               tableTyp,
+						Volatility:        o.Volatility,
+						CalledOnNullInput: calledOnNullInput,
+						RoutineType:       o.Type,
+						RoutineLang:       o.Language,
+						Body:              []memo.RelExpr{stmtScope.expr},
+						BodyProps:         []*physical.Required{stmtScope.makePhysicalProps()},
+						Params:            paramCols,
+					},
+				},
+			)
+
+			// For UPSERT and INSERT ON CONFLICT, UPDATE triggers should only fire for
+			// the conflicting rows, which are identified by the canary column. INSERT
+			// triggers should only fire for non-conflicting rows. A trigger that
+			// matches both operations can fire unconditionally.
+			if outCanaryCol != 0 {
+				var hasInsert, hasUpdate bool
+				for i := 0; i < trigger.EventCount(); i++ {
+					if trigger.Event(i).EventType == tree.TriggerEventInsert {
+						hasInsert = true
+					} else if trigger.Event(i).EventType == tree.TriggerEventUpdate {
+						hasUpdate = true
+					}
+				}
+				if hasInsert && !hasUpdate {
+					isInsertCond := f.ConstructIs(f.ConstructVariable(outCanaryCol), memo.NullSingleton)
+					triggerFn = f.ConstructCase(
+						memo.TrueSingleton,
+						memo.ScalarListExpr{f.ConstructWhen(isInsertCond, triggerFn)},
+						memo.NullSingleton,
+					)
+				} else if hasUpdate && !hasInsert {
+					isUpdateCond := f.ConstructIsNot(f.ConstructVariable(outCanaryCol), memo.NullSingleton)
+					triggerFn = f.ConstructCase(
+						memo.TrueSingleton,
+						memo.ScalarListExpr{f.ConstructWhen(isUpdateCond, triggerFn)},
+						memo.NullSingleton,
+					)
+				}
+			}
+
+			// Finally, project a column that invokes the trigger function.
+			triggerFnCol := f.Metadata().AddColumn(def.Name, tableTyp)
+			expr = f.ConstructProject(
+				expr,
+				memo.ProjectionsExpr{f.ConstructProjectionsItem(triggerFn, triggerFnCol)},
+				passThrough,
+			)
+		}
+		return f.ConstructBarrier(expr)
+	})
+}
+
+var _ memo.PostQueryBuilder = &rowLevelAfterTriggerBuilder{}
+
+func newRowLevelAfterTriggerBuilder(
+	mutation opt.Operator, mutatedTable cat.Table, triggers []cat.Trigger,
+) *rowLevelAfterTriggerBuilder {
+	return &rowLevelAfterTriggerBuilder{
+		mutation:     mutation,
+		mutatedTable: mutatedTable,
+		triggers:     triggers,
+	}
+}
+
 // onUpdateCascadeBuilder is a memo.CascadeBuilder implementation for
 // ON UPDATE CASCADE / SET NULL / SET DEFAULT.
 //
@@ -615,7 +886,7 @@ type onUpdateCascadeBuilder struct {
 	action tree.ReferenceAction
 }
 
-var _ memo.CascadeBuilder = &onUpdateCascadeBuilder{}
+var _ memo.PostQueryBuilder = &onUpdateCascadeBuilder{}
 
 func newOnUpdateCascadeBuilder(
 	mutatedTable cat.Table, fkInboundOrdinal int, childTable cat.Table, action tree.ReferenceAction,
@@ -638,8 +909,9 @@ func (cb *onUpdateCascadeBuilder) Build(
 	binding opt.WithID,
 	bindingProps *props.Relational,
 	oldValues, newValues opt.ColList,
+	_ opt.ColumnID,
 ) (_ memo.RelExpr, err error) {
-	return buildCascadeHelper(ctx, semaCtx, evalCtx, catalog, factoryI, func(b *Builder) memo.RelExpr {
+	return buildTriggerCascadeHelper(ctx, semaCtx, evalCtx, catalog, factoryI, func(b *Builder) memo.RelExpr {
 		opt.MaybeInjectOptimizerTestingPanic(ctx, evalCtx)
 
 		fk := cb.mutatedTable.InboundForeignKey(cb.fkInboundOrdinal)
@@ -882,10 +1154,10 @@ func (b *Builder) buildUpdateCascadeMutationInput(
 	return outScope
 }
 
-// buildCascadeHelper contains boilerplate for CascadeBuilder.Build
+// buildTriggerCascadeHelper contains boilerplate for CascadeBuilder.Build
 // implementations. It creates a Builder, sets up panic-to-error conversion,
-// and executes the given function.
-func buildCascadeHelper(
+// and executes the given function. TODO
+func buildTriggerCascadeHelper(
 	ctx context.Context,
 	semaCtx *tree.SemaContext,
 	evalCtx *eval.Context,

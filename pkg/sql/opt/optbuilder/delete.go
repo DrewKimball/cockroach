@@ -6,7 +6,8 @@
 package optbuilder
 
 import (
-	"github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgcode"
+	"github.com/cockroachdb/cockroach/pkg/sql/opt"
+"github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgcode"
 	"github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgerror"
 	"github.com/cockroachdb/cockroach/pkg/sql/privilege"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
@@ -104,6 +105,8 @@ func (b *Builder) buildDelete(del *tree.Delete, inScope *scope) (outScope *scope
 // operator that corresponds to the given RETURNING clause.
 func (mb *mutationBuilder) buildDelete(returning *tree.ReturningExprs) {
 	mb.buildFKChecksAndCascadesForDelete()
+
+	mb.buildRowLevelAfterTriggers(opt.DeleteOp)
 
 	// Project partial index DEL boolean columns.
 	mb.projectPartialIndexDelCols()

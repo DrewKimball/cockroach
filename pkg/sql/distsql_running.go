@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1126,6 +1127,37 @@ func (w *errOnlyResultWriter) SetRowsAffected(ctx context.Context, n int) {
 	panic("SetRowsAffected not supported by errOnlyResultWriter")
 }
 
+// droppingResultWriter drops all rows that are added to it. It only tracks
+// errors with the SetError and Err functions.
+type droppingResultWriter struct {
+	err error
+}
+
+var _ rowResultWriter = &droppingResultWriter{}
+var _ batchResultWriter = &droppingResultWriter{}
+
+// AddRow is part of the rowResultWriter interface.
+func (d *droppingResultWriter) AddRow(ctx context.Context, row tree.Datums) error {
+	return nil
+}
+
+func (d *droppingResultWriter) AddBatch(ctx context.Context, batch coldata.Batch) error {
+	return nil
+}
+
+// SetRowsAffected is part of the rowResultWriter interface.
+func (d *droppingResultWriter) SetRowsAffected(ctx context.Context, n int) {}
+
+// SetError is part of the rowResultWriter interface.
+func (d *droppingResultWriter) SetError(err error) {
+	d.err = err
+}
+
+// Err is part of the rowResultWriter interface.
+func (d *droppingResultWriter) Err() error {
+	return d.err
+}
+
 // RowResultWriter is a thin wrapper around a RowContainer.
 type RowResultWriter struct {
 	rowContainer *rowContainerHelper
@@ -2075,7 +2107,7 @@ func (dsp *DistSQLPlanner) PlanAndRunCascadesAndChecks(
 	plan *planComponents,
 	recv *DistSQLReceiver,
 ) bool {
-	if len(plan.cascades) == 0 && len(plan.checkPlans) == 0 {
+	if len(plan.cascades) == 0 && len(plan.checkPlans) == 0 && len(plan.triggers) == 0 {
 		return false
 	}
 
@@ -2088,14 +2120,117 @@ func (dsp *DistSQLPlanner) PlanAndRunCascadesAndChecks(
 
 	checksContainLocking := planner.curPlan.flags.IsSet(planFlagCheckContainsLocking)
 
-	// We treat plan.cascades as a queue.
-	for i := 0; i < len(plan.cascades); i++ {
+	// Cascades and triggers can both queue new cascade, check, and trigger
+	// actions. In addition, triggers execute after cascades and checks in each
+	// "round".
+	var cascadesIdx, checksIdx, triggersIdx int
+	for cascadesIdx < len(plan.cascades) ||
+		checksIdx < len(plan.checkPlans) ||
+		triggersIdx < len(plan.triggers) {
+		// Execute cascades first.
+		cascadesToRun := plan.cascades[cascadesIdx:]
+		cascadesIdx = len(plan.cascades)
+		if !dsp.runPostQueries(ctx, planner, evalCtxFactory, plan, recv, cascadesToRun) {
+			return false
+		}
+
+		if checksIdx < len(plan.checkPlans) {
+			checksToRun := plan.checkPlans[checksIdx:]
+			checksIdx = len(plan.checkPlans)
+
+			// We place a sequence point before the checks, so that they observe the
+			// writes of the main query and/or any cascades. However, The external read
+			// timestamp is not allowed to advance, since the checks are run as part of
+			// the same statement as the corresponding mutations.
+			if err := planner.Txn().Step(ctx, false /* allowReadTimestampStep */); err != nil {
+				recv.SetError(err)
+				return false
+			}
+
+			// We'll run the checks in parallel if the parallelization is enabled, we have
+			// multiple checks to run, none of the checks have non-default locking, and
+			// we're likely to have quota to do so.
+			runParallelChecks := parallelizeChecks.Get(&dsp.st.SV) &&
+				len(checksToRun) > 1 && !checksContainLocking &&
+				dsp.parallelChecksSem.ApproximateQuota() > 0
+
+			// Reset the flag for the next set of checks (if any).
+			checksContainLocking = false
+			if runParallelChecks {
+				// At the moment, we rely on not using the newer DistSQL spec factory to
+				// enable parallelization.
+				// TODO(yuzefovich): the planObserver logic in
+				// planAndRunChecksInParallel will need to be adjusted when we switch to
+				// using the DistSQL spec factory.
+				for i := range checksToRun {
+					if checksToRun[i].plan.isPhysicalPlan() {
+						runParallelChecks = false
+						break
+					}
+				}
+			}
+			if runParallelChecks {
+				if err := dsp.planAndRunChecksInParallel(ctx, checksToRun, planner, evalCtxFactory, recv); err != nil {
+					recv.SetError(err)
+					return false
+				}
+			} else {
+				if len(checksToRun) > 1 {
+					log.VEventf(ctx, 2, "executing %d checks serially", len(checksToRun))
+				}
+				for i := range checksToRun {
+					log.VEventf(ctx, 2, "executing check query %d out of %d", i+1, len(checksToRun))
+					if err := dsp.planAndRunPostquery(
+						ctx,
+						checksToRun[i].plan,
+						planner,
+						evalCtxFactory(false /* usedConcurrently */),
+						recv,
+						false, /* parallelCheck */
+						defaultGetSaveFlowsFunc,
+						planner.instrumentation.getAssociateNodeWithComponentsFn(),
+						recv.stats.add,
+					); err != nil {
+						recv.SetError(err)
+						return false
+					}
+				}
+			}
+		}
+
+		triggersToRun := plan.triggers[triggersIdx:]
+		triggersIdx = len(plan.triggers)
+		if !dsp.runPostQueries(ctx, planner, evalCtxFactory, plan, recv, triggersToRun) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// runPostQueries runs the given set of cascades or triggers (but not both at
+// the same time). It returns false if an error was encountered and sets that
+// error in the provided receiver. The executed post-queries may queue new
+// cascades, checks, and triggers in the provided plan.
+func (dsp *DistSQLPlanner) runPostQueries(
+	ctx context.Context,
+	planner *planner,
+	evalCtxFactory func(usedConcurrently bool) *extendedEvalContext,
+	plan *planComponents,
+	recv *DistSQLReceiver,
+	toRun []postQueryMetadata,
+) bool {
+	defaultGetSaveFlowsFunc := func() func(map[base.SQLInstanceID]*execinfrapb.FlowSpec, execopnode.OpChains, []execinfra.LocalProcessor, bool) error {
+		return getDefaultSaveFlowsFunc(ctx, planner, planComponentTypePostquery)
+	}
+
+	for i := range toRun {
 		// The original bufferNode is stored in c.Buffer; we can refer to it
 		// directly.
 		// TODO(radu): this requires keeping all previous plans "alive" until the
 		// very end. We may want to make copies of the buffer nodes and clean up
 		// everything else.
-		buf := plan.cascades[i].Buffer
+		buf := toRun[i].Buffer
 		var numBufferedRows int
 		if buf != nil {
 			numBufferedRows = buf.(*bufferNode).rows.rows.Len()
@@ -2104,22 +2239,36 @@ func (dsp *DistSQLPlanner) PlanAndRunCascadesAndChecks(
 				continue
 			}
 		}
+		isCascade := toRun[i].FKConstraint != nil
 
-		log.VEventf(ctx, 2, "executing cascade for constraint %s", plan.cascades[i].FKConstraint.Name())
+		if isCascade {
+			log.VEventf(ctx, 2, "executing cascade for constraint %s",
+				toRun[i].FKConstraint.Name())
+		} else {
+			names := make([]string, len(toRun[i].Triggers))
+			for j := range toRun[i].Triggers {
+				names[j] = string(toRun[i].Triggers[j].Name())
+			}
+			log.VEventf(ctx, 2, "executing triggers %s",
+				strings.Join(names, ","))
+		}
 
 		// We place a sequence point before every cascade, so that each subsequent
 		// cascade can observe the writes by the previous step. However, The
 		// external read timestamp is not allowed to advance, since the checks are
 		// run as part of the same statement as the corresponding mutations.
-		if err := planner.Txn().Step(ctx, false /* allowReadTimestampStep */); err != nil {
-			recv.SetError(err)
-			return false
+		// Triggers will handle placing their own sequence points.
+		if isCascade {
+			if err := planner.Txn().Step(ctx, false /* allowReadTimestampStep */); err != nil {
+				recv.SetError(err)
+				return false
+			}
 		}
 
 		evalCtx := evalCtxFactory(false /* usedConcurrently */)
 		execFactory := newExecFactory(ctx, planner)
-		// The cascading query is allowed to autocommit only if it is the last
-		// cascade and there are no check queries to run.
+		// A cascading query is allowed to autocommit only if it is the last cascade
+		// and there are no check queries or triggers to run.
 		//
 		// Note that even if it's the last cascade, we still might not be able
 		// to autocommit in case there are more checks to run during or after
@@ -2127,11 +2276,14 @@ func (dsp *DistSQLPlanner) PlanAndRunCascadesAndChecks(
 		// need to explicitly enable autocommit on each mutation planNode. In
 		// other words, allowAutoCommit = true here means that the plan _might_
 		// autocommit but doesn't guarantee that.
-		allowAutoCommit := planner.autoCommit
-		if len(plan.checkPlans) > 0 || i < len(plan.cascades)-1 {
-			allowAutoCommit = false
+		allowAutoCommit := false
+		if isCascade {
+			allowAutoCommit = planner.autoCommit
+			if len(plan.checkPlans) > 0 || len(plan.triggers) > 0 || i < len(toRun)-1 {
+				allowAutoCommit = false
+			}
 		}
-		cascadePlan, err := plan.cascades[i].PlanFn(
+		postQueryPlan, err := toRun[i].PlanFn(
 			ctx, &planner.semaCtx, &evalCtx.Context, execFactory,
 			buf, numBufferedRows, allowAutoCommit,
 		)
@@ -2139,39 +2291,24 @@ func (dsp *DistSQLPlanner) PlanAndRunCascadesAndChecks(
 			recv.SetError(err)
 			return false
 		}
-		cp := cascadePlan.(*planComponents)
-		plan.cascades[i].plan = cp.main
-		if len(cp.subqueryPlans) > 0 {
-			recv.SetError(errors.AssertionFailedf("cascades should not have subqueries"))
+		pqPlan := postQueryPlan.(*planComponents)
+		toRun[i].plan = pqPlan.main
+		if len(pqPlan.subqueryPlans) > 0 {
+			opName := "cascades"
+			if !isCascade {
+				opName = "triggers"
+			}
+			recv.SetError(errors.AssertionFailedf("%s should not have subqueries", opName))
 			return false
 		}
 
-		// Queue any new cascades.
-		if len(cp.cascades) > 0 {
-			plan.cascades = append(plan.cascades, cp.cascades...)
-		}
-
-		// Collect any new checks.
-		if len(cp.checkPlans) > 0 {
-			plan.checkPlans = append(plan.checkPlans, cp.checkPlans...)
-			if cp.flags.IsSet(planFlagCheckContainsLocking) {
-				checksContainLocking = true
-			}
-		}
-
-		// In cyclical reference situations, the number of cascading operations can
-		// be arbitrarily large. To avoid OOM, we enforce a limit. This is also a
-		// safeguard in case we have a bug that results in an infinite cascade loop.
-		if limit := int(evalCtx.SessionData().OptimizerFKCascadesLimit); len(plan.cascades) > limit {
-			telemetry.Inc(sqltelemetry.CascadesLimitReached)
-			err := pgerror.Newf(pgcode.TriggeredActionException, "cascades limit (%d) reached", limit)
-			recv.SetError(err)
+		if !addPostQueriesFromPlan(evalCtx, recv, pqPlan, plan) {
 			return false
 		}
 
 		if err := dsp.planAndRunPostquery(
 			ctx,
-			cp.main,
+			pqPlan.main,
 			planner,
 			evalCtx,
 			recv,
@@ -2184,67 +2321,41 @@ func (dsp *DistSQLPlanner) PlanAndRunCascadesAndChecks(
 			return false
 		}
 	}
+	return true
+}
 
-	if len(plan.checkPlans) == 0 {
-		return true
+// addPostQueriesFromPlan queues any cascades, checks, and triggers from the
+// given "fromPlan" to the given "toPlan". It returns false if an error was
+// encountered and sets that error in the provided receiver, otherwise true.
+func addPostQueriesFromPlan(
+	evalCtx *extendedEvalContext, recv *DistSQLReceiver, fromPlan, toPlan *planComponents,
+) bool {
+
+	// Collect any new checks.
+	if len(fromPlan.checkPlans) > 0 {
+		toPlan.checkPlans = append(toPlan.checkPlans, fromPlan.checkPlans...)
 	}
 
-	// We place a sequence point before the checks, so that they observe the
-	// writes of the main query and/or any cascades. However, The external read
-	// timestamp is not allowed to advance, since the checks are run as part of
-	// the same statement as the corresponding mutations.
-	if err := planner.Txn().Step(ctx, false /* allowReadTimestampStep */); err != nil {
+	// Queue any new cascades.
+	if len(fromPlan.cascades) > 0 {
+		toPlan.cascades = append(toPlan.cascades, fromPlan.cascades...)
+	}
+
+	// Queue any new triggers.
+	if len(fromPlan.triggers) > 0 {
+		toPlan.triggers = append(toPlan.triggers, fromPlan.triggers...)
+	}
+
+	// In cyclical reference situations, the number of cascading operations can
+	// be arbitrarily large. To avoid OOM, we enforce a limit. This is also a
+	// safeguard in case we have a bug that results in an infinite cascade loop.
+	// TODO(drewk): add something similar for triggers.
+	if limit := int(evalCtx.SessionData().OptimizerFKCascadesLimit); len(toPlan.cascades) > limit {
+		telemetry.Inc(sqltelemetry.CascadesLimitReached)
+		err := pgerror.Newf(pgcode.TriggeredActionException, "cascades limit (%d) reached", limit)
 		recv.SetError(err)
 		return false
 	}
-
-	// We'll run the checks in parallel if the parallelization is enabled, we have
-	// multiple checks to run, none of the checks have non-default locking, and
-	// we're likely to have quota to do so.
-	runParallelChecks := parallelizeChecks.Get(&dsp.st.SV) &&
-		len(plan.checkPlans) > 1 && !checksContainLocking &&
-		dsp.parallelChecksSem.ApproximateQuota() > 0
-	if runParallelChecks {
-		// At the moment, we rely on not using the newer DistSQL spec factory to
-		// enable parallelization.
-		// TODO(yuzefovich): the planObserver logic in
-		// planAndRunChecksInParallel will need to be adjusted when we switch to
-		// using the DistSQL spec factory.
-		for i := range plan.checkPlans {
-			if plan.checkPlans[i].plan.isPhysicalPlan() {
-				runParallelChecks = false
-				break
-			}
-		}
-	}
-	if runParallelChecks {
-		if err := dsp.planAndRunChecksInParallel(ctx, plan.checkPlans, planner, evalCtxFactory, recv); err != nil {
-			recv.SetError(err)
-			return false
-		}
-	} else {
-		if len(plan.checkPlans) > 1 {
-			log.VEventf(ctx, 2, "executing %d checks serially", len(plan.checkPlans))
-		}
-		for i := range plan.checkPlans {
-			log.VEventf(ctx, 2, "executing check query %d out of %d", i+1, len(plan.checkPlans))
-			if err := dsp.planAndRunPostquery(
-				ctx,
-				plan.checkPlans[i].plan,
-				planner,
-				evalCtxFactory(false /* usedConcurrently */),
-				recv,
-				false, /* parallelCheck */
-				defaultGetSaveFlowsFunc,
-				planner.instrumentation.getAssociateNodeWithComponentsFn(),
-				recv.stats.add,
-			); err != nil {
-				recv.SetError(err)
-				return false
-			}
-		}
-	}
-
 	return true
 }
 
@@ -2321,7 +2432,7 @@ func (dsp *DistSQLPlanner) planAndRunPostquery(
 	postqueryRecv := recv.clone()
 	defer postqueryRecv.Release()
 	defer addTopLevelQueryStats(&postqueryRecv.stats)
-	postqueryResultWriter := &errOnlyResultWriter{}
+	postqueryResultWriter := &droppingResultWriter{}
 	postqueryRecv.resultWriter = postqueryResultWriter
 	postqueryRecv.batchWriter = postqueryResultWriter
 	finishedSetupFn, cleanup := getFinishedSetupFn(planner)

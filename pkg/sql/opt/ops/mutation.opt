@@ -176,6 +176,9 @@ define MutationPrivate {
 
     # FKCascades stores metadata necessary for building cascading queries.
     FKCascades FKCascades
+
+    # AfterTriggers stores metadata necessary for building AFTER triggers.
+    AfterTriggers AfterTriggers
 }
 
 # Update evaluates a relational input expression that fetches existing rows from

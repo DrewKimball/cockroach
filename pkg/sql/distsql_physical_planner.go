@@ -4864,7 +4864,8 @@ func logAndSanitizeExportDestination(ctx context.Context, dest string) error {
 func checkScanParallelizationIfLocal(
 	ctx context.Context, plan *planComponents, c *localScanParallelizationChecker,
 ) (prohibitParallelization, hasScanNodeToParallelize bool) {
-	if plan.main.planNode == nil || len(plan.cascades) != 0 || len(plan.checkPlans) != 0 {
+	if plan.main.planNode == nil || len(plan.cascades) != 0 ||
+		len(plan.checkPlans) != 0 || len(plan.triggers) != 0 {
 		// We either used the experimental DistSQL spec factory or have
 		// cascades/checks; both of these conditions - for now - prohibit
 		// the scan parallelization.
