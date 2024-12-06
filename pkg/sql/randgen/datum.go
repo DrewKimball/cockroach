@@ -375,7 +375,7 @@ func RandDatumWithNullChance(
 			// the dimensionality.
 			maxDim = 50
 		}
-		return tree.NewDPGVector(vector.Random(rng, maxDim))
+		return tree.NewDPGVector(vector.RandomWithMaxDim(rng, maxDim))
 	default:
 		panic(errors.AssertionFailedf("invalid type %v", typ.DebugString()))
 	}

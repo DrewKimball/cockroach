@@ -3798,6 +3798,18 @@ layers:
       aggregation: AVG
       derivative: NON_NEGATIVE_DERIVATIVE
       owner: cockroachdb/kv
+    - name: distsender.rpc.vectorindexscan.sent
+      exported_name: distsender_rpc_vectorindexscan_sent
+      description: |-
+        Number of VectorIndexScan requests processed.
+
+        This counts the requests in batches handed to DistSender, not the RPCs sent to individual Ranges as a result.
+      y_axis_label: RPCs
+      type: COUNTER
+      unit: COUNT
+      aggregation: AVG
+      derivative: NON_NEGATIVE_DERIVATIVE
+      owner: cockroachdb/kv
     - name: distsender.rpc.writebatch.sent
       exported_name: distsender_rpc_writebatch_sent
       description: |-
@@ -20890,6 +20902,15 @@ layers:
     - name: rpc.method.truncatelog.recv
       exported_name: rpc_method_truncatelog_recv
       description: Number of TruncateLog requests processed
+      y_axis_label: RPCs
+      type: COUNTER
+      unit: COUNT
+      aggregation: AVG
+      derivative: NON_NEGATIVE_DERIVATIVE
+      owner: cockroachdb/kv
+    - name: rpc.method.vectorindexscan.recv
+      exported_name: rpc_method_vectorindexscan_recv
+      description: Number of VectorIndexScan requests processed
       y_axis_label: RPCs
       type: COUNTER
       unit: COUNT

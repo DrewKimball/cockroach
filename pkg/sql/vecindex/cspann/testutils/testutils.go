@@ -8,6 +8,7 @@ package testutils
 import (
 	"cmp"
 	"encoding/gob"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -187,4 +188,16 @@ func ParseDataDrivenInt(t *testing.T, arg datadriven.CmdArg) int {
 func ParseDataDrivenFlag(t *testing.T, arg datadriven.CmdArg) bool {
 	require.Len(t, arg.Vals, 0)
 	return true
+}
+
+// RandomVectorSet generates a vector set with a random number of randomly
+// generated vectors.
+func RandomVectorSet(rnd *rand.Rand, dims int) vector.Set {
+	count := rnd.Intn(128)
+	set := vector.MakeSet(dims)
+	set.AddUndefined(count)
+	for i := range count {
+		copy(set.At(i), vector.Random(rnd, dims))
+	}
+	return set
 }

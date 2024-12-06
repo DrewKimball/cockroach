@@ -67,7 +67,7 @@ func TestRoundtripRandomPGVector(t *testing.T) {
 	rng, _ := randutil.NewTestRand()
 	extra := randutil.RandBytes(rng, 10)
 	for i := 0; i < 1000; i++ {
-		v := Random(rng, 1000 /* maxDim */)
+		v := RandomWithMaxDim(rng, 1000 /* maxDim */)
 		encoded := Encode(nil, v)
 		encoded = append(encoded, extra...)
 		remaining, roundtripped, err := Decode(encoded)

@@ -1097,6 +1097,7 @@ distsender_rpc_sent_nextreplicaerror: distsender.rpc.sent.nextreplicaerror
 distsender_rpc_subsume_sent: distsender.rpc.subsume.sent
 distsender_rpc_transferlease_sent: distsender.rpc.transferlease.sent
 distsender_rpc_truncatelog_sent: distsender.rpc.truncatelog.sent
+distsender_rpc_vectorindexscan_sent: distsender.rpc.vectorindexscan.sent
 distsender_rpc_writebatch_sent: distsender.rpc.writebatch.sent
 distsender_slow_replicarpcs: distsender.slow.replicarpcs
 exec_error: exec.error
@@ -2267,6 +2268,7 @@ rpc_method_scan_recv: rpc.method.scan.recv
 rpc_method_subsume_recv: rpc.method.subsume.recv
 rpc_method_transferlease_recv: rpc.method.transferlease.recv
 rpc_method_truncatelog_recv: rpc.method.truncatelog.recv
+rpc_method_vectorindexscan_recv: rpc.method.vectorindexscan.recv
 rpc_method_writebatch_recv: rpc.method.writebatch.recv
 rpc_server_request_duration_nanos: rpc.server.request.duration.nanos
 rpc_server_request_duration_nanos_bucket: rpc.server.request.duration.nanos.bucket

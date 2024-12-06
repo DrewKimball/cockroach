@@ -244,6 +244,13 @@ func (rsr *ReverseScanRequest) SafeFormat(s redact.SafePrinter, _ rune) {
 
 var _ SafeFormatterRequest = (*EndTxnRequest)(nil)
 
+var _ SafeFormatterRequest = (*VectorIndexScanRequest)(nil)
+
+// SafeFormat implements the redact.SafeFormatter interface.
+func (vsr *VectorIndexScanRequest) SafeFormat(s redact.SafePrinter, _ rune) {
+	s.Print(vsr.Method())
+}
+
 // SafeFormat implements the redact.SafeFormatter interface.
 func (etr *EndTxnRequest) SafeFormat(s redact.SafePrinter, _ rune) {
 	s.Printf("%s(", etr.Method())
@@ -873,6 +880,9 @@ func (*ScanRequest) Method() Method { return Scan }
 // Method implements the Request interface.
 func (*ReverseScanRequest) Method() Method { return ReverseScan }
 
+// Method implements the Request interface. TODO
+func (*VectorIndexScanRequest) Method() Method { return ReverseScan }
+
 // Method implements the Request interface.
 func (*CheckConsistencyRequest) Method() Method { return CheckConsistency }
 
@@ -1047,6 +1057,12 @@ func (sr *ScanRequest) ShallowCopy() Request {
 // ShallowCopy implements the Request interface.
 func (rsr *ReverseScanRequest) ShallowCopy() Request {
 	shallowCopy := *rsr
+	return &shallowCopy
+}
+
+// ShallowCopy implements the Request interface.
+func (vsr *VectorIndexScanRequest) ShallowCopy() Request {
+	shallowCopy := *vsr
 	return &shallowCopy
 }
 
@@ -1345,6 +1361,13 @@ func (rsr *ReverseScanResponse) ShallowCopy() Response {
 	shallowCopy := *rsr
 	shallowCopy.BatchResponses = append([][]byte(nil), rsr.BatchResponses...)
 	shallowCopy.ColBatches.ColBatches = append([]coldata.Batch(nil), rsr.ColBatches.ColBatches...)
+	return &shallowCopy
+}
+
+// ShallowCopy implements the Response interface.
+func (vsr *VectorIndexScanResponse) ShallowCopy() Response {
+	// TODO
+	shallowCopy := *vsr
 	return &shallowCopy
 }
 
@@ -1978,6 +2001,10 @@ func (rsr *ReverseScanRequest) flags() flag {
 	maybeLocking := flagForLockStrength(rsr.KeyLockingStrength)
 	maybeWrite := flagForLockDurability(rsr.KeyLockingDurability)
 	return isRead | maybeWrite | isRange | isTxn | maybeLocking | updatesTSCache | needsRefresh | canSkipLocked
+}
+
+func (vsr *VectorIndexScanRequest) flags() flag {
+	return isRead | isRange | isTxn | updatesTSCache | needsRefresh | canSkipLocked
 }
 
 // EndTxn updates the timestamp cache to prevent replays.

@@ -274,14 +274,28 @@ func Mult(t T, t2 T) (T, error) {
 	return ret, nil
 }
 
-// Random returns a random vector with the number of dimensions in [1, maxDim]
-// range.
-func Random(rng *rand.Rand, maxDim int) T {
+// RandomWithMaxDim returns a random vector with the number of dimensions in
+// [1, maxDim] range.
+func RandomWithMaxDim(rng *rand.Rand, maxDim int) T {
 	n := 1 + rng.Intn(maxDim)
-	v := make(T, n)
+	return Random(rng, n)
+}
+
+// Random returns a random vector with the given number of dimensions.
+func Random(rng *rand.Rand, dims int) T {
+	// Most of the time, generate small values to avoid always having infinite/NaN
+	// distances when comparing vectors.
+	useSmallValues := rng.Float32() < 0.9
+
+	v := make(T, dims)
 	for i := range v {
 		for {
-			v[i] = float32(rng.NormFloat64())
+			if useSmallValues {
+				const scaleFactor = 5
+				v[i] = (rng.Float32() - 0.5) * scaleFactor
+			} else {
+				v[i] = float32(rng.NormFloat64())
+			}
 			if math.IsNaN(float64(v[i])) || math.IsInf(float64(v[i]), 0) {
 				continue
 			}

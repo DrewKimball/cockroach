@@ -52,6 +52,10 @@ const (
 	// args.RequestHeader.Key and args.RequestHeader.EndKey, with
 	// the latter endpoint excluded.
 	ReverseScan
+	// VectorIndexScan fetches all vectors within the partition specified by the
+	// args.RequestHeader.Key and args.RequestHeader.EndKey bounds, and returns
+	// the distances from each vector to the query vector.
+	VectorIndexScan
 	// EndTxn either commits or aborts an ongoing transaction.
 	EndTxn
 	// AdminSplit is called to coordinate a split of a range.

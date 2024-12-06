@@ -49,16 +49,7 @@ func (sc *storeCodec) GetVectorSet() quantize.QuantizedVectorSet {
 // DecodeVector decodes a single vector to the codec's internal vector set. It
 // returns the remainder of the input buffer.
 func (sc *storeCodec) DecodeVector(encodedVector []byte) ([]byte, error) {
-	switch sc.quantizer.(type) {
-	case *quantize.UnQuantizer:
-		return vecencoding.DecodeUnquantizerVectorToSet(
-			encodedVector, sc.tmpVectorSet.(*quantize.UnQuantizedVectorSet))
-	case *quantize.RaBitQuantizer:
-		return vecencoding.DecodeRaBitQVectorToSet(
-			encodedVector, sc.tmpVectorSet.(*quantize.RaBitQuantizedVectorSet),
-		)
-	}
-	return nil, errors.Errorf("unknown quantizer type %T", sc.quantizer)
+	return DecodeVectorToSet(sc.quantizer, sc.tmpVectorSet, encodedVector)
 }
 
 // EncodeVector encodes a single vector and returns the encoded bytes.
@@ -189,4 +180,22 @@ func (pc *partitionCodec) setStoreCodec(partitionKey cspann.PartitionKey) {
 	} else {
 		pc.codec = &pc.nonRootCodec
 	}
+}
+
+// DecodeVectorToSet decodes a single encoded vector into the provided quantized
+// vector set. The vector set is expected to have been created using the given
+// quantizer.
+func DecodeVectorToSet(
+	quantizer quantize.Quantizer, set quantize.QuantizedVectorSet, encodedVector []byte,
+) ([]byte, error) {
+	switch quantizer.(type) {
+	case *quantize.UnQuantizer:
+		return vecencoding.DecodeUnquantizerVectorToSet(
+			encodedVector, set.(*quantize.UnQuantizedVectorSet))
+	case *quantize.RaBitQuantizer:
+		return vecencoding.DecodeRaBitQVectorToSet(
+			encodedVector, set.(*quantize.RaBitQuantizedVectorSet),
+		)
+	}
+	return nil, errors.Errorf("unknown quantizer type %T", quantizer)
 }

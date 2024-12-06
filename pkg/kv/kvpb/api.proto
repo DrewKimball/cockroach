@@ -17,6 +17,7 @@ import "roachpb/span_config.proto";
 import "rpc/rpcpb/rpc.proto";
 import "settings/encoding.proto";
 import "sql/catalog/fetchpb/index_fetch.proto";
+import "sql/vecindex/vecpb/vec.proto";
 import "storage/enginepb/mvcc.proto";
 import "storage/enginepb/mvcc3.proto";
 import "util/hlc/timestamp.proto";
@@ -841,6 +842,46 @@ message ReverseScanResponse {
   ColBatches col_batches = 5 [(gogoproto.nullable) = false];
 }
 
+// A VectorIndexScanRequest is the argument to the VectorIndexScan() method.
+// It specifies the start and end keys for a scan of a vector index partition,
+// as well as the information needed to calculate distances from a query vector.
+message VectorIndexScanRequest {
+  RequestHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
+  // Metric specifies the distance metric used to compute similarity between
+  // vectors in the partition.
+  cockroach.sql.vecindex.vecpb.DistanceMetric metric = 2;
+  // PartitionKey is the key of the partition to scan.
+  uint64 partition_key = 3;
+  // Dims is the number of dimensions in each vector.
+  uint64 dims = 4;
+  // Seed is the seed used to quantize vectors in the vector index. It may be
+  // left unset if the quantization method is MethodNotQuantized.
+  int64 seed = 5;
+  // QueryVector is the vector to search for in the vector index.
+  repeated float query_vector = 6;
+}
+
+// A VectorIndexScanResponse is the return value from the VectorIndexScan()
+// method.
+message VectorIndexScanResponse {
+  ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
+  // ChildPartitionKeys is the list of child partitions within the searched
+  // partition. It is only set if the searched partition is a root or branch
+  // partition.
+  repeated uint64 child_partition_keys = 2;
+  // ChildPrimaryKeys is the list of primary keys of the full vectors in the
+  // searched partition. It is only set if the searched partition is a leaf
+  // partition.
+  repeated bytes child_primary_keys = 3 [(gogoproto.casttype) = "github.com/cockroachdb/cockroach/pkg/roachpb.Key"];
+  // SquaredDistances is the list of estimated squared distance between the
+  // vectors within the searched partition and the query vector.
+  repeated float squared_distances = 4;
+	// ErrorBounds is a list of probabilistic bounds on the error of the distance
+	// estimates.
+  repeated float error_bounds = 5;
+  // Count is the number of vectors in the searched partition.
+  uint64 count = 6;
+}
 
 enum ChecksumMode {
     // CHECK_VIA_QUEUE is set for requests made from the consistency queue. In
@@ -2579,6 +2620,7 @@ message RequestUnion {
     LinkExternalSSTableRequest link_external_sstable = 57;
     ExciseRequest excise = 58;
     FlushLockTableRequest flush_lock_table = 59;
+    VectorIndexScanRequest vector_scan = 60;
   }
   reserved 8, 15, 23, 25, 26, 27, 31, 34, 49, 52;
 }
@@ -2635,6 +2677,7 @@ message ResponseUnion {
     LinkExternalSSTableResponse link_external_sstable = 57;
     ExciseResponse excise = 58;
     FlushLockTableResponse flush_lock_table = 59;
+    VectorIndexScanResponse vector_scan = 60;
   }
   reserved 8, 15, 23, 25, 26, 27, 28, 31, 34, 49, 52;
 }
