@@ -203,14 +203,18 @@ func (b *Builder) buildCreateFunction(cf *tree.CreateRoutine, inScope *scope) (o
 		// The parameter type must be supported by the current cluster version.
 		checkUnsupportedType(b.ctx, b.semaCtx, typ)
 		if typ.Identical(types.AnyTuple) {
-			if language == tree.RoutineLangSQL {
+			switch language {
+			case tree.RoutineLangSQL:
 				panic(pgerror.Newf(pgcode.InvalidFunctionDefinition,
 					"SQL functions cannot have arguments of type record"))
-			} else if language == tree.RoutineLangPLpgSQL {
-				panic(unimplemented.NewWithIssueDetail(105713,
-					"PL/pgSQL functions with RECORD input arguments",
-					"PL/pgSQL functions with RECORD input arguments are not yet supported",
-				))
+			case tree.RoutineLangPLpgSQL:
+				if param.IsOutParam() {
+					// TODO(drewk): open issue.
+					panic(unimplemented.NewWithIssueDetail(12345,
+						"RECORD OUT parameters",
+						"PL/pgSQL routines with RECORD-typed OUT parameters are not yet supported",
+					))
+				}
 			}
 		}
 		if param.DefaultVal != nil && param.Class == tree.RoutineParamOut {
@@ -459,7 +463,7 @@ func (b *Builder) buildCreateFunction(cf *tree.CreateRoutine, inScope *scope) (o
 				b, options, cf.Name.Object(), stmt.AST.Label, nil /* colRefs */, routineParams,
 				funcReturnType, nil /* outScope */, 0, /* resultBufferID */
 			)
-			stmtScope = plBuilder.buildRootBlock(stmt.AST, bodyScope, routineParams)
+			stmtScope = plBuilder.buildRootBlock(stmt.AST, bodyScope)
 		})
 		checkStmtVolatility(targetVolatility, stmtScope, stmt)
 

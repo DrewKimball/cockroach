@@ -262,22 +262,12 @@ func (b *Builder) buildRoutine(
 			argTypes = append(argTypes, pexpr.(tree.TypedExpr).ResolvedType())
 		}
 	}
-	// Create a new scope for building the statements in the function body. We
-	// start with an empty scope because a statement in the function body cannot
-	// refer to anything from the outer expression. If there are function
-	// parameters, we add them as columns to the scope so that references to
-	// them can be resolved.
-	//
-	// TODO(mgartner): We may need to set bodyScope.atRoot=true to prevent
-	// CTEs that mutate and are not at the top-level.
-	bodyScope := b.allocScope()
-	var params opt.ColList
+	// If necessary, add DEFAULT arguments.
+	args, argTypes = b.addDefaultArgs(f, args, argTypes, inScope, colRefs)
+
+	// Check the parameters for validity and resolve polymorphic types.
 	var polyArgTyp *types.T
 	if o.Types.Length() > 0 {
-		// If necessary, add DEFAULT arguments.
-		args, argTypes = b.addDefaultArgs(f, args, argTypes, bodyScope, colRefs)
-
-		// Add all input parameters to the scope.
 		paramTypes, ok := o.Types.(tree.ParamTypes)
 		if !ok {
 			panic(unimplemented.NewWithIssue(88947,
@@ -309,32 +299,66 @@ func (b *Builder) buildRoutine(
 				b.maybeResolvePolymorphicReturnType(f, polyArgTyp)
 			}
 		}
+	}
 
-		// Add any needed casts from argument type to parameter type, and add a
+	// paramsForPLpgSQL describes all parameters of PLpgSQL routines, including
+	// OUT parameters. We will fill this out below as resolved parameter types are
+	// determined.
+	var paramsForPLpgSQL []routineParam
+	if o.Language == tree.RoutineLangPLpgSQL {
+		paramsForPLpgSQL = make([]routineParam, 0, len(o.RoutineParams))
+	}
+
+	// Create a new scope for building the statements in the function body. We
+	// start with an empty scope because a statement in the function body cannot
+	// refer to anything from the outer expression. If there are function
+	// parameters, we add them as columns to the scope so that references to
+	// them can be resolved.
+	bodyScope := b.allocScope()
+
+	var inParamIdx int
+	params := make(opt.ColList, len(argTypes))
+	for _, param := range o.RoutineParams {
+		// Add any needed casts from argument type to the parameter type, and add a
 		// correctly typed column to the bodyScope for each parameter.
-		params = make(opt.ColList, len(paramTypes))
-		for i := range paramTypes {
-			argTyp := argTypes[i]
-			desiredTyp := maybeReplacePolymorphicType(paramTypes[i].Typ, polyArgTyp)
-			if desiredTyp.Identical(types.AnyTuple) {
-				// This is a RECORD-typed parameter. Use the actual argument type.
-				desiredTyp = argTyp
+		paramTyp, err := tree.ResolveType(b.ctx, param.Type, b.semaCtx.TypeResolver)
+		if err != nil {
+			panic(err)
+		}
+		if param.IsInParam() {
+			argTyp := argTypes[inParamIdx]
+			paramTyp = maybeReplacePolymorphicType(paramTyp, polyArgTyp)
+			if paramTyp.Identical(types.AnyTuple) {
+				// This is a RECORD-typed parameter. Use the actual argument type. Note
+				// that we check that a SQL routine doesn't have RECORD parameters
+				// during routine creation.
+				paramTyp = argTyp
 			}
-			if !argTyp.Identical(desiredTyp) {
-				if !cast.ValidCast(argTyp, desiredTyp, cast.ContextAssignment) {
+			if !argTyp.Identical(paramTyp) {
+				if !cast.ValidCast(argTyp, paramTyp, cast.ContextAssignment) {
 					// Missing assignment cast between these two types should've been
 					// caught earlier, during routine creation or overload resolution.
 					panic(errors.AssertionFailedf(
 						"argument expression has type %s, need type %s, assignment cast isn't possible",
-						argTyp.SQLStringForError(), desiredTyp.SQLStringForError(),
+						argTyp.SQLStringForError(), paramTyp.SQLStringForError(),
 					))
 				}
-				args[i] = b.factory.ConstructCast(args[i], desiredTyp)
+				args[inParamIdx] = b.factory.ConstructCast(args[inParamIdx], paramTyp)
 			}
-			argColName := funcParamColName(tree.Name(paramTypes[i].Name), i)
-			col := b.synthesizeColumn(bodyScope, argColName, desiredTyp, nil /* expr */, nil /* scalar */)
-			col.setParamOrd(i)
-			params[i] = col.id
+			argColName := funcParamColName(param.Name, inParamIdx)
+			col := b.synthesizeColumn(bodyScope, argColName, paramTyp, nil /* expr */, nil /* scalar */)
+			col.setParamOrd(inParamIdx)
+			params[inParamIdx] = col.id
+			inParamIdx++
+		}
+		// Keep track of the all parameters with resolved types for PL/pgSQL
+		// routines. This includes OUT parameters.
+		if o.Language == tree.RoutineLangPLpgSQL {
+			paramsForPLpgSQL = append(paramsForPLpgSQL, routineParam{
+				name:  param.Name,
+				typ:   paramTyp,
+				class: param.Class,
+			})
 		}
 	}
 
@@ -462,28 +486,15 @@ func (b *Builder) buildRoutine(
 		if err != nil {
 			panic(err)
 		}
-		routineParams := make([]routineParam, 0, len(o.RoutineParams))
-		for _, param := range o.RoutineParams {
-			// TODO(yuzefovich): can we avoid type resolution here?
-			typ, err := tree.ResolveType(b.ctx, param.Type, b.semaCtx.TypeResolver)
-			if err != nil {
-				panic(err)
-			}
-			routineParams = append(routineParams, routineParam{
-				name:  param.Name,
-				typ:   maybeReplacePolymorphicType(typ, polyArgTyp),
-				class: param.Class,
-			})
-		}
 		options := basePLOptions().
 			SetIsSetReturning(isSetReturning).
 			SetInsideDataSource(oldInsideDataSource).
 			SetIsProcedure(isProc)
 		plBuilder := newPLpgSQLBuilder(
-			b, options, def.Name, stmt.AST.Label, colRefs,
-			routineParams, f.ResolvedType(), outScope, resultBufferID,
+			b, options, def.Name, stmt.AST.Label, colRefs, paramsForPLpgSQL,
+			f.ResolvedType(), outScope, resultBufferID,
 		)
-		stmtScope := plBuilder.buildRootBlock(stmt.AST, bodyScope, routineParams)
+		stmtScope := plBuilder.buildRootBlock(stmt.AST, bodyScope)
 		if !isSetReturning {
 			// Set-returning functions add to the result set during execution rather
 			// than directly returning the result of the last statement. The PL/pgSQL
@@ -889,8 +900,7 @@ func (b *Builder) buildPLpgSQLDoBody(do *plpgsqltree.DoBlock) *scope {
 	)
 	// Allocate a fresh scope, since DO blocks do not take parameters or reference
 	// variables or columns from the calling context.
-	bodyScope := b.allocScope()
-	stmtScope := plBuilder.buildRootBlock(do.Block, bodyScope, nil /* routineParams */)
+	stmtScope := plBuilder.buildRootBlock(do.Block, b.allocScope())
 	return b.finishRoutineReturnStmt(
 		stmtScope, false /* isSetReturning */, false /* insideDataSource */, types.Void,
 	)

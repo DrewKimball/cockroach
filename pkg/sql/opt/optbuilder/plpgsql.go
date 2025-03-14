@@ -393,9 +393,7 @@ type plBlock struct {
 }
 
 // buildRootBlock builds a PL/pgSQL routine starting with the root block.
-func (b *plpgsqlBuilder) buildRootBlock(
-	astBlock *ast.Block, s *scope, routineParams []routineParam,
-) *scope {
+func (b *plpgsqlBuilder) buildRootBlock(astBlock *ast.Block, s *scope) *scope {
 	// Push the scope so that the routine parameters live on a parent scope
 	// instead of the current one. This indicates that the columns are "outer"
 	// columns, which can be referenced but do not originate from an input
@@ -407,12 +405,13 @@ func (b *plpgsqlBuilder) buildRootBlock(
 
 	// Initialize OUT parameters to NULL. Note that the initial block for
 	// parameters was already created in newPLpgSQLBuilder().
-	for _, param := range routineParams {
-		if param.class != tree.RoutineParamOut || param.name == "" {
+	for _, outParam := range b.outParams {
+		if outParam == "" {
 			continue
 		}
+		outParamTyp := b.resolveVariableForAssign(outParam)
 		s = b.addPLpgSQLAssign(
-			s, param.name, &tree.CastExpr{Expr: tree.DNull, Type: param.typ}, noIndirection,
+			s, outParam, &tree.CastExpr{Expr: tree.DNull, Type: outParamTyp}, noIndirection,
 		)
 	}
 	if b.options.isProcedure {
@@ -487,9 +486,7 @@ func (b *plpgsqlBuilder) addDeclarations(decls []ast.Statement, block *plBlock, 
 			if err != nil {
 				panic(err)
 			}
-			if typ.Identical(types.AnyTuple) {
-				panic(recordVarErr)
-			} else if typ.IsPolymorphicType() {
+			if typ.IsPolymorphicType() {
 				// NOTE: Postgres also returns an "unsupported" error.
 				panic(pgerror.Newf(pgcode.FeatureNotSupported,
 					"variable \"%s\" has pseudo-type %s", dec.Var, typ.Name(),
@@ -1562,6 +1559,9 @@ func (b *plpgsqlBuilder) addPLpgSQLAssign(
 	colName := scopeColName(ident)
 	var scalar opt.ScalarExpr
 	if indirection != noIndirection {
+		if typ.Identical(types.AnyTuple) {
+			panic(newUninitializedRecordErr(ident))
+		}
 		scalar = b.handleIndirectionForAssign(inScope, typ, ident, indirection, val)
 	} else {
 		scalar = b.buildSQLExpr(val, typ, inScope)
@@ -2917,9 +2917,6 @@ var (
 	collatedVarErr = unimplemented.NewWithIssueDetail(105245, "variable collation",
 		"collation for PL/pgSQL variables is not yet supported",
 	)
-	recordVarErr = unimplemented.NewWithIssueDetail(114874, "RECORD variable",
-		"RECORD type for PL/pgSQL variables is not yet supported",
-	)
 	scrollableCursorErr = unimplemented.NewWithIssue(77102,
 		"DECLARE SCROLL CURSOR",
 	)
@@ -3001,4 +2998,17 @@ var (
 	doBlockVersionErr = unimplemented.Newf("do blocks",
 		"DO statement usage inside a routine definition is not supported until version 25.1",
 	)
+	// TODO(drewk): make an issue.
+	recordVarScopeErr = unimplemented.NewWithIssue(12345,
+		"referencing a RECORD variable outside of the scope where it is assigned is not yet supported",
+	)
 )
+
+func newUninitializedRecordErr(variable ast.Variable) error {
+	return errors.WithDetail(
+		pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
+			"record \"%v\" is not assigned yet", variable,
+		),
+		"The tuple structure of a not-yet-assigned record is indeterminate.",
+	)
+}

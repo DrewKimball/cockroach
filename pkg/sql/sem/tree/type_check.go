@@ -897,6 +897,11 @@ func (expr *ColumnAccessExpr) TypeCheck(
 		return nil, NewTypeIsNotCompositeError(resolvedType)
 	}
 
+	if resolvedType.Identical(types.AnyTuple) {
+		expr.typ = types.AnyElement
+		return expr, nil
+	}
+
 	if !expr.ByIndex && len(resolvedType.TupleLabels()) == 0 {
 		return nil, pgerror.Newf(pgcode.UndefinedColumn, "could not identify column %q in record data type",
 			expr.ColName)

@@ -841,7 +841,7 @@ func (b *Builder) buildTriggerFunction(
 		b, basePLOptions().WithIsTriggerFn(), resolvedDef.Name, stmt.AST.Label, nil, /* colRefs */
 		params, tableTyp, nil /* outScope */, 0, /* resultBufferID */
 	)
-	stmtScope := plBuilder.buildRootBlock(stmt.AST, triggerFuncScope, params)
+	stmtScope := plBuilder.buildRootBlock(stmt.AST, triggerFuncScope)
 	routineDef.Body = []memo.RelExpr{stmtScope.expr}
 	routineDef.BodyProps = []*physical.Required{stmtScope.makePhysicalProps()}
 

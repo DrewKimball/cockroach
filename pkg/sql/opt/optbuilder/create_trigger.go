@@ -247,7 +247,7 @@ func (b *Builder) buildFunctionForTrigger(
 			b, basePLOptions().WithIsTriggerFn(), ct.FuncName.String(), stmt.AST.Label,
 			nil /* colRefs */, triggerFuncParams, tableTyp, nil /* outScope */, 0, /* resultBufferID */
 		)
-		funcScope = plBuilder.buildRootBlock(stmt.AST, funcScope, triggerFuncParams)
+		funcScope = plBuilder.buildRootBlock(stmt.AST, funcScope)
 	})
 	var vol tree.RoutineVolatility
 	switch o.Volatility {
