@@ -294,12 +294,30 @@ func (f *Factory) EvalContext() *eval.Context {
 // singleton source nodes rather than referencing existing nodes. The source
 // memo should always be treated as immutable, and the destination memo must be
 // completely independent of it once CopyAndReplace has completed.
+//
+// If addWithBindings is true, every WITH binding in the source memo will be
+// copied to the destination memo, *without* invoking the replace function.
+// Callers should set this to true unless one of the following is true:
+//  1. The entire root expression from the source memo is being copied, in which
+//     case all WITH expressions are copied anyway.
+//  2. The expression being copied does not contain any references to "outer"
+//     WITH expressions.
 func (f *Factory) CopyAndReplace(
-	fromMemo *memo.Memo, from memo.RelExpr, fromProps *physical.Required, replace ReplaceFunc,
+	fromMemo *memo.Memo,
+	from memo.RelExpr,
+	fromProps *physical.Required,
+	replace ReplaceFunc,
+	addWithBindings bool,
 ) {
 	opt.MaybeInjectOptimizerTestingPanic(f.ctx, f.evalCtx)
 
 	f.CopyMetadataFrom(fromMemo)
+
+	if addWithBindings {
+		fromMemo.Metadata().ForEachWithBinding(func(id opt.WithID, expr opt.Expr) {
+			f.Metadata().AddWithBinding(id, f.CopyWithoutAssigningPlaceholders(expr))
+		})
+	}
 
 	// Perform copy and replacement, and store result as the root of this
 	// factory's memo.
@@ -329,7 +347,7 @@ func (f *Factory) CopyMetadataFrom(from *memo.Memo) {
 	f.mem.Metadata().CopyFrom(from.Metadata(), f.CopyWithoutAssigningPlaceholders)
 }
 
-// CopyWithoutAssigningPlaceholders returns a copy of the given scalar expression.
+// CopyWithoutAssigningPlaceholders returns a copy of the given expression.
 // It does not attempt to replace placeholders with values.
 func (f *Factory) CopyWithoutAssigningPlaceholders(e opt.Expr) opt.Expr {
 	return f.CopyAndReplaceDefault(e, f.CopyWithoutAssigningPlaceholders)
@@ -409,7 +427,12 @@ func (f *Factory) AssignPlaceholders(from *memo.Memo) (err error) {
 		}
 		return f.CopyAndReplaceDefault(e, replaceFn)
 	}
-	f.CopyAndReplace(from, from.RootExpr().(memo.RelExpr), from.RootProps(), replaceFn)
+	// There is no need to copy the WITH bindings before invoking the replace
+	// function because the replace function will encounter every WITH expression
+	// anyway.
+	const addWithBindings = false
+	rootExpr := from.RootExpr().(memo.RelExpr)
+	f.CopyAndReplace(from, rootExpr, from.RootProps(), replaceFn, addWithBindings)
 
 	return nil
 }

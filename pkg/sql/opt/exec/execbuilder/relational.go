@@ -1281,41 +1281,24 @@ func (b *Builder) buildApplyJoin(join memo.RelExpr) (_ execPlan, outputCols colO
 		// with the corresponding value from the left row.
 		var replaceFn norm.ReplaceFunc
 		replaceFn = func(e opt.Expr) opt.Expr {
-			switch t := e.(type) {
-			case *memo.VariableExpr:
-				if leftOrd, ok := leftBoundColMap.Get(t.Col); ok {
-					return f.ConstructConstVal(leftRow[leftOrd], t.Typ)
+			if v, ok := e.(*memo.VariableExpr); ok {
+				if leftOrd, ok := leftBoundColMap.Get(v.Col); ok {
+					return f.ConstructConstVal(leftRow[leftOrd], v.Typ)
 				}
-
-			case *memo.WithScanExpr:
-				// Allow referring to "outer" With expressions. The bound
-				// expressions are not part of this Memo, but they are used only
-				// for their relational properties, which should be valid.
-				//
-				// We must add all With expressions to the metadata even if they
-				// aren't referred to directly because they might be referred to
-				// transitively through other With expressions. For example, if
-				// the RHS refers to With expression &1, and &1 refers to With
-				// expression &2, we must include &2 in the metadata so that
-				// its relational properties are available. See #87733.
-				//
-				// We lazily add these With expressions to the metadata here
-				// because the call to Factory.CopyAndReplace below clears With
-				// expressions in the metadata.
-				b.mem.Metadata().ForEachWithBinding(func(id opt.WithID, expr opt.Expr) {
-					// Make sure to check for an existing With binding, since we may
-					// have already rewritten the bound expression and added it to the
-					// new memo if the associated WithExpr is part of the right input of
-					// the apply-join.
-					if !f.Metadata().HasWithBinding(id) {
-						f.Metadata().AddWithBinding(id, expr)
-					}
-				})
-				// Fall through.
 			}
 			return f.CopyAndReplaceDefault(e, replaceFn)
 		}
-		f.CopyAndReplace(fromMemo, rightExpr, &rightRequiredProps, replaceFn)
+		// Allow referring to "outer" With expressions. The bound expressions are
+		// not part of this Memo, but they are used only for their relational
+		// properties, which should be valid.
+		//
+		// We must add all With expressions to the metadata even if they aren't
+		// referred to directly because they might be referred to transitively
+		// through other With expressions. For example, if the RHS refers to With
+		// expression &1, and &1 refers to With expression &2, we must include &2 in
+		// the metadata so that its relational properties are available. See #87733.
+		const addWithBindings = true
+		f.CopyAndReplace(fromMemo, rightExpr, &rightRequiredProps, replaceFn, addWithBindings)
 
 		newRightSide, err := o.Optimize()
 		if err != nil {

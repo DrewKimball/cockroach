@@ -1138,19 +1138,6 @@ func (b *Builder) buildRoutinePlanGenerator(
 	wrapRootExpr wrapRootExprFn,
 	resultBufferID memo.RoutineResultBufferID,
 ) tree.RoutinePlanGenerator {
-	// argOrd returns the ordinal of the argument within the arguments list that
-	// can be substituted for each reference to the given function parameter
-	// column. If the given column does not represent a function parameter,
-	// ok=false is returned.
-	argOrd := func(col opt.ColumnID) (ord int, ok bool) {
-		for i, param := range params {
-			if col == param {
-				return i, true
-			}
-		}
-		return 0, false
-	}
-
 	// We will pre-populate the withExprs of the new execbuilder.
 	var withExprs []builtWithExpr
 	if allowOuterWithRefs {
@@ -1207,44 +1194,14 @@ func (b *Builder) buildRoutinePlanGenerator(
 			// with argument datums.
 			var replaceFn norm.ReplaceFunc
 			replaceFn = func(e opt.Expr) opt.Expr {
-				switch t := e.(type) {
-				case *memo.VariableExpr:
-					if ord, ok := argOrd(t.Col); ok {
-						return f.ConstructConstVal(args[ord], t.Typ)
+				if v, ok := e.(*memo.VariableExpr); ok {
+					if ord, ok := params.Find(v.Col); ok {
+						return f.ConstructConstVal(args[ord], v.Typ)
 					}
-
-				case *memo.WithScanExpr:
-					// Allow referring to "outer" With expressions, if
-					// allowOuterWithRefs is true. The bound expressions are not
-					// part of this Memo, but they are used only for their
-					// relational properties, which should be valid.
-					//
-					// We must add all With expressions to the metadata even if they
-					// aren't referred to directly because they might be referred to
-					// transitively through other With expressions. For example, if
-					// stmt refers to With expression &1, and &1 refers to With
-					// expression &2, we must include &2 in the metadata so that its
-					// relational properties are available. See #87733.
-					//
-					// We lazily add these With expressions to the metadata here
-					// because the call to Factory.CopyAndReplace below clears With
-					// expressions in the metadata.
-					if allowOuterWithRefs {
-						b.mem.Metadata().ForEachWithBinding(func(id opt.WithID, expr opt.Expr) {
-							// Make sure to check for an existing With binding, since we may
-							// have already rewritten the bound expression and added it to the
-							// new memo if the associated WithExpr is part of the routine.
-							if !f.Metadata().HasWithBinding(id) {
-								f.Metadata().AddWithBinding(id, expr)
-							}
-						})
-					}
-					// Fall through.
 				}
-
 				return f.CopyAndReplaceDefault(e, replaceFn)
 			}
-			f.CopyAndReplace(originalMemo, stmt, props, replaceFn)
+			f.CopyAndReplace(originalMemo, stmt, props, replaceFn, allowOuterWithRefs)
 
 			if wrapRootExpr != nil {
 				wrapped := wrapRootExpr(f, f.Memo().RootExpr().(memo.RelExpr)).(memo.RelExpr)

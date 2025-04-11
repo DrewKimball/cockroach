@@ -7,12 +7,14 @@ package norm_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/cockroach/pkg/settings/cluster"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/memo"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/norm"
+	"github.com/cockroachdb/cockroach/pkg/sql/opt/props/physical"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/testutils"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/testutils/testcat"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/xform"
@@ -102,7 +104,9 @@ func TestCopyAndReplace(t *testing.T) {
 		}
 		return o.Factory().CopyAndReplaceDefault(e, replaceFn)
 	}
-	o.Factory().CopyAndReplace(m, m.RootExpr().(memo.RelExpr), m.RootProps(), replaceFn)
+	const addWithBindings = false
+	rootExpr := m.RootExpr().(memo.RelExpr)
+	o.Factory().CopyAndReplace(m, rootExpr, m.RootProps(), replaceFn, addWithBindings)
 
 	if e, err := o.Optimize(); err != nil {
 		t.Fatal(err)
@@ -126,6 +130,17 @@ func TestCopyAndReplaceWithScan(t *testing.T) {
 		}
 	}
 
+	makeRequiredProps := func(expr memo.RelExpr) *physical.Required {
+		var required physical.Required
+		expr.Relational().OutputCols.ForEach(func(col opt.ColumnID) {
+			required.Presentation = append(required.Presentation, opt.AliasedColumn{
+				Alias: fmt.Sprintf("col%d", col),
+				ID:    col,
+			})
+		})
+		return &required
+	}
+
 	evalCtx := eval.MakeTestingEvalContext(cluster.MakeTestingClusterSettings())
 	for _, query := range []string{
 		"WITH cte AS (SELECT * FROM ab) SELECT * FROM cte, cte AS cte2 WHERE cte.a = cte2.b",
@@ -147,10 +162,28 @@ func TestCopyAndReplaceWithScan(t *testing.T) {
 			replaceFn = func(e opt.Expr) opt.Expr {
 				return o.Factory().CopyAndReplaceDefault(e, replaceFn)
 			}
-			o.Factory().CopyAndReplace(m, m.RootExpr().(memo.RelExpr), m.RootProps(), replaceFn)
+			// It is unnecessary to copy WITH bindings before replacing the root
+			// expression because it already contains every WITH expression.
+			var addWithBindings bool
+			rootExpr := m.RootExpr().(memo.RelExpr)
+			o.Factory().CopyAndReplace(m, rootExpr, m.RootProps(), replaceFn, addWithBindings)
 
 			if _, err := o.Optimize(); err != nil {
 				t.Fatal(err)
+			}
+
+			// It is necessary to copy WITH bindings when copying a subexpression that
+			// references them. Failure to do so results in a panic with message
+			// "no binding for WithID 1".
+			addWithBindings = true
+			m = o.Factory().DetachMemo()
+			rootExpr = m.RootExpr().(memo.RelExpr)
+			for range rootExpr.ChildCount() {
+				o.Init(context.Background(), &evalCtx, cat)
+				if childExpr, ok := rootExpr.Child(rootExpr.ChildCount() - 1).(memo.RelExpr); ok {
+					childProps := makeRequiredProps(childExpr)
+					o.Factory().CopyAndReplace(m, childExpr, childProps, replaceFn, addWithBindings)
+				}
 			}
 		})
 	}

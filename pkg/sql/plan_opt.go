@@ -1029,6 +1029,11 @@ func (opc *optPlanningCtx) makeQueryIndexRecommendation(
 	// Save the normalized memo created by the optbuilder.
 	savedMemo := opc.optimizer.DetachMemo(ctx)
 
+	// There is no need to copy the WITH bindings before invoking the replace
+	// function because the replace function will encounter every WITH expression
+	// anyway.
+	const addWithBindings = false
+
 	// Use the optimizer to fully optimize the memo. We need to do this before
 	// finding index candidates because the *memo.SortExpr from the sort enforcer
 	// is only added to the memo in this step. The sort expression is required to
@@ -1040,6 +1045,7 @@ func (opc *optPlanningCtx) makeQueryIndexRecommendation(
 		savedMemo.RootExpr().(memo.RelExpr),
 		savedMemo.RootProps(),
 		f.CopyWithoutAssigningPlaceholders,
+		addWithBindings,
 	)
 	opc.optimizer.NotifyOnMatchedRule(func(ruleName opt.RuleName) bool {
 		return ruleName.IsNormalize()
@@ -1061,6 +1067,7 @@ func (opc *optPlanningCtx) makeQueryIndexRecommendation(
 		savedMemo.RootExpr().(memo.RelExpr),
 		savedMemo.RootProps(),
 		f.CopyWithoutAssigningPlaceholders,
+		addWithBindings,
 	)
 	opc.optimizer.Memo().Metadata().UpdateTableMeta(ctx, f.EvalContext(), hypTables)
 	if _, err = opc.optimizer.Optimize(); err != nil {
@@ -1086,6 +1093,7 @@ func (opc *optPlanningCtx) makeQueryIndexRecommendation(
 		savedMemo.RootExpr().(memo.RelExpr),
 		savedMemo.RootProps(),
 		f.CopyWithoutAssigningPlaceholders,
+		addWithBindings,
 	)
 
 	return indexRecs, nil
