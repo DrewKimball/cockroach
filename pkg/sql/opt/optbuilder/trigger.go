@@ -765,7 +765,7 @@ func (tb *rowLevelAfterTriggerBuilder) Build(
 
 type cachedTriggerFunc struct {
 	triggerName tree.Name
-	funDef      *memo.UDFDefinition
+	funDef      *memo.RoutineDefinition
 	resolved    *tree.ResolvedFunctionDefinition
 }
 
@@ -811,7 +811,7 @@ func (b *Builder) buildTriggerFunction(
 	// All triggers are called on NULL input.
 	const calledOnNullInput = true
 	const isTriggerFunc = true
-	udfDef := &memo.UDFDefinition{
+	routineDef := &memo.RoutineDefinition{
 		Name:              resolvedDef.Name,
 		Typ:               tableTyp,
 		Volatility:        o.Volatility,
@@ -827,7 +827,7 @@ func (b *Builder) buildTriggerFunction(
 	b.builtTriggerFuncs[tableID] = append(b.builtTriggerFuncs[tableID],
 		cachedTriggerFunc{
 			triggerName: trigger.Name(),
-			funDef:      udfDef,
+			funDef:      routineDef,
 			resolved:    resolvedDef,
 		},
 	)
@@ -842,10 +842,10 @@ func (b *Builder) buildTriggerFunction(
 		params, tableTyp, nil /* outScope */, 0, /* resultBufferID */
 	)
 	stmtScope := plBuilder.buildRootBlock(stmt.AST, triggerFuncScope, params)
-	udfDef.Body = []memo.RelExpr{stmtScope.expr}
-	udfDef.BodyProps = []*physical.Required{stmtScope.makePhysicalProps()}
+	routineDef.Body = []memo.RelExpr{stmtScope.expr}
+	routineDef.BodyProps = []*physical.Required{stmtScope.makePhysicalProps()}
 
-	return f.ConstructUDFCall(args, &memo.UDFCallPrivate{Def: udfDef}), resolvedDef
+	return f.ConstructUDFCall(args, &memo.UDFCallPrivate{Def: routineDef}), resolvedDef
 }
 
 // buildTriggerWhen wraps the trigger function invocation in a CASE WHEN

@@ -190,7 +190,7 @@ func newMetadata(compiled *lang.CompiledExpr, pkg string) *metadata {
 		"SequenceID":           {fullName: "opt.SequenceID", passByVal: true},
 		"UniqueID":             {fullName: "opt.UniqueID", passByVal: true},
 		"WithID":               {fullName: "opt.WithID", passByVal: true},
-		"UDFDefinition":        {fullName: "memo.UDFDefinition", isPointer: true},
+		"RoutineDefinition":    {fullName: "memo.RoutineDefinition", isPointer: true},
 		"StoredProcTxnOp":      {fullName: "tree.StoredProcTxnOp", passByVal: true},
 		"TransactionModes":     {fullName: "tree.TransactionModes", passByVal: true},
 		"Ordering":             {fullName: "opt.Ordering", passByVal: true},

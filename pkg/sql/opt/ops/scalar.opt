@@ -1296,7 +1296,7 @@ define UDFCall {
 [Private]
 define UDFCallPrivate {
     # Def points to the UDF SQL body.
-    Def UDFDefinition
+    Def RoutineDefinition
 }
 
 # TxnControl allows PL/pgSQL stored procedures to pause their execution, commit
@@ -1328,7 +1328,7 @@ define TxnControlPrivate {
 
     # Def stores the procedure that will resume execution of the parent SP in
     # the new transaction.
-    Def UDFDefinition
+    Def RoutineDefinition
 }
 
 # KVOptions is a set of KVOptionItems that specify arbitrary keys and values

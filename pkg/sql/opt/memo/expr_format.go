@@ -166,9 +166,9 @@ type ExprFmtCtx struct {
 	// with the session variable `save_tables_prefix` set to the same value.
 	nameGen *ExprNameGenerator
 
-	// seenUDFs is used to ensure that formatting of recursive UDFs does not
-	// infinitely recurse.
-	seenUDFs map[*UDFDefinition]struct{}
+	// seenRoutines is used to ensure that formatting of recursive routines does
+	// not infinitely recurse.
+	seenRoutines map[*RoutineDefinition]struct{}
 
 	// tailCalls allows for quick lookup of all the routines in tail-call position
 	// when the last body statement of a routine is formatted.
@@ -213,7 +213,7 @@ func MakeExprFmtCtxBuffer(
 		Memo:             mem,
 		Catalog:          catalog,
 		nameGen:          nameGen,
-		seenUDFs:         make(map[*UDFDefinition]struct{}),
+		seenRoutines:     make(map[*RoutineDefinition]struct{}),
 	}
 }
 
@@ -1057,11 +1057,11 @@ func (f *ExprFmtCtx) formatScalar(scalar opt.ScalarExpr, tp treeprinter.Node) {
 func (f *ExprFmtCtx) formatScalarWithLabel(
 	label string, scalar opt.ScalarExpr, tp treeprinter.Node,
 ) {
-	formatUDFDefinition := func(def *UDFDefinition, tp treeprinter.Node) {
-		if _, seen := f.seenUDFs[def]; !seen {
+	formatRoutineDef := func(def *RoutineDefinition, tp treeprinter.Node) {
+		if _, seen := f.seenRoutines[def]; !seen {
 			// Ensure that the definition of the UDF is not printed out again if it
 			// is recursively called.
-			f.seenUDFs[def] = struct{}{}
+			f.seenRoutines[def] = struct{}{}
 			if len(def.Params) > 0 {
 				f.formatColList(tp, "params:", def.Params, opt.ColSet{} /* notNullCols */)
 			}
@@ -1090,7 +1090,7 @@ func (f *ExprFmtCtx) formatScalarWithLabel(
 				f.formatExpr(def.Body[i], stmtNode)
 				f.tailCalls = prevTailCalls
 			}
-			delete(f.seenUDFs, def)
+			delete(f.seenRoutines, def)
 		} else {
 			tp.Child("recursive-call")
 		}
@@ -1128,7 +1128,7 @@ func (f *ExprFmtCtx) formatScalarWithLabel(
 			tp.Child("tail-call")
 		}
 		formatRoutineArgs(udf.Args, tp)
-		formatUDFDefinition(udf.Def, tp)
+		formatRoutineDef(udf.Def, tp)
 	}
 
 	f.Buffer.Reset()
@@ -1201,7 +1201,7 @@ func (f *ExprFmtCtx) formatScalarWithLabel(
 		f.FormatScalarProps(scalar)
 		tp = tp.Child(f.Buffer.String())
 		formatRoutineArgs(controlExpr.Args, tp)
-		formatUDFDefinition(controlExpr.Def, tp)
+		formatRoutineDef(controlExpr.Def, tp)
 	}
 
 	// Omit various list items from the output, but show some of their properties
@@ -1289,7 +1289,7 @@ func (f *ExprFmtCtx) formatScalarWithLabel(
 			formatUDFInputAndBody(t, tp)
 		case *TxnControlExpr:
 			formatRoutineArgs(t.Args, tp)
-			formatUDFDefinition(t.Def, tp)
+			formatRoutineDef(t.Def, tp)
 		case *SubqueryExpr:
 			if _, tailCall := f.tailCalls[t]; tailCall {
 				// Subqueries nested within routines are themselves planned as nested

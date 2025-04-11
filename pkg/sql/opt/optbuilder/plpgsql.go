@@ -1934,8 +1934,8 @@ func (b *plpgsqlBuilder) makeRaiseFormatMessage(
 // incorrectly be caught by the exception handler of the nested block.
 func (b *plpgsqlBuilder) buildExceptions(block *ast.Block) *memo.ExceptionBlock {
 	codes := make([]pgcode.Code, 0, len(block.Exceptions))
-	handlers := make([]*memo.UDFDefinition, 0, len(block.Exceptions))
-	addHandler := func(codeStr string, handler *memo.UDFDefinition) {
+	handlers := make([]*memo.RoutineDefinition, 0, len(block.Exceptions))
+	addHandler := func(codeStr string, handler *memo.RoutineDefinition) {
 		code := pgcode.MakeCode(strings.ToUpper(codeStr))
 		switch code {
 		case pgcode.TransactionRollback, pgcode.TransactionIntegrityConstraintViolation,
@@ -2245,7 +2245,7 @@ func (b *plpgsqlBuilder) makeContinuation(conName string) continuation {
 	}
 	b.ensureScopeHasExpr(s)
 	return continuation{
-		def: &memo.UDFDefinition{
+		def: &memo.RoutineDefinition{
 			Params:            params,
 			Name:              b.makeIdentifier(conName),
 			Typ:               b.returnType,
@@ -2666,7 +2666,7 @@ func (b *plpgsqlBuilder) makeReturnForOutParams() tree.Expr {
 type continuation struct {
 	// def is used to construct a call into a routine that picks up execution
 	// from a branch in the control flow.
-	def *memo.UDFDefinition
+	def *memo.RoutineDefinition
 
 	// s is a scope initialized with the parameters of the routine. It should be
 	// used to construct the routine body statement.

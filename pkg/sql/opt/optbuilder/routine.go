@@ -504,7 +504,7 @@ func (b *Builder) buildRoutine(
 	routine := b.factory.ConstructUDFCall(
 		args,
 		&memo.UDFCallPrivate{
-			Def: &memo.UDFDefinition{
+			Def: &memo.RoutineDefinition{
 				Name:               def.Name,
 				Typ:                f.ResolvedType(),
 				Volatility:         o.Volatility,
@@ -860,7 +860,7 @@ func (b *Builder) buildDo(do *tree.DoBlock, inScope *scope) *scope {
 	routine := b.factory.ConstructUDFCall(
 		memo.ScalarListExpr{},
 		&memo.UDFCallPrivate{
-			Def: &memo.UDFDefinition{
+			Def: &memo.RoutineDefinition{
 				Name:        doBlockRoutineName,
 				Typ:         types.Void,
 				Volatility:  volatility.Volatile,

@@ -376,7 +376,7 @@ func (f *Factory) AssignPlaceholders(from *memo.Memo) (err error) {
 	// Copy the "from" memo to this memo, replacing any Placeholder operators as
 	// the copy proceeds.
 	var replaceFn ReplaceFunc
-	var recursiveRoutines map[*memo.UDFDefinition]struct{}
+	var recursiveRoutines map[*memo.RoutineDefinition]struct{}
 	replaceFn = func(e opt.Expr) opt.Expr {
 		switch t := e.(type) {
 		case *memo.PlaceholderExpr:
@@ -396,7 +396,7 @@ func (f *Factory) AssignPlaceholders(from *memo.Memo) (err error) {
 					return e
 				}
 				if recursiveRoutines == nil {
-					recursiveRoutines = make(map[*memo.UDFDefinition]struct{})
+					recursiveRoutines = make(map[*memo.RoutineDefinition]struct{})
 				}
 				recursiveRoutines[t.Def] = struct{}{}
 			}

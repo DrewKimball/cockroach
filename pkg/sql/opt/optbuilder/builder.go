@@ -196,10 +196,10 @@ type Builder struct {
 	// one another.
 	//
 	// NOTE: Since we map from StableID, multiple mutations to the same table may
-	// reuse the same cached UDFDefinition to invoke a trigger function. This is
-	// ok because UDFDefinitions are independent of the context in which they are
-	// built, and can be safely reused across different call-sites within the same
-	// memo.
+	// reuse the same cached RoutineDefinition to invoke a trigger function. This
+	// is ok because RoutineDefinition are independent of the context in which
+	// they are built, and can be safely reused across different call-sites within
+	// the same memo.
 	builtTriggerFuncs map[cat.StableID][]cachedTriggerFunc
 }
 

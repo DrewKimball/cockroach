@@ -667,10 +667,11 @@ func (sj *SemiJoinExpr) getMultiplicity() props.JoinMultiplicity {
 	return sj.multiplicity
 }
 
-// UDFDefinition stores details about the SQL body of a UDF. It is stored
-// separately from the call-site to allow different invocations of the same UDF
-// to point to the same definition; this is necessary for recursive UDFs.
-type UDFDefinition struct {
+// RoutineDefinition stores details about the body statements of a routine.
+// It is stored separately from the call-site to allow different invocations of
+// the same routine to point to the same definition; this is necessary for
+// recursive routines.
+type RoutineDefinition struct {
 	// Name is the name of the function.
 	Name string
 
@@ -763,7 +764,7 @@ type UDFDefinition struct {
 	BlockState *tree.BlockState
 
 	// ResultBufferID, if set, identifies the buffer that stores the result for
-	// the set-returning PL/pgSQL function that this UDFDefinition represents.
+	// the set-returning PL/pgSQL function that this RoutineDefinition represents.
 	// Sub-routines within the body statements may use this ID to add their
 	// results to the same buffer. This is used to implement the PL/pgsql
 	// RETURN NEXT and RETURN QUERY statements.
@@ -781,7 +782,7 @@ type ExceptionBlock struct {
 
 	// Actions contains routine definitions that represent exception handlers for
 	// each code in the Codes slice.
-	Actions []*UDFDefinition
+	Actions []*RoutineDefinition
 }
 
 // RoutineStmtOutput allows the result of a statement in a PL/pgSQL function to

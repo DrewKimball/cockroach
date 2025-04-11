@@ -786,7 +786,7 @@ func (h *hasher) HashLiteralRows(val *opt.LiteralRows) {
 	h.HashUint64(uint64(reflect.ValueOf(val).Pointer()))
 }
 
-func (h *hasher) HashUDFDefinition(val *UDFDefinition) {
+func (h *hasher) HashRoutineDefinition(val *RoutineDefinition) {
 	h.HashUint64(uint64(reflect.ValueOf(val).Pointer()))
 }
 
@@ -1316,7 +1316,7 @@ func (h *hasher) IsLiteralRowsEqual(l, r *opt.LiteralRows) bool {
 	return l == r
 }
 
-func (h *hasher) IsUDFDefinitionEqual(l, r *UDFDefinition) bool {
+func (h *hasher) IsRoutineDefinitionEqual(l, r *RoutineDefinition) bool {
 	if len(l.Body) != len(r.Body) {
 		return false
 	}
@@ -1333,7 +1333,7 @@ func (h *hasher) IsUDFDefinitionEqual(l, r *UDFDefinition) bool {
 			return false
 		}
 		for i := range l.ExceptionBlock.Actions {
-			if !h.IsUDFDefinitionEqual(l.ExceptionBlock.Actions[i], r.ExceptionBlock.Actions[i]) {
+			if !h.IsRoutineDefinitionEqual(l.ExceptionBlock.Actions[i], r.ExceptionBlock.Actions[i]) {
 				return false
 			}
 			if l.ExceptionBlock.Codes[i] != r.ExceptionBlock.Codes[i] {
