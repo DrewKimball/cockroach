@@ -1317,16 +1317,8 @@ func (h *hasher) IsLiteralRowsEqual(l, r *opt.LiteralRows) bool {
 }
 
 func (h *hasher) IsRoutineDefinitionEqual(l, r *RoutineDefinition) bool {
-	if len(l.Body) != len(r.Body) {
+	if !l.Body.Equal(r.Body) {
 		return false
-	}
-	for i := range l.Body {
-		if !h.IsRelExprEqual(l.Body[i], r.Body[i]) {
-			return false
-		}
-		if !h.IsPhysPropsEqual(l.BodyProps[i], r.BodyProps[i]) {
-			return false
-		}
 	}
 	if l.ExceptionBlock != nil {
 		if r.ExceptionBlock == nil || len(l.ExceptionBlock.Actions) != len(r.ExceptionBlock.Actions) {
@@ -1360,7 +1352,7 @@ func (h *hasher) IsRoutineDefinitionEqual(l, r *RoutineDefinition) bool {
 	if l.FirstStmtOutput.TargetBufferID != r.FirstStmtOutput.TargetBufferID {
 		return false
 	}
-	return h.IsColListEqual(l.Params, r.Params) && l.IsRecursive == r.IsRecursive
+	return l.IsRecursive == r.IsRecursive
 }
 
 func (h *hasher) IsStoredProcTxnOpEqual(l, r tree.StoredProcTxnOp) bool {

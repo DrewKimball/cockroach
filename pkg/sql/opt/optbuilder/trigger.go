@@ -819,7 +819,6 @@ func (b *Builder) buildTriggerFunction(
 		TriggerFunc:       isTriggerFunc,
 		RoutineType:       o.Type,
 		RoutineLang:       o.Language,
-		Params:            paramCols,
 	}
 	if b.builtTriggerFuncs == nil {
 		b.builtTriggerFuncs = make(map[cat.StableID][]cachedTriggerFunc)
@@ -838,12 +837,15 @@ func (b *Builder) buildTriggerFunction(
 		panic(err)
 	}
 	plBuilder := newPLpgSQLBuilder(
-		b, basePLOptions().WithIsTriggerFn(), resolvedDef.Name, stmt.AST.Label, nil, /* colRefs */
+		b, basePLOptions().WithIsTriggerFn(), resolvedDef.Name, stmt.AST.Label,
 		params, tableTyp, nil /* outScope */, 0, /* resultBufferID */
 	)
 	stmtScope := plBuilder.buildRootBlock(stmt.AST, triggerFuncScope)
-	routineDef.Body = []memo.RelExpr{stmtScope.expr}
-	routineDef.BodyProps = []*physical.Required{stmtScope.makePhysicalProps()}
+	routineDef.Body = &memo.DefaultRoutineBody{
+		Params:    paramCols,
+		Body:      []memo.RelExpr{stmtScope.expr},
+		BodyProps: []*physical.Required{stmtScope.makePhysicalProps()},
+	}
 
 	return f.ConstructUDFCall(args, &memo.UDFCallPrivate{Def: routineDef}), resolvedDef
 }

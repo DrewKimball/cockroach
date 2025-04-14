@@ -857,6 +857,7 @@ func (b *Builder) buildSubquery(
 			ref tree.RoutineExecFactory,
 			_ tree.RoutineResultWriter,
 			args tree.Datums,
+			argTypes []*types.T,
 			fn tree.RoutinePlanGeneratedFunc,
 		) error {
 			// Analyze the input of the subquery to find tail calls, which will allow
@@ -1130,9 +1131,7 @@ type wrapRootExprFn func(f *norm.Factory, e memo.RelExpr) opt.Expr
 // This is for PL/pgSQL set-returning routines, which must allow sub-routines to
 // add to the result set at any point during execution.
 func (b *Builder) buildRoutinePlanGenerator(
-	params opt.ColList,
-	stmts []memo.RelExpr,
-	stmtProps []*physical.Required,
+	body memo.RoutineBody,
 	stmtStr []string,
 	allowOuterWithRefs bool,
 	wrapRootExpr wrapRootExprFn,
@@ -1160,19 +1159,19 @@ func (b *Builder) buildRoutinePlanGenerator(
 		ref tree.RoutineExecFactory,
 		resultWriter tree.RoutineResultWriter,
 		args tree.Datums,
+		argTypes []*types.T,
 		fn tree.RoutinePlanGeneratedFunc,
 	) (err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				// This code allows us to propagate internal errors without
-				// having to add error checks everywhere throughout the code.
-				// This is only possible because the code does not update shared
-				// state and does not manipulate locks.
+				// This code allows us to propagate internal errors without having to
+				// add error checks everywhere throughout the code. This is only
+				// possible because the code does not update shared state and does not
+				// manipulate locks.
 				//
-				// This is the same panic-catching logic that exists in
-				// o.Optimize() below. It's required here because it's possible
-				// for factory functions to panic below, like
-				// CopyAndReplaceDefault.
+				// This is the same panic-catching logic that exists in o.Optimize()
+				// below. It's required here because it's possible for factory functions
+				// to panic below, like CopyAndReplaceDefault.
 				if ok, e := errorutil.ShouldCatch(r); ok {
 					err = e
 					log.VEventf(ctx, 1, "%v", err)
@@ -1184,28 +1183,38 @@ func (b *Builder) buildRoutinePlanGenerator(
 			}
 		}()
 
-		for i := range stmts {
-			stmt := stmts[i]
-			props := stmtProps[i]
+		for i := range body.RoutineBodyStmtCount() {
 			o.Init(ctx, b.evalCtx, b.catalog)
 			f := o.Factory()
 
-			// Copy the expression into a new memo. Replace parameter references
-			// with argument datums.
-			var replaceFn norm.ReplaceFunc
-			replaceFn = func(e opt.Expr) opt.Expr {
-				if v, ok := e.(*memo.VariableExpr); ok {
-					if ord, ok := params.Find(v.Col); ok {
-						return f.ConstructConstVal(args[ord], v.Typ)
-					}
+			switch t := body.(type) {
+			case *memo.LazyRoutineBody:
+				if err = t.Build(ctx, b.semaCtx, b.evalCtx, b.catalog, f, args, argTypes, i); err != nil {
+					return err
 				}
-				return f.CopyAndReplaceDefault(e, replaceFn)
-			}
-			f.CopyAndReplace(originalMemo, stmt, props, replaceFn, allowOuterWithRefs)
+			case *memo.DefaultRoutineBody:
+				stmt := t.Body[i]
+				props := t.BodyProps[i]
 
-			if wrapRootExpr != nil {
-				wrapped := wrapRootExpr(f, f.Memo().RootExpr().(memo.RelExpr)).(memo.RelExpr)
-				f.Memo().SetRoot(wrapped, props)
+				// Copy the expression into a new memo. Replace parameter references
+				// with argument datums.
+				var replaceFn norm.ReplaceFunc
+				replaceFn = func(e opt.Expr) opt.Expr {
+					if v, ok := e.(*memo.VariableExpr); ok {
+						if ord, ok := t.Params.Find(v.Col); ok {
+							return f.ConstructConstVal(args[ord], v.Typ)
+						}
+					}
+					return f.CopyAndReplaceDefault(e, replaceFn)
+				}
+				f.CopyAndReplace(originalMemo, stmt, props, replaceFn, allowOuterWithRefs)
+
+				if wrapRootExpr != nil {
+					wrapped := wrapRootExpr(f, f.Memo().RootExpr().(memo.RelExpr)).(memo.RelExpr)
+					f.Memo().SetRoot(wrapped, props)
+				}
+			default:
+				return errors.AssertionFailedf("unexpected body type %T", t)
 			}
 
 			// Optimize the memo.
@@ -1222,7 +1231,7 @@ func (b *Builder) buildRoutinePlanGenerator(
 			// because non-zero resultBufferID means that expressions in the body will
 			// add directly to the result set, and the result of the last body
 			// statement will be ignored.
-			isFinalPlan := i == len(stmts)-1
+			isFinalPlan := i == body.RoutineBodyStmtCount()-1
 			var tailCalls map[opt.ScalarExpr]struct{}
 			if isFinalPlan && resultBufferID == 0 {
 				tailCalls = make(map[opt.ScalarExpr]struct{})

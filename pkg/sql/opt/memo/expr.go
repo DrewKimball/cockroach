@@ -728,20 +728,10 @@ type RoutineDefinition struct {
 	// RoutineLang indicates the language of the routine (SQL or PL/pgSQL).
 	RoutineLang tree.RoutineLanguage
 
-	// Params is the list of columns representing parameters of the function. The
-	// i-th column in the list corresponds to the i-th parameter of the function.
-	// During execution of the UDF, these columns are replaced with the arguments
-	// of the function invocation.
-	Params opt.ColList
-
-	// Body contains a relational expression for each statement in the function
-	// body. It is unset during construction of a recursive UDF.
-	Body []RelExpr
-
-	// BodyProps contains the physical properties with which each body statement
-	// should be optimized if it is rebuilt. Each props corresponds to the RelExpr
-	// at the same position in Body.
-	BodyProps []*physical.Required
+	// Body stores the information needed to get the plan for each body statement
+	// of the routine. It is either a DefaultRoutineBody or a LazyRoutineBody.
+	// See the respective comments for more information.
+	Body RoutineBody
 
 	// BodyStmts, if set, is the string representation of each statement in
 	// Body. It is only populated when verbose tracing is enabled.
@@ -770,6 +760,85 @@ type RoutineDefinition struct {
 	// RETURN NEXT and RETURN QUERY statements.
 	ResultBufferID RoutineResultBufferID
 }
+
+type RoutineBody interface {
+	RoutineBodyStmtCount() int
+	Equal(other RoutineBody) bool
+}
+
+// DefaultRoutineBody stores the pre-built optimizer plan for each routine body
+// statement.
+type DefaultRoutineBody struct {
+	// Params is the list of columns representing parameters of the function. The
+	// i-th column in the list corresponds to the i-th parameter of the function.
+	// During execution of the UDF, these columns are replaced with the arguments
+	// of the function invocation.
+	Params opt.ColList
+
+	// Body contains a relational expression for each statement in the function
+	// body. It is unset during construction of a recursive UDF.
+	Body []RelExpr
+
+	// BodyProps contains the physical properties with which each body statement
+	// should be optimized if it is rebuilt. Each props corresponds to the RelExpr
+	// at the same position in Body.
+	BodyProps []*physical.Required
+}
+
+// RoutineBodyStmtCount implements the RoutineBody interface.
+func (b *DefaultRoutineBody) RoutineBodyStmtCount() int {
+	return len(b.Body)
+}
+
+// Equal implements the RoutineBody interface.
+func (b *DefaultRoutineBody) Equal(other RoutineBody) bool {
+	otherBody, ok := other.(*DefaultRoutineBody)
+	if !ok || !b.Params.Equals(otherBody.Params) || len(b.Body) != len(otherBody.Body) {
+		return false
+	}
+	for i := range b.Body {
+		if b.Body[i] != otherBody.Body[i] || !b.BodyProps[i].Equals(otherBody.BodyProps[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// LazyRoutineBody is used to delay planning for the body statements of a
+// routine until it is invoked during execution. Currently, this is only needed
+// for routines with RECORD parameters/variables.
+type LazyRoutineBody struct {
+	// BuildStmt is used to build the plan for each routine body statement.
+	BuildStmt []LazyRoutineBuildFn
+}
+
+// RoutineBodyStmtCount implements the RoutineBody interface.
+func (b *LazyRoutineBody) RoutineBodyStmtCount() int {
+	return len(b.BuildStmt)
+}
+
+// Equal implements the RoutineBody interface.
+func (b *LazyRoutineBody) Equal(other RoutineBody) bool {
+	otherBody, ok := other.(*LazyRoutineBody)
+	if !ok || b != otherBody {
+		// Pointer equality is sufficient for lazy bodies.
+		return false
+	}
+	return true
+}
+
+// LazyRoutineBuildFn is used to lazily build the plan for a single routine body
+// statement. It builds the unoptimized plan with arguments inlined into the
+// provided factory.
+type LazyRoutineBuildFn func(
+	ctx context.Context,
+	semaCtx *tree.SemaContext,
+	evalCtx *eval.Context,
+	catalog cat.Catalog,
+	factory interface{},
+	args tree.Datums,
+	argTypes []*types.T,
+) error
 
 // ExceptionBlock contains the information needed to match and handle errors in
 // the EXCEPTION block of a routine defined with PLpgSQL.

@@ -325,10 +325,11 @@ func (b *Builder) buildRoutine(
 		if err != nil {
 			panic(err)
 		}
+		isRecordType := paramTyp.Identical(types.AnyTuple)
 		if param.IsInParam() {
 			argTyp := argTypes[inParamIdx]
 			paramTyp = maybeReplacePolymorphicType(paramTyp, polyArgTyp)
-			if paramTyp.Identical(types.AnyTuple) {
+			if isRecordType {
 				// This is a RECORD-typed parameter. Use the actual argument type. Note
 				// that we check that a SQL routine doesn't have RECORD parameters
 				// during routine creation.
@@ -355,9 +356,10 @@ func (b *Builder) buildRoutine(
 		// routines. This includes OUT parameters.
 		if o.Language == tree.RoutineLangPLpgSQL {
 			paramsForPLpgSQL = append(paramsForPLpgSQL, routineParam{
-				name:  param.Name,
-				typ:   paramTyp,
-				class: param.Class,
+				name:       param.Name,
+				typ:        paramTyp,
+				class:      param.Class,
+				recordType: isRecordType,
 			})
 		}
 	}
@@ -491,7 +493,7 @@ func (b *Builder) buildRoutine(
 			SetInsideDataSource(oldInsideDataSource).
 			SetIsProcedure(isProc)
 		plBuilder := newPLpgSQLBuilder(
-			b, options, def.Name, stmt.AST.Label, colRefs, paramsForPLpgSQL,
+			b, options, def.Name, stmt.AST.Label, paramsForPLpgSQL,
 			f.ResolvedType(), outScope, resultBufferID,
 		)
 		stmtScope := plBuilder.buildRootBlock(stmt.AST, bodyScope)
@@ -511,6 +513,11 @@ func (b *Builder) buildRoutine(
 		panic(errors.AssertionFailedf("unexpected language: %v", o.Language))
 	}
 
+	routineBody := &memo.DefaultRoutineBody{
+		Params:    params,
+		Body:      body,
+		BodyProps: bodyProps,
+	}
 	multiColDataSource := len(f.ResolvedType().TupleContents()) > 0 && oldInsideDataSource
 	routine := b.factory.ConstructUDFCall(
 		args,
@@ -524,10 +531,8 @@ func (b *Builder) buildRoutine(
 				MultiColDataSource: multiColDataSource,
 				RoutineType:        o.Type,
 				RoutineLang:        o.Language,
-				Body:               body,
-				BodyProps:          bodyProps,
+				Body:               routineBody,
 				BodyStmts:          bodyStmts,
-				Params:             params,
 				ResultBufferID:     resultBufferID,
 			},
 		},
@@ -877,9 +882,11 @@ func (b *Builder) buildDo(do *tree.DoBlock, inScope *scope) *scope {
 				Volatility:  volatility.Volatile,
 				RoutineType: tree.ProcedureRoutine,
 				RoutineLang: tree.RoutineLangPLpgSQL,
-				Body:        []memo.RelExpr{bodyScope.expr},
-				BodyProps:   []*physical.Required{bodyScope.makePhysicalProps()},
-				BodyStmts:   bodyStmts,
+				Body: &memo.DefaultRoutineBody{
+					Body:      []memo.RelExpr{bodyScope.expr},
+					BodyProps: []*physical.Required{bodyScope.makePhysicalProps()},
+				},
+				BodyStmts: bodyStmts,
 			},
 		},
 	)
@@ -895,8 +902,8 @@ func (b *Builder) buildPLpgSQLDoBody(do *plpgsqltree.DoBlock) *scope {
 	// Build an expression for each statement in the function body.
 	options := basePLOptions().WithIsProcedure().WithIsDoBlock()
 	plBuilder := newPLpgSQLBuilder(
-		b, options, doBlockRoutineName, do.Block.Label, nil, /* colRefs */
-		nil /* routineParams */, types.Void, nil /* outScope */, 0, /* resultBufferID */
+		b, options, doBlockRoutineName, do.Block.Label, nil, /* routineParams */
+		types.Void, nil /* outScope */, 0, /* resultBufferID */
 	)
 	// Allocate a fresh scope, since DO blocks do not take parameters or reference
 	// variables or columns from the calling context.
