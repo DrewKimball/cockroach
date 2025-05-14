@@ -191,6 +191,14 @@ func (s *sqlSymType) SetPos(pos int32) {
 	s.pos = pos
 }
 
+func (s *sqlSymType) LineNo() int32 {
+  return s.line
+}
+
+func (s *sqlSymType) SetLineNo(line int32) {
+  s.line = line
+}
+
 func (s *sqlSymType) Str() string {
 	return s.str
 }
@@ -1108,6 +1116,7 @@ func (u *sqlSymUnion) doBlockOption() tree.DoBlockOption {
 %union {
   id    int32
   pos   int32
+  line  int32
   str   string
   union sqlSymUnion
 }

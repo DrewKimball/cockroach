@@ -47,6 +47,11 @@ type Parser struct {
 type ParseOptions struct {
 	intType        *types.T
 	retainComments bool
+
+	// lineStart allows callers to specify the starting line number for error
+	// reporting. This is useful when a SQL statement is part of a larger
+	// script or when the SQL is being generated dynamically.
+	lineStart int32
 }
 
 var DefaultParseOptions = ParseOptions{
@@ -61,6 +66,11 @@ func (po ParseOptions) RetainComments() ParseOptions {
 
 func (po ParseOptions) WithIntType(t *types.T) ParseOptions {
 	po.intType = t
+	return po
+}
+
+func (po ParseOptions) WithLineStart(lineStart int32) ParseOptions {
+	po.lineStart = lineStart
 	return po
 }
 
@@ -166,6 +176,9 @@ func (p *Parser) parseWithDepth(
 	p.scanner.Init(sql)
 	if options.retainComments {
 		p.scanner.RetainComments()
+	}
+	if options.lineStart != 0 {
+		p.scanner.SetLineNo(options.lineStart)
 	}
 	defer p.scanner.Cleanup()
 	for {

@@ -50,6 +50,16 @@ func (s *jsonpathSymType) SetPos(pos int32) {
   s.pos = pos
 }
 
+// LineNo implements the scanner.ScanSymType interface.
+func (s *jsonpathSymType) LineNo() int32 {
+  return s.line
+}
+
+// SetLineNo implements the scanner.ScanSymType interface.
+func (s *jsonpathSymType) SetLineNo(line int32) {
+  s.line = line
+}
+
 // Str implements the scanner.ScanSymType interface.
 func (s *jsonpathSymType) Str() string {
   return s.str
@@ -188,10 +198,11 @@ func regexBinaryOp(left jsonpath.Path, regex string, flags string) (jsonpath.Ope
 %}
 
 %union{
-  id      int32
-  pos     int32
-  str     string
-  union   jsonpathSymUnion
+  id    int32
+  pos   int32
+  line  int32
+  str   string
+  union jsonpathSymUnion
 }
 
 /*

@@ -57,9 +57,10 @@ func (l *lexer) lastToken() jsonpathSymType {
 
 	if l.lastPos >= len(l.tokens) {
 		return jsonpathSymType{
-			id:  0,
-			pos: int32(len(l.in)),
-			str: "EOF",
+			id:   0,
+			line: l.tokens[len(l.tokens)-1].line,
+			pos:  int32(len(l.in)),
+			str:  "EOF",
 		}
 	}
 	return l.tokens[l.lastPos]

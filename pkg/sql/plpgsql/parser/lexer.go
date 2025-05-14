@@ -169,7 +169,8 @@ func (l *lexer) MakeExecSqlStmt() (*plpgsqltree.Execute, error) {
 	} else {
 		sql = l.getStr(startPos, endPos)
 	}
-	sqlStmt, err := parser.ParseOne(sql)
+	opts := parser.DefaultParseOptions.WithLineStart(firstTok.line)
+	sqlStmt, err := parser.ParseOneWithOptions(sql, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -250,6 +251,7 @@ func (l *lexer) MakeFetchOrMoveStmt(isMove bool) (plpgsqltree.Statement, error) 
 		// Push back the lookahead token so that it can be included.
 		l.PushBack(1)
 	}
+	lineNo := l.lastToken().line
 	prefix := "FETCH "
 	if isMove {
 		prefix = "MOVE "
@@ -259,7 +261,8 @@ func (l *lexer) MakeFetchOrMoveStmt(isMove bool) (plpgsqltree.Statement, error) 
 		return nil, err
 	}
 	sqlStr = prefix + sqlStr
-	sqlStmt, err := parser.ParseOne(sqlStr)
+	opts := parser.DefaultParseOptions.WithLineStart(lineNo)
+	sqlStmt, err := parser.ParseOneWithOptions(sqlStr, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -396,7 +399,8 @@ func (l *lexer) ParseReturnQuery() (plpgsqltree.Statement, error) {
 		return nil, err
 	}
 	queryStr := l.getStr(startPos, endPos)
-	stmt, err := parser.ParseOne(queryStr)
+	opts := parser.DefaultParseOptions.WithLineStart(l.getToken(startPos).line)
+	stmt, err := parser.ParseOneWithOptions(queryStr, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -572,12 +576,20 @@ func (l *lexer) lastToken() plpgsqlSymType {
 
 	if l.lastPos >= len(l.tokens) {
 		return plpgsqlSymType{
-			id:  0,
-			pos: int32(len(l.in)),
-			str: "EOF",
+			id:   0,
+			line: l.tokens[len(l.tokens)-1].line,
+			pos:  int32(len(l.in)),
+			str:  "EOF",
 		}
 	}
 	return l.tokens[l.lastPos]
+}
+
+func (l *lexer) getToken(pos int) plpgsqlSymType {
+	if pos < 0 || pos >= len(l.tokens) {
+		return plpgsqlSymType{}
+	}
+	return l.tokens[pos]
 }
 
 // SetStmt is called from the parser when the statement is constructed.
@@ -626,7 +638,9 @@ func (l *lexer) Unimplemented(feature string) {
 func (l *lexer) ParseExpr(sqlStr string) (plpgsqltree.Expr, error) {
 	// Use ParseExprs instead of ParseExpr in order to correctly handle the case
 	// when multiple expressions are incorrectly passed.
-	exprs, err := parser.ParseExprs([]string{sqlStr})
+	lastTok := l.lastToken()
+	opts := parser.DefaultParseOptions.WithLineStart(lastTok.line)
+	exprs, err := parser.ParseExprsWithOptions([]string{sqlStr}, opts)
 	if err != nil {
 		return nil, err
 	}

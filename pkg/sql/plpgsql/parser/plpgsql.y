@@ -51,6 +51,14 @@ func (s *plpgsqlSymType) SetPos(pos int32) {
   s.pos = pos
 }
 
+func (s *plpgsqlSymType) LineNo() int32 {
+  return s.line
+}
+
+func (s *plpgsqlSymType) SetLineNo(line int32) {
+  s.line = line
+}
+
 func (s *plpgsqlSymType) Str() string {
   return s.str
 }
@@ -338,6 +346,7 @@ func (u *plpgsqlSymUnion) doBlockOption() tree.DoBlockOption {
 %union {
   id    int32
   pos   int32
+  line  int32
   str   string
   union plpgsqlSymUnion
 }

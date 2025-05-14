@@ -41,6 +41,8 @@ type ScanSymType interface {
 	SetID(int32)
 	Pos() int32
 	SetPos(int32)
+	LineNo() int32
+	SetLineNo(int32)
 	Str() string
 	SetStr(string)
 	UnionVal() interface{}
@@ -51,6 +53,7 @@ type ScanSymType interface {
 type Scanner struct {
 	in            string
 	pos           int
+	lineNo        int32
 	bytesPrealloc []byte
 
 	// Comments is the list of parsed comments from the statement.
@@ -87,8 +90,9 @@ func (s *Scanner) Pos() int {
 // Init initializes a new Scanner that will process str.
 func (s *Scanner) Init(str string) {
 	*s = Scanner{
-		in:  str,
-		pos: 0,
+		in:     str,
+		pos:    0,
+		lineNo: 1,
 		// Preallocate some buffer space for identifiers etc.
 		bytesPrealloc: make([]byte, len(str)),
 	}
@@ -102,6 +106,13 @@ func (s *Scanner) RetainComments() {
 
 func (s *Scanner) ResetComments() {
 	s.Comments = nil
+}
+
+// SetLineNo sets the initial line number for the scanner. This is used to
+// ensure that the line number is correct when the scanner is used for an
+// embedded SQL statement or expression.
+func (s *Scanner) SetLineNo(lineNo int32) {
+	s.lineNo = lineNo
 }
 
 // Cleanup is used to avoid holding on to memory unnecessarily (for the cases
@@ -148,6 +159,7 @@ func (s *Scanner) finishString(buf []byte) string {
 func (s *Scanner) scanSetup(lval ScanSymType, allowComments bool) (int, bool) {
 	lval.SetID(0)
 	lval.SetPos(int32(s.pos))
+	lval.SetLineNo(s.lineNo)
 	lval.SetStr("EOF")
 	s.quoted = false
 	s.lastAttemptedID = 0
@@ -159,11 +171,13 @@ func (s *Scanner) scanSetup(lval ScanSymType, allowComments bool) (int, bool) {
 	ch := s.next()
 	if ch == eof {
 		lval.SetPos(int32(s.pos))
+		lval.SetLineNo(s.lineNo)
 		return ch, false
 	}
 
 	lval.SetID(int32(ch))
 	lval.SetPos(int32(s.pos - 1))
+	lval.SetLineNo(s.lineNo)
 	lval.SetStr(s.in[lval.Pos():s.pos])
 	s.lastAttemptedID = int32(ch)
 	return ch, false
@@ -529,6 +543,7 @@ func (s *Scanner) skipWhitespace(lval ScanSymType, allowComments bool) (newline,
 		ch := s.peek()
 		if ch == '\n' {
 			s.pos++
+			s.lineNo++
 			newline = true
 			continue
 		}
@@ -555,6 +570,7 @@ func (s *Scanner) skipWhitespace(lval ScanSymType, allowComments bool) (newline,
 // ScanComment scans the input as a comment.
 func (s *Scanner) ScanComment(lval ScanSymType) (present, ok bool) {
 	start := s.pos
+	lineNo := s.lineNo
 	ch := s.peek()
 
 	if ch == '/' {
@@ -587,6 +603,7 @@ func (s *Scanner) ScanComment(lval ScanSymType) (present, ok bool) {
 			case eof:
 				lval.SetID(lexbase.ERROR)
 				lval.SetPos(int32(start))
+				lval.SetLineNo(lineNo)
 				lval.SetStr("unterminated comment")
 				return false, false
 			}
@@ -1198,9 +1215,10 @@ func FirstLexicalToken(sql string) (tok int) {
 // fakeSym is a simplified symbol type for use by
 // HasMultipleStatements.
 type fakeSym struct {
-	id  int32
-	pos int32
-	s   string
+	id   int32
+	pos  int32
+	line int32
+	s    string
 }
 
 var _ ScanSymType = (*fakeSym)(nil)
@@ -1209,6 +1227,8 @@ func (s fakeSym) ID() int32                 { return s.id }
 func (s *fakeSym) SetID(id int32)           { s.id = id }
 func (s fakeSym) Pos() int32                { return s.pos }
 func (s *fakeSym) SetPos(p int32)           { s.pos = p }
+func (s fakeSym) LineNo() int32             { return s.line }
+func (s *fakeSym) SetLineNo(l int32)        { s.line = l }
 func (s fakeSym) Str() string               { return s.s }
 func (s *fakeSym) SetStr(v string)          { s.s = v }
 func (s fakeSym) UnionVal() interface{}     { return nil }

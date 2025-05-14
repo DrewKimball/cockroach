@@ -43,6 +43,14 @@ func (s *pgreplSymType) SetPos(pos int32) {
   s.pos = pos
 }
 
+func (s *pgreplSymType) LineNo() int32 {
+  return s.line
+}
+
+func (s *pgreplSymType) SetLineNo(line int32) {
+  s.line = line
+}
+
 func (s *pgreplSymType) Str() string {
   return s.str
 }
@@ -119,6 +127,7 @@ func (u *pgreplSymUnion) lsn() lsn.LSN {
 %union {
   id    int32
   pos   int32
+  line  int32
   str   string
   union pgreplSymUnion
 }
