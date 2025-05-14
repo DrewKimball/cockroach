@@ -18,7 +18,8 @@ error
 ANALYZE
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ANALYZE
        ^
 HINT: try \h ANALYZE
@@ -27,7 +28,8 @@ error
 ANALYSE
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ANALYSE
        ^
 HINT: try \h ANALYZE

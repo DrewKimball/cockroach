@@ -99,7 +99,8 @@ error
 CREATE USER foo PASSWORD bar
 ----
 at or near "bar": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE USER foo PASSWORD bar
                          ^
 HINT: try \h CREATE ROLE
@@ -117,7 +118,8 @@ error
 CREATE USER foo ENCRYPTED PASSWORD bar
 ----
 at or near "bar": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE USER foo ENCRYPTED PASSWORD bar
                                    ^
 HINT: try \h CREATE ROLE
@@ -144,7 +146,8 @@ error
 CREATE USER foo WITH ENCRYPTED PASSWORD bar
 ----
 at or near "bar": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE USER foo WITH ENCRYPTED PASSWORD bar
                                         ^
 HINT: try \h CREATE ROLE
@@ -171,7 +174,8 @@ error
 CREATE USER foo WITH PASSWORD
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE USER foo WITH PASSWORD
                              ^
 HINT: try \h CREATE ROLE

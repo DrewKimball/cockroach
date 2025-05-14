@@ -421,7 +421,8 @@ DO;
 END
 ----
 at or near ";": syntax error
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 BEGIN
 DO;
   ^
@@ -433,7 +434,8 @@ DO $$ BEGIN DO $$ BEGIN END $$; END $$;
 END
 ----
 at or near "begin": syntax error
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 BEGIN
 DO $$ BEGIN DO $$ BEGIN END $$; END $$;
                   ^

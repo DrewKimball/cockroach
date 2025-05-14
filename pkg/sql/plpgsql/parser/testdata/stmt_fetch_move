@@ -167,7 +167,8 @@ FETCH emp_cur INTO;
 END
 ----
 at or near "into": syntax error: missing expression
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
 FETCH emp_cur INTO;
@@ -180,7 +181,8 @@ FETCH emp_cur;
 END
 ----
 at or near "emp_cur": syntax error: invalid syntax for FETCH
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
 FETCH emp_cur;
@@ -193,10 +195,12 @@ MOVE NEXT FROM emp_cur INTO x, y;
 END
 ----
 at or near ";": at or near "x": syntax error
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 x, y
 ^
 --
+at line 3
 source SQL:
 DECLARE
 BEGIN

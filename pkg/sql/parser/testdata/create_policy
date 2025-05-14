@@ -101,7 +101,8 @@ error
 CREATE POLICY a.p1 on xy USING (true);
 ----
 at or near ".": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE POLICY a.p1 on xy USING (true)
                ^
 HINT: try \h CREATE POLICY
@@ -111,7 +112,8 @@ error
 CREATE POLICY p1 on xy USING true;
 ----
 at or near "true": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE POLICY p1 on xy USING true
                              ^
 HINT: try \h CREATE POLICY
@@ -121,7 +123,8 @@ error
 CREATE POLICY p1 on xy WITH CHECK true;
 ----
 at or near "true": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE POLICY p1 on xy WITH CHECK true
                                   ^
 HINT: try \h CREATE POLICY
@@ -131,7 +134,8 @@ error
 CREATE POLICY p1 on xy WITH CHECK (true) USING (true) TO public;
 ----
 at or near "to": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE POLICY p1 on xy WITH CHECK (true) USING (true) TO public
                                                       ^
 
@@ -140,6 +144,7 @@ error
 CREATE POLICY p1 on xy WITH CHECK (true) USING (true) FOR SELECT;
 ----
 at or near "for": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE POLICY p1 on xy WITH CHECK (true) USING (true) FOR SELECT
                                                       ^

@@ -114,7 +114,8 @@ BEGIN
 END
 ----
 at or near "EOF": syntax error: mismatched parentheses
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 BEGIN
   RETURN NEXT (foo;
 END
@@ -126,10 +127,12 @@ BEGIN
 END
 ----
 at or near "xy": at or near "select": syntax error
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 SET ROW (SELECT * FROM xy)
          ^
 --
+at line 2
 source SQL:
 BEGIN
   RETURN NEXT SELECT * FROM xy;

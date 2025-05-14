@@ -52,7 +52,8 @@ error
 DROP POLICY p;
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 DROP POLICY p
              ^
 HINT: try \h DROP POLICY
@@ -62,7 +63,8 @@ error
 DROP POLICY db.schema.xy;
 ----
 at or near ".": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 DROP POLICY db.schema.xy
               ^
 HINT: try \h DROP POLICY
@@ -72,7 +74,8 @@ error
 DROP POLICY foo.p1 on xy;
 ----
 at or near ".": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 DROP POLICY foo.p1 on xy
                ^
 HINT: try \h DROP POLICY

@@ -26,7 +26,8 @@ error
 ALTER PROCEDURE p()
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER PROCEDURE p()
                    ^
 HINT: try \h ALTER PROCEDURE
@@ -35,7 +36,8 @@ error
 ALTER PROCEDURE p() IMMUTABLE
 ----
 at or near "immutable": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER PROCEDURE p() IMMUTABLE
                     ^
 HINT: try \h ALTER PROCEDURE
@@ -44,7 +46,8 @@ error
 ALTER PROCEDURE p() STRICT
 ----
 at or near "strict": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER PROCEDURE p() STRICT
                     ^
 HINT: try \h ALTER PROCEDURE
@@ -53,7 +56,8 @@ error
 ALTER PROCEDURE p() LEAKPROOF
 ----
 at or near "leakproof": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER PROCEDURE p() LEAKPROOF
                     ^
 HINT: try \h ALTER PROCEDURE

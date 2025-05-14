@@ -125,7 +125,8 @@ END
 ----
 ----
 at or near ";": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
   var1 integer := 30;
   var2 ALIAS FOR quantity;
@@ -178,7 +179,8 @@ END
 ----
 ----
 at or near "(": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 DECLARE
   var1 NO SCROLL CURSOR (arg1 INTEGER) FOR SELECT * FROM t1 WHERE id = arg1;
                         ^
@@ -203,7 +205,8 @@ BEGIN
 END
 ----
 at or near "four": syntax error: unable to parse type of variable declaration
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 DECLARE
   var1 one.two.three.four;
                      ^
@@ -215,7 +218,8 @@ BEGIN
 END
 ----
 at or near "four": syntax error: unable to parse type of variable declaration
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 DECLARE
   var1 one.two.three.four := 0;
                      ^
@@ -227,7 +231,8 @@ BEGIN
 END
 ----
 at or near "1": syntax error: unable to parse type of variable declaration
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 DECLARE
   var1 1;
        ^
@@ -239,7 +244,8 @@ BEGIN
 END
 ----
 at or near "foo": syntax error: unable to parse type of variable declaration
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 DECLARE
   var1 'foo';
        ^
@@ -251,7 +257,8 @@ BEGIN
 END
 ----
 at or near "rowtype": syntax error: unable to parse type of variable declaration
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 DECLARE
   var1 xy%ROWTYPE;
           ^
@@ -267,7 +274,8 @@ BEGIN
 END
 ----
 at or near "type": syntax error: unable to parse type of variable declaration
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
   var1 INT;
   var2 var1%TYPE;

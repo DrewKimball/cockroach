@@ -145,7 +145,8 @@ BEGIN
 END
 ----
 at or near "EOF": syntax error: mismatched parentheses
-DETAIL: source SQL:
+DETAIL: at line 4
+source SQL:
 DECLARE
 BEGIN
   RETURN (NULL;
@@ -159,7 +160,8 @@ BEGIN
 END
 ----
 at or near "null": syntax error: mismatched parentheses
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   RETURN  NULL);
@@ -172,7 +174,8 @@ BEGIN
 END
 ----
 at or near "EOF": syntax error: mismatched parentheses
-DETAIL: source SQL:
+DETAIL: at line 4
+source SQL:
 DECLARE
 BEGIN
   RETURN (1, ('string');
@@ -186,7 +189,8 @@ BEGIN
 END
 ----
 at or near "string": syntax error: query returned 2 columns
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   RETURN 1, 'string';
@@ -199,7 +203,8 @@ BEGIN
 END
 ----
 at or near ")": syntax error: query returned 2 columns
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   RETURN 1, (2, 3, 4, 5);

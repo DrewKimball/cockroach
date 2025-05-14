@@ -351,7 +351,8 @@ error
 DO;
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 DO
   ^
 HINT: try \h DO
@@ -361,7 +362,8 @@ error
 DO $$ BEGIN DO $$ BEGIN END $$; END $$;
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BEGIN DO
         ^
 

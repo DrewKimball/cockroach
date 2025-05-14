@@ -29,7 +29,8 @@ error
 TABLE abc[TRUE]
 ----
 at or near "[": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 TABLE abc[TRUE]
          ^
 

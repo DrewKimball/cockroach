@@ -164,7 +164,8 @@ END LOOP different_label;
 END
 ----
 at or near ";": syntax error: end label "different_label" differs from block's label "mathing"
-DETAIL: source SQL:
+DETAIL: at line 8
+source SQL:
 DECLARE
 BEGIN
 x := 1;
@@ -187,7 +188,8 @@ END LOOP nonempty_label;
 END
 ----
 at or near ";": syntax error: end label "nonempty_label" specified for unlabeled block
-DETAIL: source SQL:
+DETAIL: at line 7
+source SQL:
 DECLARE
 BEGIN
 x := 1;

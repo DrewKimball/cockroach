@@ -1222,7 +1222,8 @@ error
 SELECT * FROM t WHERE k=
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SELECT * FROM t WHERE k=
                         ^
 
@@ -2038,7 +2039,8 @@ error
 SELECT avg(1) OVER (ROWS UNBOUNDED FOLLOWING) FROM t
 ----
 at or near "following": syntax error: frame start cannot be UNBOUNDED FOLLOWING
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SELECT avg(1) OVER (ROWS UNBOUNDED FOLLOWING) FROM t
                                    ^
 
@@ -2046,7 +2048,8 @@ error
 SELECT avg(1) OVER (ROWS 1 FOLLOWING) FROM t
 ----
 at or near "following": syntax error: frame starting from following row cannot end with current row
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SELECT avg(1) OVER (ROWS 1 FOLLOWING) FROM t
                            ^
 
@@ -2054,7 +2057,8 @@ error
 SELECT avg(1) OVER (ROWS BETWEEN UNBOUNDED FOLLOWING AND UNBOUNDED FOLLOWING) FROM t
 ----
 at or near "following": syntax error: frame start cannot be UNBOUNDED FOLLOWING
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SELECT avg(1) OVER (ROWS BETWEEN UNBOUNDED FOLLOWING AND UNBOUNDED FOLLOWING) FROM t
                                                                    ^
 
@@ -2062,7 +2066,8 @@ error
 SELECT avg(1) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED PRECEDING) FROM t
 ----
 at or near "preceding": syntax error: frame end cannot be UNBOUNDED PRECEDING
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SELECT avg(1) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED PRECEDING) FROM t
                                                                    ^
 
@@ -2070,7 +2075,8 @@ error
 SELECT avg(1) OVER (ROWS BETWEEN CURRENT ROW AND 1 PRECEDING) FROM t
 ----
 at or near "preceding": syntax error: frame starting from current row cannot have preceding rows
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SELECT avg(1) OVER (ROWS BETWEEN CURRENT ROW AND 1 PRECEDING) FROM t
                                                    ^
 
@@ -2078,7 +2084,8 @@ error
 SELECT avg(1) OVER (ROWS BETWEEN 1 FOLLOWING AND 1 PRECEDING) FROM t
 ----
 at or near "preceding": syntax error: frame starting from following row cannot have preceding rows
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SELECT avg(1) OVER (ROWS BETWEEN 1 FOLLOWING AND 1 PRECEDING) FROM t
                                                    ^
 
@@ -2086,7 +2093,8 @@ error
 SELECT avg(1) OVER (ROWS BETWEEN 1 FOLLOWING AND CURRENT ROW) FROM t
 ----
 at or near "row": syntax error: frame starting from following row cannot have preceding rows
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SELECT avg(1) OVER (ROWS BETWEEN 1 FOLLOWING AND CURRENT ROW) FROM t
                                                          ^
 
@@ -2134,7 +2142,8 @@ error
 SELECT percentile_disc(0.50) WITHIN GROUP (ORDER BY f, s) FROM x;
 ----
 at or near ")": syntax error: multiple ORDER BY clauses are not supported in this function
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SELECT percentile_disc(0.50) WITHIN GROUP (ORDER BY f, s) FROM x
                                                         ^
 

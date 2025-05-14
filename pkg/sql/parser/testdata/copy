@@ -120,7 +120,8 @@ error
 COPY t TO 'file'
 ----
 at or near "file": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY t TO 'file'
           ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -155,7 +156,8 @@ error
 COPY (SELECT * FROM t) TO 'file'
 ----
 at or near "file": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY (SELECT * FROM t) TO 'file'
                           ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -231,7 +233,8 @@ error
 COPY "copytab" FROM STDIN (FORMAT  'TEXT')
 ----
 at or near "TEXT": syntax error: COPY format "TEXT" not recognized
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY "copytab" FROM STDIN (FORMAT  'TEXT')
                                    ^
 
@@ -239,7 +242,8 @@ error
 COPY "copytab" FROM STDIN (FORMAT  'abc')
 ----
 at or near "abc": syntax error: COPY format "abc" not recognized
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY "copytab" FROM STDIN (FORMAT  'abc')
                                    ^
 
@@ -247,7 +251,8 @@ error
 COPY "copytab" FROM STDIN (FORMAT     csv, DELIMITER '/', ESCAPE '.', DELIMITER '%')
 ----
 at or near "%": syntax error: delimiter option specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY "copytab" FROM STDIN (FORMAT     csv, DELIMITER '/', ESCAPE '.', DELIMITER '%')
                                                                                 ^
 
@@ -255,7 +260,8 @@ error
 COPY "copytab" FROM STDIN (FORMAT text, HEADER, FORMAT csv)
 ----
 at or near "csv": syntax error: format option specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY "copytab" FROM STDIN (FORMAT text, HEADER, FORMAT csv)
                                                        ^
 
@@ -263,7 +269,8 @@ error
 COPY "copytab" FROM STDIN (ESCAPE '%', HEADER false, NULL '.', FORCE_NOT_NULL (column))
 ----
 at or near "(": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY "copytab" FROM STDIN (ESCAPE '%', HEADER false, NULL '.', FORCE_NOT_NULL (column))
                                                                               ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -273,7 +280,8 @@ error
 COPY "copytab" FROM STDIN (FORMAT CSV, FORCE_NULL (c1, c2, c3))
 ----
 at or near "(": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY "copytab" FROM STDIN (FORMAT CSV, FORCE_NULL (c1, c2, c3))
                                                   ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -283,7 +291,8 @@ error
 COPY "copytab" FROM STDIN (ESCAPE '/',     FORCE_QUOTE (c1, c2))
 ----
 at or near "(": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY "copytab" FROM STDIN (ESCAPE '/',     FORCE_QUOTE (c1, c2))
                                                        ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -293,7 +302,8 @@ error
 COPY "copytab" FROM STDIN (HEADER, OIDS)
 ----
 at or near ")": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY "copytab" FROM STDIN (HEADER, OIDS)
                                        ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -343,7 +353,8 @@ error
 COPY (SELECT * FROM t) TO STDOUT (HEADER false, FORMAT CSV, HEADER true)
 ----
 at or near "true": syntax error: header option specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY (SELECT * FROM t) TO STDOUT (HEADER false, FORMAT CSV, HEADER true)
                                                                    ^
 
@@ -351,7 +362,8 @@ error
 COPY (SELECT * FROM t) TO STDOUT (ESCAPE '%', HEADER false, NULL '.', FORCE_NOT_NULL (column))
 ----
 at or near "(": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY (SELECT * FROM t) TO STDOUT (ESCAPE '%', HEADER false, NULL '.', FORCE_NOT_NULL (column))
                                                                                      ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -361,7 +373,8 @@ error
 COPY (SELECT * FROM t) TO STDOUT (FORMAT CSV, FORCE_NULL (c1, c2, c3))
 ----
 at or near "(": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY (SELECT * FROM t) TO STDOUT (FORMAT CSV, FORCE_NULL (c1, c2, c3))
                                                          ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -371,7 +384,8 @@ error
 COPY (SELECT * FROM t) TO STDOUT (ESCAPE '/',     FORCE_QUOTE (c1, c2))
 ----
 at or near "(": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY (SELECT * FROM t) TO STDOUT (ESCAPE '/',     FORCE_QUOTE (c1, c2))
                                                               ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -381,7 +395,8 @@ error
 COPY (SELECT * FROM t) TO STDOUT (HEADER, OIDS)
 ----
 at or near ")": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY (SELECT * FROM t) TO STDOUT (HEADER, OIDS)
                                               ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -391,7 +406,8 @@ error
 COPY (EXPLAIN SELECT * FROM t) TO STDOUT
 ----
 at or near "explain": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY (EXPLAIN SELECT * FROM t) TO STDOUT
       ^
 
@@ -424,6 +440,7 @@ error
 COPY "copytab" FROM STDIN (FORMAT     csv, ENCODING 'abc', ENCODING 'def')
 ----
 at or near "def": syntax error: encoding option specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 COPY "copytab" FROM STDIN (FORMAT     csv, ENCODING 'abc', ENCODING 'def')
                                                                     ^

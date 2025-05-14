@@ -200,7 +200,8 @@ error
 CREATE OR REPLACE FUNCTION f(a INT) RETURNS INT LANGUAGE SQL BEGIN ATOMIC SELECT 1 END
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE OR REPLACE FUNCTION f(a INT) RETURNS INT LANGUAGE SQL BEGIN ATOMIC SELECT 1 END
                                                                                       ^
 HINT: try \h CREATE FUNCTION
@@ -209,7 +210,8 @@ error
 CREATE OR REPLACE FUNCTION f(a INT) RETURNS INT LANGUAGE SQL BEGIN ATOMIC SELECT 1; CREATE OR REPLACE FUNCTION g() RETURNS INT BEGIN ATOMIC SELECT 2; END;
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE OR REPLACE FUNCTION f(a INT) RETURNS INT LANGUAGE SQL BEGIN ATOMIC SELECT 1; CREATE OR REPLACE FUNCTION g() RETURNS INT BEGIN ATOMIC SELECT 2; END;
                                                                                                                                                           ^
 HINT: try \h CREATE FUNCTION
@@ -278,7 +280,8 @@ error
 CREATE OR REPLACE FUNCTION f(VARIADIC a int = 7) RETURNS INT AS 'SELECT 1' LANGUAGE SQL
 ----
 at or near "variadic": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE OR REPLACE FUNCTION f(VARIADIC a int = 7) RETURNS INT AS 'SELECT 1' LANGUAGE SQL
                              ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -289,7 +292,8 @@ CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT TRANSFORM AS 'SELECT 1' LANG
 ----
 ----
 at or near "transform": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT TRANSFORM AS 'SELECT 1' LANGUAGE SQL
                                                     ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -310,7 +314,8 @@ CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT WINDOW AS 'SELECT 1' LANGUAG
 ----
 ----
 at or near "window": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT WINDOW AS 'SELECT 1' LANGUAGE SQL
                                                     ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -331,7 +336,8 @@ CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT ROWS 123 AS 'SELECT 1' LANGU
 ----
 ----
 at or near "123": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT ROWS 123 AS 'SELECT 1' LANGUAGE SQL
                                                          ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -352,7 +358,8 @@ CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT SUPPORT abc AS 'SELECT 1' LA
 ----
 ----
 at or near "abc": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT SUPPORT abc AS 'SELECT 1' LANGUAGE SQL
                                                             ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -373,7 +380,8 @@ CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT SET a = 123 AS 'SELECT 1' LA
 ----
 ----
 at or near "set": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT SET a = 123 AS 'SELECT 1' LANGUAGE SQL
                                                     ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -394,7 +402,8 @@ CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT PARALLEL RESTRICTED AS 'SELE
 ----
 ----
 at or near "parallel": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT PARALLEL RESTRICTED AS 'SELECT 1' LANGUAGE SQL
                                                     ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -415,7 +424,8 @@ CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT COST 123 AS 'SELECT 1' LANGU
 ----
 ----
 at or near "123": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE OR REPLACE FUNCTION f(a int = 7) RETURNS INT COST 123 AS 'SELECT 1' LANGUAGE SQL
                                                          ^
 HINT: You have attempted to use a feature that is not yet implemented.

@@ -86,7 +86,8 @@ error
 ALTER POLICY p1
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER POLICY p1
                ^
 HINT: try \h ALTER POLICY
@@ -96,7 +97,8 @@ error
 ALTER POLICY schema.p1 on schema.t1
 ----
 at or near ".": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER POLICY schema.p1 on schema.t1
                    ^
 HINT: try \h ALTER POLICY
@@ -106,7 +108,8 @@ error
 ALTER POLICY p1 on t1 RENAME to p2 TO public
 ----
 at or near "to": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER POLICY p1 on t1 RENAME to p2 TO public
                                    ^
 
@@ -115,7 +118,8 @@ error
 ALTER POLICY p1 on t1 RENAME to p2 USING (true)
 ----
 at or near "using": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER POLICY p1 on t1 RENAME to p2 USING (true)
                                    ^
 
@@ -124,7 +128,8 @@ error
 ALTER POLICY p1 on t1 RENAME to p2 WITH CHECK (true)
 ----
 at or near "with": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER POLICY p1 on t1 RENAME to p2 WITH CHECK (true)
                                    ^
 
@@ -133,6 +138,7 @@ error
 ALTER POLICY p1 on t1 WITH CHECK (true) USING (true) TO public;
 ----
 at or near "to": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER POLICY p1 on t1 WITH CHECK (true) USING (true) TO public
                                                      ^

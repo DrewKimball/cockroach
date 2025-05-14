@@ -2211,7 +2211,8 @@ error
 SHOW TRIGGER FROM foo;
 ----
 at or near "from": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SHOW TRIGGER FROM foo
              ^
 HINT: try \h SHOW TRIGGERS
@@ -2220,7 +2221,8 @@ error
 SHOW TRIGGERS ON foo;
 ----
 at or near "on": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SHOW TRIGGERS ON foo
               ^
 HINT: try \h SHOW TRIGGERS
@@ -2229,7 +2231,8 @@ error
 SHOW TRIGGERS FOR foo;
 ----
 at or near "for": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SHOW TRIGGERS FOR foo
               ^
 HINT: try \h SHOW TRIGGERS
@@ -2254,7 +2257,8 @@ error
 SHOW CREATE TRIGGER foo ON TABLE bar;
 ----
 at or near "table": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SHOW CREATE TRIGGER foo ON TABLE bar
                            ^
 HINT: try \h SHOW CREATE
@@ -2263,7 +2267,8 @@ error
 SHOW CREATE TRIGGER foo FROM bar;
 ----
 at or near "from": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SHOW CREATE TRIGGER foo FROM bar
                         ^
 HINT: try \h SHOW CREATE
@@ -2272,7 +2277,8 @@ error
 SHOW CREATE TRIGGER foo;
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SHOW CREATE TRIGGER foo
                        ^
 HINT: try \h SHOW CREATE
@@ -2281,6 +2287,7 @@ error
 SHOW CREATE TRIGGERS ON foo;
 ----
 at or near "on": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SHOW CREATE TRIGGERS ON foo
                      ^

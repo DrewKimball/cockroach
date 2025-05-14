@@ -204,7 +204,8 @@ error
 UPDATE kv SET k[0] = 9
 ----
 at or near "[": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 UPDATE kv SET k[0] = 9
                ^
 HINT: try \h UPDATE

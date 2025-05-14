@@ -625,7 +625,8 @@ error
 PAUSE ALL JOBS
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 PAUSE ALL JOBS
               ^
 HINT: try \h PAUSE ALL JOBS

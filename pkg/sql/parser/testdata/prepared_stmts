@@ -98,7 +98,8 @@ error
 PREPARE a AS BACKUP DATABASE a TO 'b'
 ----
 at or near "b": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 PREPARE a AS BACKUP DATABASE a TO 'b'
                                   ^
 HINT: try \h BACKUP
@@ -107,7 +108,8 @@ error
 PREPARE a (STRING) AS BACKUP DATABASE a TO $1
 ----
 at or near "1": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 PREPARE a (STRING) AS BACKUP DATABASE a TO $1
                                            ^
 HINT: try \h BACKUP
@@ -116,7 +118,8 @@ error
 PREPARE a AS RESTORE DATABASE a FROM 'b'
 ----
 at or near "EOF": syntax error: The `RESTORE <targets> FROM <backupURI>` syntax is no longer supported. Please use `RESTORE <targets> FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 PREPARE a AS RESTORE DATABASE a FROM 'b'
                                         ^
 HINT: try \h RESTORE
@@ -125,7 +128,8 @@ error
 PREPARE a (STRING) AS RESTORE DATABASE a FROM $1
 ----
 at or near "EOF": syntax error: The `RESTORE <targets> FROM <backupURI>` syntax is no longer supported. Please use `RESTORE <targets> FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 PREPARE a (STRING) AS RESTORE DATABASE a FROM $1
                                                 ^
 HINT: try \h RESTORE

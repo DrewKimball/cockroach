@@ -120,7 +120,8 @@ BEGIN
 END
 ----
 at or near ";": syntax error: INTO used with a command that cannot return data
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   INSERT INTO t1 VALUES (1,2) INTO y;
@@ -330,7 +331,8 @@ BEGIN
 END
 ----
 at or near "2": syntax error: mismatched parentheses
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   INSERT INTO t1 VALUES 1,2);
@@ -343,7 +345,8 @@ BEGIN
 END
 ----
 at or near "EOF": syntax error: mismatched parentheses
-DETAIL: source SQL:
+DETAIL: at line 4
+source SQL:
 DECLARE
 BEGIN
   INSERT INTO t1 VALUES (1,2;
@@ -357,7 +360,8 @@ BEGIN
 END
 ----
 at or near "EOF": syntax error: mismatched parentheses
-DETAIL: source SQL:
+DETAIL: at line 4
+source SQL:
 DECLARE
 BEGIN
   INSERT INTO t1 (VALUES (1,2);
@@ -426,7 +430,8 @@ BEGIN
 END
 ----
 at or near ";": syntax error: INTO used with a command that cannot return data
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   UPSERT INTO t1 VALUES (1,2) INTO y;

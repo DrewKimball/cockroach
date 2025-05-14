@@ -119,7 +119,8 @@ BEGIN
 END
 ----
 at or near ".": syntax error
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 BEGIN
   a.b.c := 100;
      ^
@@ -131,7 +132,8 @@ BEGIN
 END
 ----
 at or near ":": syntax error: missing expression
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   a :=;
@@ -144,7 +146,8 @@ johnny := (NULL;
 END
 ----
 at or near "EOF": syntax error: mismatched parentheses
-DETAIL: source SQL:
+DETAIL: at line 4
+source SQL:
 DECLARE
 BEGIN
 johnny := (NULL;
@@ -158,7 +161,8 @@ johnny := NULL);
 END
 ----
 at or near "null": syntax error: mismatched parentheses
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
 johnny := NULL);
@@ -171,7 +175,8 @@ johnny := (1 + (2);
 END
 ----
 at or near "EOF": syntax error: mismatched parentheses
-DETAIL: source SQL:
+DETAIL: at line 4
+source SQL:
 DECLARE
 BEGIN
 johnny := (1 + (2);
@@ -185,7 +190,8 @@ BEGIN
 END
 ----
 at or near ";": syntax error: query returned 2 columns
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   a := 1, 'string';
@@ -198,7 +204,8 @@ BEGIN
 END
 ----
 at or near ";": syntax error: query returned 2 columns
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   a := 1, (2, 3, 4, 5);
@@ -211,7 +218,8 @@ BEGIN
 END
 ----
 at or near ";": syntax error: query returned 5 columns
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   a := 1, (2, 3, 4, 5), 'abcd', true, ((1));

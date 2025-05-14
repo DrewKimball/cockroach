@@ -266,6 +266,7 @@ error
 CREATE SEQUENCE s1 AS abc
 ----
 at or near "EOF": syntax error: type "abc" does not exist
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE SEQUENCE s1 AS abc
                          ^

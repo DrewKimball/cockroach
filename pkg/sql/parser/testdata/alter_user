@@ -2,7 +2,8 @@ error
 ALTER USER foo PASSWORD bar
 ----
 at or near "bar": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER USER foo PASSWORD bar
                         ^
 HINT: try \h ALTER ROLE
@@ -20,7 +21,8 @@ error
 ALTER USER foo WITH PASSWORD bar
 ----
 at or near "bar": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER USER foo WITH PASSWORD bar
                              ^
 HINT: try \h ALTER ROLE
@@ -38,7 +40,8 @@ error
 ALTER USER foo WITH ENCRYPTED PASSWORD bar
 ----
 at or near "bar": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER USER foo WITH ENCRYPTED PASSWORD bar
                                        ^
 HINT: try \h ALTER ROLE

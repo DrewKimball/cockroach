@@ -132,7 +132,8 @@ error
 CREATE TRIGGER foo BEFORE UPDATE ON abc EXECUTE FUNCTION foo(-1);
 ----
 at or near "-": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE TRIGGER foo BEFORE UPDATE ON abc EXECUTE FUNCTION foo(-1)
                                                              ^
 HINT: try \h CREATE TRIGGER
@@ -151,7 +152,8 @@ error
 CREATE TRIGGER foo BEFORE UPDATE ON abc FOR EACH ROW EXECUTE foo();
 ----
 at or near "foo": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE TRIGGER foo BEFORE UPDATE ON abc FOR EACH ROW EXECUTE foo()
                                                              ^
 HINT: try \h CREATE TRIGGER
@@ -161,7 +163,8 @@ error
 CREATE TRIGGER foo BEFORE UPDATE FOR EACH ROW ON abc EXECUTE FUNCTION foo();
 ----
 at or near "for": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE TRIGGER foo BEFORE UPDATE FOR EACH ROW ON abc EXECUTE FUNCTION foo()
                                  ^
 HINT: try \h CREATE TRIGGER
@@ -171,7 +174,8 @@ error
 CREATE CONSTRAINT TRIGGER AFTER UPDATE ON foo FOR EACH ROW EXECUTE FUNCTION foo();
 ----
 at or near "after": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE CONSTRAINT TRIGGER AFTER UPDATE ON foo FOR EACH ROW EXECUTE FUNCTION foo()
                           ^
 HINT: You have attempted to use a feature that is not yet implemented.

@@ -202,10 +202,12 @@ END LOOP;
 END
 ----
 at or near "loop": at or near "1": syntax error
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 SET ROW ((SELEC 1))
                 ^
 --
+at line 3
 source SQL:
 DECLARE
 BEGIN
@@ -223,10 +225,12 @@ END LOOP;
 END
 ----
 at or near "loop": at or near "5": syntax error
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 SET ROW ((SELEC 5) )
                 ^
 --
+at line 3
 source SQL:
 DECLARE
 BEGIN
@@ -244,10 +248,12 @@ END LOOP;
 END
 ----
 at or near "loop": at or near "2": syntax error
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 SET ROW ((SELEC 2) )
                 ^
 --
+at line 3
 source SQL:
 DECLARE
 BEGIN
@@ -265,10 +271,12 @@ END LOOP;
 END
 ----
 at or near "loop": at or near ".": syntax error
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 SET ROW (5..10 )
           ^
 --
+at line 3
 source SQL:
 DECLARE
 BEGIN
@@ -287,7 +295,8 @@ END
 ----
 ----
 at or near "in": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
 FOR counter IN 1.5 LOOP
@@ -317,7 +326,8 @@ END
 ----
 ----
 at or near "in": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
 FOR counter IN SELECT (1...5) LOOP
@@ -346,7 +356,8 @@ RETURN;
 ----
 ----
 at or near "in": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
 FOR yr IN SELECT * FROM generate_series(1,10,1) AS y_(y)

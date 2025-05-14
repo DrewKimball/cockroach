@@ -73,7 +73,7 @@ func (l *lexer) Error(e string) {
 	e = strings.TrimPrefix(e, "syntax error: ") // we'll add it again below.
 	err := pgerror.WithCandidateCode(errors.Newf("%s", e), pgcode.Syntax)
 	lastTok := l.lastToken
-	l.lastError = parser.PopulateErrorDetails(lastTok.id, lastTok.str, lastTok.pos, err, l.in)
+	l.lastError = parser.PopulateErrorDetails(lastTok.id, lastTok.str, lastTok.pos, lastTok.line, err, l.in)
 }
 
 func (l *lexer) lex(lval *pgreplSymType) {

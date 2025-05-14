@@ -6,7 +6,8 @@ END
 ----
 ----
 at or near ";": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   RAISE;

@@ -12,7 +12,8 @@ END
 ----
 ----
 at or near "foreach": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 5
+source SQL:
 DECLARE
   s int8 := 0;
   x int;

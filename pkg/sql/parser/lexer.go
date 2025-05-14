@@ -420,7 +420,7 @@ func (l *lexer) Error(e string) {
 
 // PopulateErrorDetails properly wraps the "last error" field in the lexer.
 func PopulateErrorDetails(
-	tokID int32, lastTokStr string, lastTokPos int32, lastErr error, lIn string,
+	tokID int32, lastTokStr string, lastTokPos int32, lineNo int32, lastErr error, lIn string,
 ) error {
 	var retErr error
 
@@ -452,6 +452,7 @@ func PopulateErrorDetails(
 	j := strings.LastIndexByte(lIn[:lastTokPos], '\n') + 1
 	// Output everything up to and including the line containing the last token.
 	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "at line %d\n", lineNo)
 	fmt.Fprintf(&buf, "source SQL:\n%s\n", lIn[:i])
 	// Output a caret indicating where the last token starts.
 	fmt.Fprintf(&buf, "%s^", strings.Repeat(" ", int(lastTokPos)-j))
@@ -460,7 +461,7 @@ func PopulateErrorDetails(
 
 func (l *lexer) populateErrorDetails() {
 	lastTok := l.lastToken()
-	l.lastError = PopulateErrorDetails(lastTok.id, lastTok.str, lastTok.pos, l.lastError, l.in)
+	l.lastError = PopulateErrorDetails(lastTok.id, lastTok.str, lastTok.pos, lastTok.line, l.lastError, l.in)
 }
 
 // SetHelp marks the "last error" field in the lexer to become a

@@ -18,7 +18,8 @@ error
 CALL p
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CALL p
       ^
 
@@ -26,6 +27,7 @@ error
 CALL
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CALL
     ^

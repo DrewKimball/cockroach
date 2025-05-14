@@ -186,7 +186,8 @@ error
 SELECT POSITION('high', 'a')
 ----
 at or near ",": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SELECT POSITION('high', 'a')
                       ^
 

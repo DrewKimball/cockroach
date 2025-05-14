@@ -10,7 +10,8 @@ error
 ALTER RANGE invalid+syntax CONFIGURE ZONE = 'foo'
 ----
 at or near "EOF": syntax error: only simple names are supported in ALTER RANGE ... CONFIGURE ZONE
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER RANGE invalid+syntax CONFIGURE ZONE = 'foo'
                                                  ^
 

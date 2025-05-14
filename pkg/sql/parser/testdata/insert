@@ -172,7 +172,8 @@ error
 INSERT INTO kv (k[0]) VALUES ('hello')
 ----
 at or near "[": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 INSERT INTO kv (k[0]) VALUES ('hello')
                  ^
 HINT: try \h <SELECTCLAUSE>

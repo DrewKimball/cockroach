@@ -60,7 +60,8 @@ error
 SELECT [FUNCTION 1074]('hello','word' ORDER BY PRIMARY KEY FAMILY DESC)
 ----
 at or near "primary": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SELECT [FUNCTION 1074]('hello','word' ORDER BY PRIMARY KEY FAMILY DESC)
                                                ^
 HINT: try \hf [FUNCTION 1074]

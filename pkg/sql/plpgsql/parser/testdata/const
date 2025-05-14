@@ -134,7 +134,8 @@ BEGIN
 END
 ----
 at or near ":": syntax error: unterminated string
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 DECLARE
   x STRING := 'foo;
            ^
@@ -147,7 +148,8 @@ BEGIN
 END
 ----
 at or near ":": syntax error: unterminated string
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 DECLARE
   x STRING := $foo$ foo;
            ^

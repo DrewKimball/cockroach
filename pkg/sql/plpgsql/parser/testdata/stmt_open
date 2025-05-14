@@ -114,7 +114,8 @@ END
 ----
 ----
 at or near "execute": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
 OPEN curs2 SCROLL FOR EXECUTE SELECT $1, $2 FROM foo WHERE key = mykey USING hello, jojo;
@@ -139,7 +140,8 @@ OPEN curs1 FOR;
 END
 ----
 at or near "for": syntax error: missing SQL statement
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
 OPEN curs1 FOR;

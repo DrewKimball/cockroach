@@ -375,7 +375,8 @@ error
 CREATE DATABASE a b
 ----
 at or near "b": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE DATABASE a b
                   ^
 
@@ -383,6 +384,7 @@ error
 CREATE DATABASE a b c
 ----
 at or near "b": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE DATABASE a b c
                   ^

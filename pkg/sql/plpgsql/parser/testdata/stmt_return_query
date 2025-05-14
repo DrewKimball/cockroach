@@ -86,7 +86,8 @@ BEGIN
 END
 ----
 at or near "query": syntax error: missing SQL statement
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   RETURN QUERY;
@@ -99,10 +100,12 @@ BEGIN
 END
 ----
 at or near "100": at or near "100": syntax error
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 100
 ^
 --
+at line 3
 source SQL:
 DECLARE
 BEGIN
@@ -116,10 +119,12 @@ BEGIN
 END
 ----
 at or near "a": at or near "*": syntax error
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 * FROM xy INNER JOIN ab ON x = a
 ^
 --
+at line 3
 source SQL:
 DECLARE
 BEGIN
@@ -134,7 +139,8 @@ END
 ----
 ----
 at or near "execute": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 DECLARE
 BEGIN
   RETURN QUERY EXECUTE a dynamic command;

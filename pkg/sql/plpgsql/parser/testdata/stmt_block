@@ -263,7 +263,8 @@ BEGIN
 END
 ----
 at or near "end": syntax error
-DETAIL: source SQL:
+DETAIL: at line 5
+source SQL:
 DECLARE
 BEGIN
   BEGIN
@@ -281,7 +282,8 @@ BEGIN
 END
 ----
 at or near "raise": syntax error: end label "raise" specified for unlabeled block
-DETAIL: source SQL:
+DETAIL: at line 6
+source SQL:
 DECLARE
   x INT;
 BEGIN
@@ -297,7 +299,8 @@ BEGIN
 END bar
 ----
 at or near "bar": syntax error: end label "bar" differs from block's label "foo"
-DETAIL: source SQL:
+DETAIL: at line 4
+source SQL:
 <<foo>>
 BEGIN
   SELECT 1;
@@ -310,7 +313,8 @@ BEGIN
 END foo
 ----
 at or near "foo": syntax error: end label "foo" specified for unlabeled block
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 BEGIN
   SELECT 1;
 END foo

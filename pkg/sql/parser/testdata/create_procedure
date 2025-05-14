@@ -86,7 +86,8 @@ error
 CREATE PROCEDURE f(VARIADIC a INT) LANGUAGE SQL AS 'SELECT 1'
 ----
 at or near "variadic": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE PROCEDURE f(VARIADIC a INT) LANGUAGE SQL AS 'SELECT 1'
                    ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -97,7 +98,8 @@ CREATE PROCEDURE f() TRANSFORM AS 'SELECT 1' LANGUAGE SQL
 ----
 ----
 at or near "transform": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE PROCEDURE f() TRANSFORM AS 'SELECT 1' LANGUAGE SQL
                      ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -118,7 +120,8 @@ CREATE PROCEDURE f() SET a = 123 AS 'SELECT 1' LANGUAGE SQL
 ----
 ----
 at or near "set": syntax error: unimplemented: this syntax
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE PROCEDURE f() SET a = 123 AS 'SELECT 1' LANGUAGE SQL
                      ^
 HINT: You have attempted to use a feature that is not yet implemented.
@@ -139,7 +142,8 @@ error
 CREATE PROCEDURE f() RETURNS INT LANGUAGE SQL AS 'SELECT 1'
 ----
 at or near "int": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE PROCEDURE f() RETURNS INT LANGUAGE SQL AS 'SELECT 1'
                              ^
 HINT: try \h CREATE PROCEDURE

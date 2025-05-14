@@ -67,7 +67,8 @@ error
 CREATE INDEX ON a (b) STORING ()
 ----
 at or near ")": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE INDEX ON a (b) STORING ()
                                ^
 HINT: try \h CREATE INDEX

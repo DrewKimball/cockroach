@@ -82,7 +82,8 @@ error
 ALTER DEFAULT PRIVILEGES GRANT ALL ON PROCEDURES TO foo
 ----
 at or near "procedures": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER DEFAULT PRIVILEGES GRANT ALL ON PROCEDURES TO foo
                                       ^
 HINT: try \h ALTER DEFAULT PRIVILEGES
@@ -195,7 +196,8 @@ error
 ALTER DEFAULT PRIVILEGES FOR ROLE foo GRANT ALL ON PROCEDURES TO foo
 ----
 at or near "procedures": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER DEFAULT PRIVILEGES FOR ROLE foo GRANT ALL ON PROCEDURES TO foo
                                                    ^
 HINT: try \h ALTER DEFAULT PRIVILEGES
@@ -308,7 +310,8 @@ error
 ALTER DEFAULT PRIVILEGES IN SCHEMA s GRANT ALL ON PROCEDURES TO foo
 ----
 at or near "procedures": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER DEFAULT PRIVILEGES IN SCHEMA s GRANT ALL ON PROCEDURES TO foo
                                                   ^
 HINT: try \h ALTER DEFAULT PRIVILEGES
@@ -421,7 +424,8 @@ error
 ALTER DEFAULT PRIVILEGES FOR ROLE foo IN SCHEMA s GRANT ALL ON PROCEDURES TO foo
 ----
 at or near "procedures": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER DEFAULT PRIVILEGES FOR ROLE foo IN SCHEMA s GRANT ALL ON PROCEDURES TO foo
                                                                ^
 HINT: try \h ALTER DEFAULT PRIVILEGES
@@ -574,7 +578,8 @@ error
 ALTER DEFAULT PRIVILEGES REVOKE ALL ON PROCEDURES FROM foo
 ----
 at or near "procedures": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER DEFAULT PRIVILEGES REVOKE ALL ON PROCEDURES FROM foo
                                        ^
 HINT: try \h ALTER DEFAULT PRIVILEGES
@@ -687,7 +692,8 @@ error
 ALTER DEFAULT PRIVILEGES FOR ROLE foo REVOKE ALL ON PROCEDURES FROM foo
 ----
 at or near "procedures": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER DEFAULT PRIVILEGES FOR ROLE foo REVOKE ALL ON PROCEDURES FROM foo
                                                     ^
 HINT: try \h ALTER DEFAULT PRIVILEGES
@@ -800,7 +806,8 @@ error
 ALTER DEFAULT PRIVILEGES IN SCHEMA s REVOKE ALL ON PROCEDURES FROM foo
 ----
 at or near "procedures": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER DEFAULT PRIVILEGES IN SCHEMA s REVOKE ALL ON PROCEDURES FROM foo
                                                    ^
 HINT: try \h ALTER DEFAULT PRIVILEGES
@@ -913,7 +920,8 @@ error
 ALTER DEFAULT PRIVILEGES FOR ROLE foo IN SCHEMA s REVOKE ALL ON PROCEDURES FROM foo
 ----
 at or near "procedures": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER DEFAULT PRIVILEGES FOR ROLE foo IN SCHEMA s REVOKE ALL ON PROCEDURES FROM foo
                                                                 ^
 HINT: try \h ALTER DEFAULT PRIVILEGES
@@ -1051,6 +1059,7 @@ error
 ALTER DEFAULT PRIVILEGES FOR ALL ROLES GRANT CREATE, UNKNOWN_PRIV ON TYPES TO SESSION_USER WITH GRANT OPTION
 ----
 at or near "on": syntax error: not a valid privilege: "unknown_priv"
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER DEFAULT PRIVILEGES FOR ALL ROLES GRANT CREATE, UNKNOWN_PRIV ON TYPES TO SESSION_USER WITH GRANT OPTION
                                                                   ^

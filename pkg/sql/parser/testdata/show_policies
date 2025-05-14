@@ -27,7 +27,8 @@ error
 SHOW POLICIES
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SHOW POLICIES
              ^
 HINT: try \h SHOW POLICIES

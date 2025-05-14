@@ -773,7 +773,8 @@ error
 BACKUP foo INTO 'bar' WITH key1, key2 = 'value'
 ----
 at or near "key1": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo INTO 'bar' WITH key1, key2 = 'value'
                            ^
 HINT: try \h BACKUP
@@ -782,7 +783,8 @@ error
 BACKUP foo INTO 'bar' WITH revision_history, revision_history
 ----
 at or near "EOF": syntax error: revision_history option specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo INTO 'bar' WITH revision_history, revision_history
                                                              ^
 
@@ -790,7 +792,8 @@ error
 BACKUP foo INTO 'bar' WITH detached, revision_history, detached
 ----
 at or near "EOF": syntax error: detached option specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo INTO 'bar' WITH detached, revision_history, detached
                                                                ^
 
@@ -798,7 +801,8 @@ error
 BACKUP foo INTO 'bar' WITH revision_history=false, revision_history, detached
 ----
 at or near ",": syntax error: revision_history option specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo INTO 'bar' WITH revision_history=false, revision_history, detached
                                                                    ^
 
@@ -806,7 +810,8 @@ error
 BACKUP foo INTO 'bar' WITH detached=true, revision_history, detached=true
 ----
 at or near "true": syntax error: detached option specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo INTO 'bar' WITH detached=true, revision_history, detached=true
                                                                      ^
 
@@ -814,7 +819,8 @@ error
 BACKUP INTO 'bar' WITH include_all_virtual_clusters=false, include_all_secondary_tenants
 ----
 at or near "EOF": syntax error: include_all_virtual_clusters specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP INTO 'bar' WITH include_all_virtual_clusters=false, include_all_secondary_tenants
                                                                                         ^
 
@@ -822,7 +828,8 @@ error
 BACKUP foo INTO 'bar' WITH updates_cluster_monitoring_metrics=false, updates_cluster_monitoring_metrics, detached
 ----
 at or near ",": syntax error: updates_cluster_monitoring_metrics option specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo INTO 'bar' WITH updates_cluster_monitoring_metrics=false, updates_cluster_monitoring_metrics, detached
                                                                                                        ^
 
@@ -830,7 +837,8 @@ error
 BACKUP foo INTO 'bar' WITH detached=$1, revision_history
 ----
 at or near "1": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo INTO 'bar' WITH detached=$1, revision_history
                                     ^
 HINT: try \h BACKUP
@@ -839,7 +847,8 @@ error
 RESTORE foo FROM 'bar' IN 'baz' WITH key1, key2 = 'value'
 ----
 at or near "key1": syntax error: The `RESTORE <targets> FROM <backupURI>` syntax is no longer supported. Please use `RESTORE <targets> FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE foo FROM 'bar' IN 'baz' WITH key1, key2 = 'value'
                                      ^
 HINT: try \h RESTORE
@@ -848,7 +857,8 @@ error
 RESTORE foo FROM 'bar' IN 'baz' WITH skip_missing_foreign_keys, skip_missing_foreign_keys
 ----
 at or near "skip_missing_foreign_keys": syntax error: skip_missing_foreign_keys specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE foo FROM 'bar' IN 'baz' WITH skip_missing_foreign_keys, skip_missing_foreign_keys
                                                                 ^
 
@@ -856,7 +866,8 @@ error
 RESTORE foo FROM 'bar' IN 'baz' WITH skip_missing_sequences, skip_missing_views, skip_missing_sequences
 ----
 at or near "skip_missing_sequences": syntax error: skip_missing_sequences specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE foo FROM 'bar' IN 'baz' WITH skip_missing_sequences, skip_missing_views, skip_missing_sequences
                                                                                  ^
 
@@ -864,7 +875,8 @@ error
 RESTORE foo FROM 'bar' IN 'baz' WITH detached, skip_missing_views, detached
 ----
 at or near "detached": syntax error: detached option specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE foo FROM 'bar' IN 'baz' WITH detached, skip_missing_views, detached
                                                                    ^
 
@@ -872,7 +884,8 @@ error
 RESTORE foo FROM 'bar' IN 'baz' WITH skip_missing_udfs, skip_missing_views, skip_missing_udfs
 ----
 at or near "skip_missing_udfs": syntax error: skip_missing_udfs specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE foo FROM 'bar' IN 'baz' WITH skip_missing_udfs, skip_missing_views, skip_missing_udfs
                                                                             ^
 
@@ -880,7 +893,8 @@ error
 RESTORE FROM 'bar' IN 'baz' WITH unsafe_restore_incompatible_version, unsafe_restore_incompatible_version
 ----
 at or near "unsafe_restore_incompatible_version": syntax error: unsafe_restore_incompatible_version specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE FROM 'bar' IN 'baz' WITH unsafe_restore_incompatible_version, unsafe_restore_incompatible_version
                                                                       ^
 
@@ -888,7 +902,8 @@ error
 BACKUP ROLE foo, bar INTO 'baz'
 ----
 at or near "foo": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP ROLE foo, bar INTO 'baz'
             ^
 HINT: try \h BACKUP
@@ -897,7 +912,8 @@ error
 RESTORE ROLE foo, bar FROM 'baz' IN 'qux'
 ----
 at or near "foo": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE ROLE foo, bar FROM 'baz' IN 'qux'
              ^
 HINT: try \h RESTORE
@@ -917,7 +933,8 @@ error
 BACKUP TO 'foo'
 ----
 at or near "foo": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP TO 'foo'
           ^
 HINT: try \h BACKUP
@@ -926,7 +943,8 @@ error
 BACKUP TABLE foo TO 'bar'
 ----
 at or near "bar": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP TABLE foo TO 'bar'
                     ^
 HINT: try \h BACKUP
@@ -935,7 +953,8 @@ error
 BACKUP foo TO 'bar'
 ----
 at or near "bar": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo TO 'bar'
               ^
 HINT: try \h BACKUP
@@ -944,7 +963,8 @@ error
 BACKUP DATABASE foo TO 'bar'
 ----
 at or near "bar": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP DATABASE foo TO 'bar'
                        ^
 HINT: try \h BACKUP
@@ -953,7 +973,8 @@ error
 BACKUP TO 'bar' AS OF SYSTEM TIME '1'
 ----
 at or near "bar": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP TO 'bar' AS OF SYSTEM TIME '1'
           ^
 HINT: try \h BACKUP
@@ -962,7 +983,8 @@ error
 BACKUP DATABASE foo TO 'bar' AS OF SYSTEM TIME '1'
 ----
 at or near "bar": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP DATABASE foo TO 'bar' AS OF SYSTEM TIME '1'
                        ^
 HINT: try \h BACKUP
@@ -971,7 +993,8 @@ error
 BACKUP TO 'foo' INCREMENTAL FROM 'bar'
 ----
 at or near "foo": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP TO 'foo' INCREMENTAL FROM 'bar'
           ^
 HINT: try \h BACKUP
@@ -980,7 +1003,8 @@ error
 BACKUP TO 'foo' INCREMENTAL FROM 'bar', 'baz'
 ----
 at or near "foo": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP TO 'foo' INCREMENTAL FROM 'bar', 'baz'
           ^
 HINT: try \h BACKUP
@@ -989,7 +1013,8 @@ error
 BACKUP TABLE foo TO 'bar' INCREMENTAL FROM 'baz'
 ----
 at or near "bar": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP TABLE foo TO 'bar' INCREMENTAL FROM 'baz'
                     ^
 HINT: try \h BACKUP
@@ -998,7 +1023,8 @@ error
 BACKUP TO 'bar' WITH updates_cluster_monitoring_metrics
 ----
 at or near "bar": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP TO 'bar' WITH updates_cluster_monitoring_metrics
           ^
 HINT: try \h BACKUP
@@ -1007,7 +1033,8 @@ error
 BACKUP TABLE foo TO 'bar' WITH updates_cluster_monitoring_metrics
 ----
 at or near "bar": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP TABLE foo TO 'bar' WITH updates_cluster_monitoring_metrics
                     ^
 HINT: try \h BACKUP
@@ -1016,7 +1043,8 @@ error
 BACKUP foo, bar TO 'baz'
 ----
 at or near "baz": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo, bar TO 'baz'
                    ^
 HINT: try \h BACKUP
@@ -1025,7 +1053,8 @@ error
 BACKUP foo, bar TO 'baz' WITH updates_cluster_monitoring_metrics
 ----
 at or near "baz": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo, bar TO 'baz' WITH updates_cluster_monitoring_metrics
                    ^
 HINT: try \h BACKUP
@@ -1034,7 +1063,8 @@ error
 BACKUP foo TO ('bar', 'baz')
 ----
 at or near "(": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo TO ('bar', 'baz')
               ^
 HINT: try \h BACKUP
@@ -1043,7 +1073,8 @@ error
 BACKUP foo, bar TO ('baz', 'qux')
 ----
 at or near "(": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo, bar TO ('baz', 'qux')
                    ^
 HINT: try \h BACKUP
@@ -1052,7 +1083,8 @@ error
 BACKUP foo, bar TO ('baz', 'qux') WITH updates_cluster_monitoring_metrics
 ----
 at or near "(": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 BACKUP foo, bar TO ('baz', 'qux') WITH updates_cluster_monitoring_metrics
                    ^
 HINT: try \h BACKUP
@@ -1061,7 +1093,8 @@ error
 EXPLAIN BACKUP DATABASE foo TO 'bar'
 ----
 at or near "bar": syntax error: The `BACKUP TO` syntax is no longer supported. Please use `BACKUP INTO` to create a backup collection.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 EXPLAIN BACKUP DATABASE foo TO 'bar'
                                ^
 HINT: try \h BACKUP
@@ -1075,7 +1108,8 @@ error
 SHOW BACKUP 'foo' WITH KMS = ('foo', 'bar')
 ----
 at or near "test": syntax error: The `SHOW BACKUP` syntax without the `IN` keyword is no longer supported. Please use `SHOW BACKUP FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 SHOW BACKUP 'foo'
 ---
 test
@@ -1086,7 +1120,8 @@ error
 EXPLAIN SHOW BACKUP 'foo'
 ----
 at or near "EOF": syntax error: The `SHOW BACKUP` syntax without the `IN` keyword is no longer supported. Please use `SHOW BACKUP FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 EXPLAIN SHOW BACKUP 'foo'
                          ^
 HINT: try \h SHOW BACKUP
@@ -1095,7 +1130,8 @@ error
 SHOW BACKUP FILES 'foo'
 ----
 at or near "EOF": syntax error: The `SHOW BACKUP FILES` syntax without the `IN` keyword is no longer supported. Please use `SHOW BACKUP FILES FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SHOW BACKUP FILES 'foo'
                        ^
 HINT: try \h SHOW BACKUP
@@ -1104,7 +1140,8 @@ error
 SHOW BACKUP RANGES 'foo'
 ----
 at or near "EOF": syntax error: The `SHOW BACKUP RANGES` syntax without the `IN` keyword is no longer supported. Please use `SHOW BACKUP RANGES FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SHOW BACKUP RANGES 'foo'
                         ^
 HINT: try \h SHOW BACKUP
@@ -1113,7 +1150,8 @@ error
 SHOW BACKUP SCHEMAS 'foo'
 ----
 at or near "EOF": syntax error: The `SHOW BACKUP SCHEMAS` syntax without the `IN` keyword is no longer supported. Please use `SHOW BACKUP SCHEMAS FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 SHOW BACKUP SCHEMAS 'foo'
                          ^
 HINT: try \h SHOW BACKUP
@@ -1122,7 +1160,8 @@ error
 EXPLAIN SHOW BACKUP FILES 'foo'
 ----
 at or near "EOF": syntax error: The `SHOW BACKUP FILES` syntax without the `IN` keyword is no longer supported. Please use `SHOW BACKUP FILES FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 EXPLAIN SHOW BACKUP FILES 'foo'
                                ^
 HINT: try \h SHOW BACKUP
@@ -1131,7 +1170,8 @@ error
 EXPLAIN SHOW BACKUP RANGES 'foo'
 ----
 at or near "EOF": syntax error: The `SHOW BACKUP RANGES` syntax without the `IN` keyword is no longer supported. Please use `SHOW BACKUP RANGES FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 EXPLAIN SHOW BACKUP RANGES 'foo'
                                 ^
 HINT: try \h SHOW BACKUP
@@ -1140,7 +1180,8 @@ error
 EXPLAIN SHOW BACKUP SCHEMAS 'foo'
 ----
 at or near "EOF": syntax error: The `SHOW BACKUP SCHEMAS` syntax without the `IN` keyword is no longer supported. Please use `SHOW BACKUP SCHEMAS FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 EXPLAIN SHOW BACKUP SCHEMAS 'foo'
                                  ^
 HINT: try \h SHOW BACKUP
@@ -1149,7 +1190,8 @@ error
 RESTORE FROM 'foo'
 ----
 at or near "EOF": syntax error: The `RESTORE FROM <backupURI>` syntax is no longer supported. Please use `RESTORE FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE FROM 'foo'
                   ^
 HINT: try \h RESTORE
@@ -1158,7 +1200,8 @@ error
 RESTORE foo FROM 'bar'
 ----
 at or near "EOF": syntax error: The `RESTORE <targets> FROM <backupURI>` syntax is no longer supported. Please use `RESTORE <targets> FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE foo FROM 'bar'
                       ^
 HINT: try \h RESTORE
@@ -1167,7 +1210,8 @@ error
 RESTORE TABLE foo FROM 'bar'
 ----
 at or near "EOF": syntax error: The `RESTORE <targets> FROM <backupURI>` syntax is no longer supported. Please use `RESTORE <targets> FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE TABLE foo FROM 'bar'
                             ^
 HINT: try \h RESTORE
@@ -1176,7 +1220,8 @@ error
 RESTORE DATABASE foo FROM 'bar'
 ----
 at or near "EOF": syntax error: The `RESTORE <targets> FROM <backupURI>` syntax is no longer supported. Please use `RESTORE <targets> FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE DATABASE foo FROM 'bar'
                                ^
 HINT: try \h RESTORE
@@ -1185,7 +1230,8 @@ error
 RESTORE DATABASE foo FROM 'bar', 'baz'
 ----
 at or near ",": syntax error: The `RESTORE <targets> FROM <backupURI>` syntax is no longer supported. Please use `RESTORE <targets> FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE DATABASE foo FROM 'bar', 'baz'
                                ^
 HINT: try \h RESTORE
@@ -1194,7 +1240,8 @@ error
 RESTORE DATABASE foo FROM 'bar' WITH new_db_name = 'baz'
 ----
 at or near "with": syntax error: The `RESTORE <targets> FROM <backupURI>` syntax is no longer supported. Please use `RESTORE <targets> FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE DATABASE foo FROM 'bar' WITH new_db_name = 'baz'
                                 ^
 HINT: try \h RESTORE
@@ -1203,7 +1250,8 @@ error
 RESTORE DATABASE foo FROM 'bar' AS OF SYSTEM TIME '1'
 ----
 at or near "as": syntax error: The `RESTORE <targets> FROM <backupURI>` syntax is no longer supported. Please use `RESTORE <targets> FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 RESTORE DATABASE foo FROM 'bar' AS OF SYSTEM TIME '1'
                                 ^
 HINT: try \h RESTORE
@@ -1212,7 +1260,8 @@ error
 EXPLAIN RESTORE DATABASE foo FROM 'bar'
 ----
 at or near "EOF": syntax error: The `RESTORE <targets> FROM <backupURI>` syntax is no longer supported. Please use `RESTORE <targets> FROM <subdirectory> IN <collectionURI>`.
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 EXPLAIN RESTORE DATABASE foo FROM 'bar'
                                        ^
 HINT: try \h RESTORE

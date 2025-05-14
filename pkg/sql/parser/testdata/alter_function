@@ -26,7 +26,8 @@ error
 ALTER FUNCTION f()
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 ALTER FUNCTION f()
                   ^
 HINT: try \h ALTER FUNCTION

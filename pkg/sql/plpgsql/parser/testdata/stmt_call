@@ -85,7 +85,8 @@ BEGIN
 END
 ----
 at or near ";": syntax error: CALL statement target must be a stored procedure
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 BEGIN
   CALL p;
         ^
@@ -96,7 +97,8 @@ BEGIN
 END
 ----
 at or near ";": syntax error: CALL statement target must be a stored procedure
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 BEGIN
   CALL 123;
           ^
@@ -107,10 +109,12 @@ BEGIN
 END
 ----
 at or near ";": at or near "1": syntax error
-DETAIL: source SQL:
+DETAIL: at line 2
+source SQL:
 SET ROW (p 1 2)
            ^
 --
+at line 2
 source SQL:
 BEGIN
   CALL p 1 2;

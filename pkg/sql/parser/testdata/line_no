@@ -1,0 +1,36 @@
+error
+SELECT
+  1,
+  2,
+  3,
+  4,;
+----
+at or near "EOF": syntax error
+DETAIL: at line 5
+source SQL:
+SELECT
+  1,
+  2,
+  3,
+  4,
+    ^
+
+error
+SELECT
+  1,
+  2,
+  3,
+  4,
+FROM
+  foo;
+----
+at or near "from": syntax error
+DETAIL: at line 6
+source SQL:
+SELECT
+  1,
+  2,
+  3,
+  4,
+FROM
+^

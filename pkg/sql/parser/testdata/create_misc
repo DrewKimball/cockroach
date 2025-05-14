@@ -213,7 +213,8 @@ error
 CREATE STATISTICS a ON col1 FROM t WITH OPTIONS THROTTLING 2.0
 ----
 at or near "2.0": syntax error: THROTTLING fraction must be between 0 and 1
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE STATISTICS a ON col1 FROM t WITH OPTIONS THROTTLING 2.0
                                                            ^
 
@@ -221,7 +222,8 @@ error
 CREATE STATISTICS a ON col1 FROM t WITH OPTIONS THROTTLING 0.1 THROTTLING 0.5
 ----
 at or near "0.5": syntax error: THROTTLING specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE STATISTICS a ON col1 FROM t WITH OPTIONS THROTTLING 0.1 THROTTLING 0.5
                                                                           ^
 
@@ -229,7 +231,8 @@ error
 CREATE STATISTICS a ON col1 FROM t WITH OPTIONS AS OF SYSTEM TIME '-1s' THROTTLING 0.1 AS OF SYSTEM TIME '-2s'
 ----
 at or near "EOF": syntax error: AS OF specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE STATISTICS a ON col1 FROM t WITH OPTIONS AS OF SYSTEM TIME '-1s' THROTTLING 0.1 AS OF SYSTEM TIME '-2s'
                                                                                                               ^
 
@@ -237,7 +240,8 @@ error
 CREATE STATISTICS a ON col1 FROM t USING EXTREMES USING EXTREMES
 ----
 at or near "extremes": syntax error: USING EXTREMES specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE STATISTICS a ON col1 FROM t USING EXTREMES USING EXTREMES
                                                         ^
 
@@ -245,7 +249,8 @@ error
 CREATE STATISTICS a ON col1 FROM t WHERE b > 0 WHERE c < 3
 ----
 at or near "EOF": syntax error: WHERE specified multiple times
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE STATISTICS a ON col1 FROM t WHERE b > 0 WHERE c < 3
                                                           ^
 
@@ -253,7 +258,8 @@ error
 CREATE STATISTICS a ON col1 FROM t USING EXTREMES WHERE a > 10
 ----
 at or near "EOF": syntax error: USING EXTREMES and WHERE may not be specified together
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE STATISTICS a ON col1 FROM t USING EXTREMES WHERE a > 10
                                                               ^
 
@@ -261,6 +267,7 @@ error
 CREATE STATISTICS a ON col1 FROM t USING EXTREMES WITH OPTIONS AS OF SYSTEM TIME '2016-02-03'
 ----
 at or near "with": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE STATISTICS a ON col1 FROM t USING EXTREMES WITH OPTIONS AS OF SYSTEM TIME '2016-02-03'
                                                   ^

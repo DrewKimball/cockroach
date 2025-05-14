@@ -74,7 +74,8 @@ error
 CREATE VIEW a
 ----
 at or near "EOF": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE VIEW a
              ^
 HINT: try \h CREATE VIEW
@@ -83,7 +84,8 @@ error
 CREATE VIEW a () AS select * FROM b
 ----
 at or near ")": syntax error
-DETAIL: source SQL:
+DETAIL: at line 1
+source SQL:
 CREATE VIEW a () AS select * FROM b
                ^
 HINT: try \h CREATE VIEW

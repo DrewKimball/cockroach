@@ -102,7 +102,8 @@ BEGIN
 END
 ----
 at or near "foo": syntax error
-DETAIL: source SQL:
+DETAIL: at line 3
+source SQL:
 BEGIN
   INSERT INTO xy VALUES (1, 2);
   COMMIT foo;
