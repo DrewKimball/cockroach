@@ -902,7 +902,8 @@ func spansForAllRestoreTableIndexes(
 			continue
 		}
 		for _, index := range table.ActiveIndexes() {
-			if err := sstIntervalTree.Insert(intervalSpan(table.IndexSpan(codec, index.GetID())), false); err != nil {
+			intervalSpan := roachpb.MakeIntervalSpan(table.IndexSpan(codec, index.GetID()))
+			if err := sstIntervalTree.Insert(intervalSpan, false); err != nil {
 				panic(errors.NewAssertionErrorWithWrappedErrf(err, "IndexSpan"))
 			}
 			added[tableAndIndex{tableID: table.GetID(), indexID: index.GetID()}] = true
@@ -927,7 +928,8 @@ func spansForAllRestoreTableIndexes(
 			for _, idx := range tbl.ActiveIndexes() {
 				key := tableAndIndex{tableID: tbl.GetID(), indexID: idx.GetID()}
 				if !added[key] {
-					if err := sstIntervalTree.Insert(intervalSpan(tbl.IndexSpan(codec, idx.GetID())), false); err != nil {
+					intervalSpan := roachpb.MakeIntervalSpan(tbl.IndexSpan(codec, idx.GetID()))
+					if err := sstIntervalTree.Insert(intervalSpan, false); err != nil {
 						panic(errors.NewAssertionErrorWithWrappedErrf(err, "IndexSpan"))
 					}
 					added[key] = true

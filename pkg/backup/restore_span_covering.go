@@ -17,22 +17,9 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/execinfrapb"
 	"github.com/cockroachdb/cockroach/pkg/util/bulk"
 	"github.com/cockroachdb/cockroach/pkg/util/hlc"
-	"github.com/cockroachdb/cockroach/pkg/util/interval"
 	spanUtils "github.com/cockroachdb/cockroach/pkg/util/span"
 	"github.com/cockroachdb/errors"
 )
-
-type intervalSpan roachpb.Span
-
-var _ interval.Interface = intervalSpan{}
-
-// ID is part of `interval.Interface` but seemed unused by backup usage.
-func (ie intervalSpan) ID() uintptr { return 0 }
-
-// Range is part of `interval.Interface`.
-func (ie intervalSpan) Range() interval.Range {
-	return interval.Range{Start: []byte(ie.Key), End: []byte(ie.EndKey)}
-}
 
 // targetRestoreSpanSize defines a minimum size for the sum of sizes of files in
 // the initial level (base backup or first inc covering some span) of a restore

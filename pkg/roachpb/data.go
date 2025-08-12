@@ -2972,3 +2972,28 @@ func (tid *TenantID) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return unmarshal(tid)
 	}
 }
+
+// IntervalSpan implements the interval.Interface for a Span to allow placing
+// Spans in an interval tree. IntervalSpans should be constructed using
+// MakeIntervalSpan.
+type IntervalSpan Span
+
+var _ interval.Interface = IntervalSpan{}
+
+// ID is part of the interval.Interface. We don't need to distinguish the same
+// spans, so we always return 0.
+func (ie IntervalSpan) ID() uintptr { return 0 }
+
+// Range is part of the interval.Interface.
+func (ie IntervalSpan) Range() interval.Range {
+	return interval.Range{Start: []byte(ie.Key), End: []byte(ie.EndKey)}
+}
+
+// MakeIntervalSpan constructs an IntervalSpan from a Span.
+func MakeIntervalSpan(s Span) IntervalSpan {
+	if s.EndKey == nil {
+		// This represents a Get request.
+		s.EndKey = s.Key.PrefixEnd()
+	}
+	return IntervalSpan(s)
+}

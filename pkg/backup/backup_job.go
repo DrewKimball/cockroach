@@ -1117,7 +1117,7 @@ func spansForAllTableIndexes(
 	added := make(map[tableAndIndex]bool, len(tables))
 	sstIntervalTree := interval.NewTree(interval.ExclusiveOverlapper)
 	insertSpan := func(indexSpan roachpb.Span) {
-		if err := sstIntervalTree.Insert(intervalSpan(indexSpan), true); err != nil {
+		if err := sstIntervalTree.Insert(roachpb.MakeIntervalSpan(indexSpan), true); err != nil {
 			panic(errors.NewAssertionErrorWithWrappedErrf(err, "IndexSpan"))
 		}
 	}

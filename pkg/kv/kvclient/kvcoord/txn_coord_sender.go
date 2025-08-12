@@ -432,6 +432,11 @@ func newLeafTxnCoordSender(
 		tcs.interceptorStack = tcs.interceptorAlloc.arr[:4]
 	}
 
+	if buildutil.CrdbTestBuild {
+		// In test builds, add the txnVerifier interceptor to the stack.
+		tcs.interceptorStack = append(tcs.interceptorStack, &txnVerifier{})
+	}
+
 	// Per-interceptor leaf initialization.
 	for _, reqInt := range tcs.interceptorStack {
 		reqInt.initializeLeaf(tis)

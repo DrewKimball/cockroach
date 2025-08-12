@@ -864,9 +864,12 @@ func (dsp *DistSQLPlanner) Run(
 			}
 		}
 		if localState.MustUseLeafTxn() {
-			// Set up leaf txns using the txnCoordMeta if we need to.
+			// Set up leaf txns using the txnCoordMeta if we need to. In test builds,
+			// build the reads tree even if the txn hasn't performed any writes in
+			// order to increase test coverage.
 			var readsTree interval.Tree
-			if txn.HasPerformedWrites() && evalCtx.SessionData().DistSQLUseReducedLeafWriteSets {
+			if (buildutil.CrdbTestBuild || txn.HasPerformedWrites()) &&
+				evalCtx.SessionData().DistSQLUseReducedLeafWriteSets {
 				// Avoid constructing the reads tree if the txn hasn't performed
 				// any writes (the tree would be unused) or the session variable
 				// disables this optimization (we will include all writes into
@@ -884,6 +887,20 @@ func (dsp *DistSQLPlanner) Run(
 					"leafInputState is nil when txn is non-nil and we must use the leaf txn",
 				))
 				return
+			}
+			if buildutil.CrdbTestBuild {
+				// For test builds, propagate the spans from readsTree to verify actual
+				// reads performed during execution within the leaf txn.
+				if readsTree != nil {
+					it := readsTree.Iterator()
+					for {
+						i, next := it.Next()
+						if !next {
+							break
+						}
+						tis.AllowedReadSpans = append(tis.AllowedReadSpans, roachpb.Span(i.(roachpb.IntervalSpan)))
+					}
+				}
 			}
 			leafInputState = tis
 		}

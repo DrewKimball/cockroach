@@ -1,0 +1,324 @@
+# Logic test for reduced write set optimization in leaf transactions.
+# This test verifies that when a transaction performs mutations followed by
+# read-only operations using parallel execution (streamer), the leaf transactions
+# only receive writes for keys that are actually being read, not the entire
+# write set.
+
+statement ok
+CREATE TABLE departments (
+  id INT PRIMARY KEY,
+  name STRING NOT NULL,
+  budget DECIMAL,
+  INDEX name_idx (name)
+)
+
+statement ok
+CREATE TABLE employees (
+  id INT PRIMARY KEY,
+  name STRING NOT NULL,
+  dept_id INT NOT NULL,
+  salary DECIMAL,
+  INDEX dept_idx (dept_id),
+  INDEX name_idx (name)
+)
+
+statement ok
+CREATE TABLE projects (
+  id INT PRIMARY KEY,
+  name STRING NOT NULL,
+  dept_id INT NOT NULL,
+  status STRING DEFAULT 'active',
+  INDEX dept_idx (dept_id),
+  INDEX status_idx (status)
+)
+
+# Insert some existing data before the transaction
+statement ok
+INSERT INTO departments VALUES 
+  (10, 'Legal', 50000),
+  (20, 'HR', 75000),
+  (30, 'Finance', 100000)
+
+statement ok
+INSERT INTO employees VALUES 
+  (100, 'Alice_Johnson', 10, 80000),
+  (200, 'Bob_Smith', 20, 65000),
+  (300, 'Carol_Davis', 30, 90000)
+
+statement ok
+INSERT INTO projects VALUES 
+  (1000, 'Legal_Review_System', 10, 'active'),
+  (2000, 'HR_Portal', 20, 'completed'),
+  (3000, 'Budget_Tracker', 30, 'active')
+
+# Inject statistics to encourage lookup joins
+statement ok
+ALTER TABLE departments INJECT STATISTICS '[
+  {
+    "columns": ["id"],
+    "created_at": "2018-01-01 1:00:00.00000+00:00",
+    "row_count": 1000,
+    "distinct_count": 1000
+  }
+]'
+
+statement ok
+ALTER TABLE employees INJECT STATISTICS '[
+  {
+    "columns": ["id"],
+    "created_at": "2018-01-01 1:00:00.00000+00:00",
+    "row_count": 10000,
+    "distinct_count": 10000
+  }
+]'
+
+statement ok
+ALTER TABLE projects INJECT STATISTICS '[
+  {
+    "columns": ["id"],
+    "created_at": "2018-01-01 1:00:00.00000+00:00",
+    "row_count": 10000,
+    "distinct_count": 10000
+  }
+]'
+
+# Test Case 1: Transaction with mutations to multiple tables,
+# followed by a lookup join that only reads a subset of the mutated data
+statement ok
+BEGIN
+
+# Add new departments and employees (creates writes to many keys)
+statement ok
+INSERT INTO departments VALUES 
+  (1, 'Engineering', 200000),
+  (2, 'Sales', 150000),
+  (3, 'Marketing', 120000),
+  (4, 'Support', 80000)
+
+statement ok
+INSERT INTO employees VALUES 
+  (1, 'John_Doe', 1, 120000),
+  (2, 'Jane_Smith', 1, 110000),
+  (3, 'Mike_Wilson', 2, 95000),
+  (4, 'Sarah_Brown', 2, 85000),
+  (5, 'Tom_Jones', 3, 75000),
+  (6, 'Lisa_Wang', 4, 70000)
+
+statement ok
+INSERT INTO projects VALUES 
+  (1, 'Database_Migration', 1, 'active'),
+  (2, 'API_Redesign', 1, 'planning'),
+  (3, 'Sales_Dashboard', 2, 'active'),
+  (4, 'Customer_Portal', 4, 'planning')
+
+# Query that uses lookup join but only accesses Engineering dept (id=1)
+# This should only need writes for dept 1, employees 1&2, and project 1&2
+# The streamer should receive a reduced write set, not all the mutations
+query ITIT rowsort
+SELECT e.id, e.name, p.id, p.name
+FROM employees e 
+INNER LOOKUP JOIN departments d ON e.dept_id = d.id 
+INNER LOOKUP JOIN projects p ON p.dept_id = d.id
+WHERE d.name = 'Engineering'
+----
+1  John_Doe   1  Database_Migration
+1  John_Doe   2  API_Redesign
+2  Jane_Smith 1  Database_Migration
+2  Jane_Smith 2  API_Redesign
+
+# Query that reads both mutated and existing data
+# Should include existing Legal dept data and new Engineering data
+query IT rowsort
+SELECT d.id, d.name
+FROM departments d
+WHERE d.id IN (1, 10)
+----
+1   Engineering
+10  Legal
+
+# Query that only reads existing (non-mutated) data
+# Should not need any writes from this transaction
+query IT rowsort
+SELECT e.id, e.name
+FROM employees e
+WHERE e.id >= 100
+----
+100  Alice_Johnson
+200  Bob_Smith
+300  Carol_Davis
+
+statement ok
+COMMIT
+
+# Test Case 2: Large write set with selective index join
+statement ok
+BEGIN
+
+# Insert many rows to create a large write set
+statement ok
+INSERT INTO employees 
+SELECT 
+  1000 + i, 
+  'Employee_' || i, 
+  CASE WHEN i % 4 = 0 THEN 1 
+       WHEN i % 4 = 1 THEN 2
+       WHEN i % 4 = 2 THEN 3
+       ELSE 4 END,
+  50000 + i * 1000
+FROM generate_series(1, 100) i
+
+# Query with index join that only needs a small subset
+# Should only send writes for employees with names containing 'Employee_1'
+query IT rowsort
+SELECT e.id, e.name
+FROM employees e
+WHERE e.name LIKE 'Employee_1%'
+ORDER BY e.id
+LIMIT 5
+----
+1001  Employee_1
+1010  Employee_10
+1011  Employee_11
+1012  Employee_12
+1013  Employee_13
+
+statement ok
+COMMIT
+
+# Test Case 3: Multi-department transaction with foreign key lookups
+statement ok
+BEGIN
+
+# Update existing departments and add new ones
+statement ok
+UPDATE departments SET budget = budget * 1.1 WHERE id IN (1, 2, 3)
+
+statement ok
+INSERT INTO departments VALUES (5, 'Research', 180000), (6, 'Operations', 90000)
+
+statement ok
+INSERT INTO employees VALUES 
+  (7, 'Research_Lead', 5, 130000),
+  (8, 'Ops_Manager', 6, 100000)
+
+# Query that uses lookup join but only accesses Research dept
+# Should only need writes for dept 5 and Employee_7
+query ITI rowsort
+SELECT e.id, e.name, d.id
+FROM employees e 
+INNER LOOKUP JOIN departments d ON e.dept_id = d.id
+WHERE d.name = 'Research'
+----
+7  Research_Lead  5
+
+# Query mixing reads of updated and non-updated data
+# Should get updated budgets for depts 1,2,3 and original budget for dept 10
+query ITR rowsort
+SELECT d.id, d.name, d.budget
+FROM departments d
+WHERE d.id IN (1, 2, 10)
+----
+1   Engineering  220000.0
+2   Sales        165000.0
+10  Legal        50000
+
+statement ok
+COMMIT
+
+# Test Case 4: Transaction with deletes and subsequent selective reads
+statement ok
+BEGIN
+
+# Delete some employees
+statement ok
+DELETE FROM employees WHERE id IN (3, 4, 5)
+
+# Insert new employees in same departments
+statement ok
+INSERT INTO employees VALUES 
+  (13, 'New_Sales_Rep', 2, 80000),
+  (14, 'Marketing_Specialist', 3, 72000)
+
+# Query that would have found deleted employees but now finds new ones
+# Should handle the deleted writes correctly and only send relevant writes
+query IT rowsort
+SELECT e.id, e.name
+FROM employees e
+INNER LOOKUP JOIN departments d ON e.dept_id = d.id
+WHERE d.id IN (2, 3)
+AND e.id > 10
+ORDER BY e.id
+----
+13    New_Sales_Rep
+14    Marketing_Specialist
+1001  Employee_1
+1002  Employee_2
+1005  Employee_5
+1006  Employee_6
+1009  Employee_9
+1010  Employee_10
+1013  Employee_13
+1014  Employee_14
+1017  Employee_17
+1018  Employee_18
+1021  Employee_21
+1022  Employee_22
+1025  Employee_25
+1026  Employee_26
+1029  Employee_29
+1030  Employee_30
+1033  Employee_33
+1034  Employee_34
+1037  Employee_37
+1038  Employee_38
+1041  Employee_41
+1042  Employee_42
+1045  Employee_45
+1046  Employee_46
+1049  Employee_49
+1050  Employee_50
+1053  Employee_53
+1054  Employee_54
+1057  Employee_57
+1058  Employee_58
+1061  Employee_61
+1062  Employee_62
+1065  Employee_65
+1066  Employee_66
+1069  Employee_69
+1070  Employee_70
+1073  Employee_73
+1074  Employee_74
+1077  Employee_77
+1078  Employee_78
+1081  Employee_81
+1082  Employee_82
+1085  Employee_85
+1086  Employee_86
+1089  Employee_89
+1090  Employee_90
+1093  Employee_93
+1094  Employee_94
+1097  Employee_97
+1098  Employee_98
+
+statement ok
+COMMIT
+
+# Verify final state - check that all operations were applied correctly
+query I
+SELECT count(*) FROM employees WHERE id BETWEEN 1000 AND 1100
+----
+100
+
+query I
+SELECT count(*) FROM departments WHERE id >= 1
+----
+9
+
+# This test exercises the reduced write set optimization by ensuring that
+# when lookup joins or index joins are used within transactions, only the
+# writes relevant to the actual read spans are sent to leaf transactions,
+# not the entire write set. This is particularly important for performance
+# when transactions have large write sets but read operations only access
+# a small subset of the written data.

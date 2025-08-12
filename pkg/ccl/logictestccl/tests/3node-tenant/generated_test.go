@@ -1611,6 +1611,13 @@ func TestTenantLogic_redact_descriptor(
 	runLogicTest(t, "redact_descriptor")
 }
 
+func TestTenantLogic_reduced_write_set_optimization(
+	t *testing.T,
+) {
+	defer leaktest.AfterTest(t)()
+	runLogicTest(t, "reduced_write_set_optimization")
+}
+
 func TestTenantLogic_rename_atomic(
 	t *testing.T,
 ) {

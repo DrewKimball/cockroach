@@ -64,7 +64,7 @@ func constructReadsTreeForLeaf(
 		var sp roachpb.Span
 		sp.Key = indexPrefix
 		sp.EndKey = sp.Key.PrefixEnd()
-		return readsTree.Insert(intervalSpan(sp), true /* fast */)
+		return readsTree.Insert(roachpb.MakeIntervalSpan(sp), true /* fast */)
 	}
 	// Examine all disk-reading processors that interact with LeafTxnInputState.
 	for _, proc := range processors {
@@ -75,13 +75,7 @@ func constructReadsTreeForLeaf(
 			// upfront.
 			spans := core.TableReader.Spans
 			for i := 0; i < len(spans) && err == nil; i++ {
-				var sp roachpb.Span
-				sp.Key = spans[i].Key
-				sp.EndKey = spans[i].EndKey
-				if sp.EndKey == nil { // represents a Get request
-					sp.EndKey = sp.Key.PrefixEnd()
-				}
-				err = readsTree.Insert(intervalSpan(sp), true /* fast */)
+				err = readsTree.Insert(roachpb.MakeIntervalSpan(spans[i]), true /* fast */)
 			}
 		case core.JoinReader != nil:
 			err = addIndex(core.JoinReader.FetchSpec)
@@ -344,16 +338,3 @@ func (v *reducedLeafExprVisitor) VisitPre(expr tree.Expr) (recurse bool, newExpr
 }
 
 func (v *reducedLeafExprVisitor) VisitPost(expr tree.Expr) tree.Expr { return expr }
-
-type intervalSpan roachpb.Span
-
-var _ interval.Interface = intervalSpan{}
-
-// ID is part of the interval.Interface. We don't need to distinguish the same
-// spans, so we always return 0.
-func (ie intervalSpan) ID() uintptr { return 0 }
-
-// Range is part of the interval.Interface.
-func (ie intervalSpan) Range() interval.Range {
-	return interval.Range{Start: []byte(ie.Key), End: []byte(ie.EndKey)}
-}

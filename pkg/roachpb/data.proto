@@ -791,6 +791,10 @@ message LeafTxnInputState {
   // If DistSQLUseReducedLeafWriteSets is enabled, then this set might only
   // include writes overlapping with key spans that the caller will read.
   repeated BufferedWrite buffered_writes = 11 [(gogoproto.nullable) = false];
+  // allowed_read_spans contains the key spans that the leaf is allowed to read
+  // from. This is only set for test-only builds, and is used to verify that
+  // reduced write-set tracking is working correctly.
+  repeated Span allowed_read_spans = 12 [(gogoproto.nullable) = false];
 }
 
 // LeafTxnFinalState is the state from a leaf transaction coordinator
