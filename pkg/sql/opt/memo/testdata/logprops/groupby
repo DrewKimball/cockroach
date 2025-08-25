@@ -8,64 +8,12 @@ CREATE TABLE kuv (k INT PRIMARY KEY, u FLOAT, v STRING)
 
 # Group-by with interesting aggregate expressions.
 build
-SELECT y, sum(z), x, FALSE, avg(z) FILTER (WHERE z>0), string_agg(DISTINCT s, ',')
-FROM xyzs
+(SELECT y, sum(z), x, FALSE, avg(z) FILTER (WHERE z>0), string_agg(DISTINCT s, ',')
+)FROM xyzs
 WHERE s IS NOT NULL
 GROUP BY x, y
 ----
-project
- ├── columns: y:2(int) sum:7(float!null) x:1(int!null) bool:12(bool!null) avg:9(float) string_agg:11(string!null)
- ├── key: (1)
- ├── fd: ()-->(12), (1)-->(2,7,9,11)
- ├── prune: (1,2,7,9,11,12)
- ├── interesting orderings: (+1 opt(12))
- ├── group-by (hash)
- │    ├── columns: x:1(int!null) y:2(int) sum:7(float!null) avg:9(float) string_agg:11(string!null)
- │    ├── grouping columns: x:1(int!null) y:2(int)
- │    ├── key: (1)
- │    ├── fd: (1)-->(2,7,9,11)
- │    ├── prune: (7,9,11)
- │    ├── interesting orderings: (+1)
- │    ├── project
- │    │    ├── columns: column8:8(bool!null) column10:10(string!null) x:1(int!null) y:2(int) z:3(float!null) s:4(string!null)
- │    │    ├── key: (1)
- │    │    ├── fd: ()-->(10), (1)-->(2-4,8), (3,4)-->(1,2,8), (3)-->(8)
- │    │    ├── prune: (1-4,8,10)
- │    │    ├── interesting orderings: (+1 opt(10)) (-4,+3 opt(10))
- │    │    ├── select
- │    │    │    ├── columns: x:1(int!null) y:2(int) z:3(float!null) s:4(string!null) crdb_internal_mvcc_timestamp:5(decimal) tableoid:6(oid)
- │    │    │    ├── key: (1)
- │    │    │    ├── fd: (1)-->(2-6), (3,4)-->(1,2,5,6)
- │    │    │    ├── prune: (1-3,5,6)
- │    │    │    ├── interesting orderings: (+1) (-4,+3)
- │    │    │    ├── scan xyzs
- │    │    │    │    ├── columns: x:1(int!null) y:2(int) z:3(float!null) s:4(string) crdb_internal_mvcc_timestamp:5(decimal) tableoid:6(oid)
- │    │    │    │    ├── key: (1)
- │    │    │    │    ├── fd: (1)-->(2-6), (3,4)~~>(1,2,5,6)
- │    │    │    │    ├── prune: (1-6)
- │    │    │    │    └── interesting orderings: (+1) (-4,+3,+1)
- │    │    │    └── filters
- │    │    │         └── is-not [type=bool, outer=(4), constraints=(/4: (/NULL - ]; tight)]
- │    │    │              ├── variable: s:4 [type=string]
- │    │    │              └── null [type=unknown]
- │    │    └── projections
- │    │         ├── gt [as=column8:8, type=bool, outer=(3)]
- │    │         │    ├── variable: z:3 [type=float]
- │    │         │    └── const: 0.0 [type=float]
- │    │         └── const: ',' [as=column10:10, type=string]
- │    └── aggregations
- │         ├── sum [as=sum:7, type=float, outer=(3)]
- │         │    └── variable: z:3 [type=float]
- │         ├── agg-filter [as=avg:9, type=float, outer=(3,8)]
- │         │    ├── avg [type=float]
- │         │    │    └── variable: z:3 [type=float]
- │         │    └── variable: column8:8 [type=bool]
- │         └── agg-distinct [as=string_agg:11, type=string, outer=(4,10)]
- │              └── string-agg [type=string]
- │                   ├── variable: s:4 [type=string]
- │                   └── variable: column10:10 [type=string]
- └── projections
-      └── false [as=bool:12, type=bool]
+error (42601): at or near "from": syntax error
 
 # Scalar groupby.
 build

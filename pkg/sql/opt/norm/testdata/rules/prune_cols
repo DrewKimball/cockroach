@@ -1030,25 +1030,51 @@ project
       │    ├── immutable
       │    ├── key: (1)
       │    ├── fd: (1)-->(2,11)
-      │    ├── left-join-apply
-      │    │    ├── columns: k:1!null i:2 y:8 r:11
+      │    ├── group-by (hash)
+      │    │    ├── columns: k:1!null i:2 r:11 rownum:12
+      │    │    ├── grouping columns: k:1!null rownum:12
       │    │    ├── immutable
-      │    │    ├── fd: (1)-->(2)
-      │    │    ├── scan a
-      │    │    │    ├── columns: k:1!null i:2
-      │    │    │    ├── key: (1)
-      │    │    │    └── fd: (1)-->(2)
+      │    │    ├── key: (1,12)
+      │    │    ├── fd: (1)-->(2), (1,12)-->(2,11)
       │    │    ├── project
-      │    │    │    ├── columns: r:11 y:8
-      │    │    │    ├── outer: (1)
+      │    │    │    ├── columns: filter:13 k:1!null i:2 r:11 rownum:12
       │    │    │    ├── immutable
-      │    │    │    ├── fd: ()-->(11)
-      │    │    │    ├── scan xy
-      │    │    │    │    └── columns: y:8
+      │    │    │    ├── key: (1,12)
+      │    │    │    ├── fd: (1)-->(2), (1,12)-->(11,13)
+      │    │    │    ├── left-join-apply
+      │    │    │    │    ├── columns: k:1!null i:2 y:8 r:11 rownum:12
+      │    │    │    │    ├── immutable
+      │    │    │    │    ├── key: (1,12)
+      │    │    │    │    ├── fd: (1)-->(2), (1,12)-->(8,11)
+      │    │    │    │    ├── scan a
+      │    │    │    │    │    ├── columns: k:1!null i:2
+      │    │    │    │    │    ├── key: (1)
+      │    │    │    │    │    └── fd: (1)-->(2)
+      │    │    │    │    ├── ordinality
+      │    │    │    │    │    ├── columns: y:8 r:11 rownum:12!null
+      │    │    │    │    │    ├── outer: (1)
+      │    │    │    │    │    ├── immutable
+      │    │    │    │    │    ├── key: (12)
+      │    │    │    │    │    ├── fd: ()-->(11), (12)-->(8,11)
+      │    │    │    │    │    └── project
+      │    │    │    │    │         ├── columns: r:11 y:8
+      │    │    │    │    │         ├── outer: (1)
+      │    │    │    │    │         ├── immutable
+      │    │    │    │    │         ├── fd: ()-->(11)
+      │    │    │    │    │         ├── scan xy
+      │    │    │    │    │         │    └── columns: y:8
+      │    │    │    │    │         └── projections
+      │    │    │    │    │              └── k:1 + 1 [as=r:11, outer=(1), immutable]
+      │    │    │    │    └── filters (true)
       │    │    │    └── projections
-      │    │    │         └── k:1 + 1 [as=r:11, outer=(1), immutable]
-      │    │    └── filters
-      │    │         └── y:8 = k:1 [outer=(1,8), constraints=(/1: (/NULL - ]; /8: (/NULL - ]), fd=(1)==(8), (8)==(1)]
+      │    │    │         └── y:8 = k:1 [as=filter:13, outer=(1,8)]
+      │    │    └── aggregations
+      │    │         ├── agg-filter [as=r:11, outer=(11,13)]
+      │    │         │    ├── any-not-null-agg
+      │    │         │    │    └── r:11
+      │    │         │    └── filter:13
+      │    │         └── const-agg [as=i:2, outer=(2)]
+      │    │              └── i:2
       │    └── aggregations
       │         ├── const-agg [as=i:2, outer=(2)]
       │         │    └── i:2

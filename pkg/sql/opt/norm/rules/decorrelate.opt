@@ -669,12 +669,38 @@
 #
 # TODO(andyk): Add other join types.
 [TryDecorrelateLimitOne, Normalize]
-(InnerJoin | InnerJoinApply | LeftJoin | LeftJoinApply
+(InnerJoin | InnerJoinApply
     $left:*
     $right:* &
         (HasOuterCols $right) &
         (Limit $input:* (Const 1) $ordering:*)
     $on:*
+    $private:*
+)
+=>
+(Project
+    # Needed to project away any columns added by EnsureKey.
+    (DistinctOn
+        ((OpName) $newLeft:(EnsureKey $left) $input $on $private)
+        (MakeAggCols2
+            ConstAgg
+            (NonKeyCols $newLeft)
+            FirstAgg
+            (OutputCols $input)
+        )
+        (MakeGrouping (KeyCols $newLeft) $ordering)
+    )
+    []
+    (OutputCols2 $left $right)
+)
+
+[TryDecorrelateLeftJoinLimitOne, Normalize]
+(LeftJoin | LeftJoinApply
+    $left:*
+    $right:* &
+        (HasOuterCols $right) &
+        (Limit $input:* (Const 1) $ordering:*)
+    $on:[]
     $private:*
 )
 =>
@@ -1317,4 +1343,50 @@
         )
     )
     $private
+)
+
+[DecomposeLeftJoin, Normalize, LowPriority]
+(LeftJoin | LeftJoinApply
+    $left:*
+    $right:*
+    $on:* & (ShouldDecomposeLeftJoin $left $right $on)
+    $private:*
+)
+=>
+(Project
+    (GroupBy
+        (Project
+            (LeftJoinApply
+                $left
+                (Let
+                    ($newRight $ordCol):(AddOrdinality $right)
+                    $newRight
+                )
+                []
+                $private
+            )
+            (Let
+                ($proj $filterCol):(MakeProjectionFromFilters
+                    $on
+                )
+                $proj
+            )
+            (OutputCols2 $left $newRight)
+        )
+        (AppendAggCols
+            (MakeFilteredAggCols
+                AnyNotNullAgg
+                (OutputCols $right)
+                $filterCol
+            )
+            ConstAgg
+            (NonKeyCols $left)
+        )
+        (MakeGrouping
+            (AddColToSet (KeyCols $left) $ordCol)
+            (EmptyOrdering)
+        )
+    )
+    []
+    (OutputCols2 $left $right)
 )

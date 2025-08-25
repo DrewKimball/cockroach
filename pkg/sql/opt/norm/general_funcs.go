@@ -1412,6 +1412,21 @@ func (c *CustomFuncs) MakeAggCols(aggOp opt.Operator, cols opt.ColSet) memo.Aggr
 	return aggs
 }
 
+func (c *CustomFuncs) MakeFilteredAggCols(
+	aggOp opt.Operator, cols opt.ColSet, filterCol opt.ColumnID,
+) memo.AggregationsExpr {
+	colsLen := cols.Len()
+	aggs := make(memo.AggregationsExpr, colsLen)
+	c.makeAggCols(aggOp, cols, aggs)
+	for i := range aggs {
+		aggs[i] = c.f.ConstructAggregationsItem(
+			c.f.ConstructAggFilter(aggs[i].Agg, c.f.ConstructVariable(filterCol)),
+			aggs[i].Col,
+		)
+	}
+	return aggs
+}
+
 // ----------------------------------------------------------------------
 //
 // Join functions

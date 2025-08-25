@@ -2555,14 +2555,56 @@ FROM
 project
  ├── columns: id1_0_0_:1!null c_name2_0_0_:2 formula0_0_:10
  ├── immutable
- ├── key: (1)
- ├── fd: (1)-->(2), (2)-->(10)
- ├── scan t_name [as=this_]
- │    ├── columns: this_.id:1!null this_.c_name:2
- │    ├── key: (1)
- │    └── fd: (1)-->(2)
+ ├── fd: (1)-->(2)
+ ├── group-by (hash)
+ │    ├── columns: this_.id:1!null this_.c_name:2 length:9 rownum:11
+ │    ├── grouping columns: this_.id:1!null rownum:11
+ │    ├── immutable
+ │    ├── key: (1,11)
+ │    ├── fd: (1)-->(2), (1,11)-->(2,9)
+ │    ├── project
+ │    │    ├── columns: filter:12 this_.id:1!null this_.c_name:2 length:9 rownum:11
+ │    │    ├── immutable
+ │    │    ├── key: (1,11)
+ │    │    ├── fd: (1)-->(2), (1,11)-->(9,12)
+ │    │    ├── left-join-apply
+ │    │    │    ├── columns: this_.id:1!null this_.c_name:2 t_name.id:5 length:9 rownum:11
+ │    │    │    ├── immutable
+ │    │    │    ├── key: (1,5)
+ │    │    │    ├── fd: (1)-->(2), (1,5)-->(9,11), (1,11)-->(5,9)
+ │    │    │    ├── scan t_name [as=this_]
+ │    │    │    │    ├── columns: this_.id:1!null this_.c_name:2
+ │    │    │    │    ├── key: (1)
+ │    │    │    │    └── fd: (1)-->(2)
+ │    │    │    ├── ordinality
+ │    │    │    │    ├── columns: t_name.id:5!null length:9 rownum:11!null
+ │    │    │    │    ├── outer: (2)
+ │    │    │    │    ├── immutable
+ │    │    │    │    ├── key: (5)
+ │    │    │    │    ├── fd: ()-->(9), (5)-->(9,11), (11)-->(5,9)
+ │    │    │    │    └── project
+ │    │    │    │         ├── columns: length:9 t_name.id:5!null
+ │    │    │    │         ├── outer: (2)
+ │    │    │    │         ├── immutable
+ │    │    │    │         ├── key: (5)
+ │    │    │    │         ├── fd: ()-->(9)
+ │    │    │    │         ├── scan t_name
+ │    │    │    │         │    ├── columns: t_name.id:5!null
+ │    │    │    │         │    └── key: (5)
+ │    │    │    │         └── projections
+ │    │    │    │              └── length(this_.c_name:2) [as=length:9, outer=(2), immutable]
+ │    │    │    └── filters (true)
+ │    │    └── projections
+ │    │         └── this_.id:1 = t_name.id:5 [as=filter:12, outer=(1,5)]
+ │    └── aggregations
+ │         ├── agg-filter [as=length:9, outer=(9,12)]
+ │         │    ├── any-not-null-agg
+ │         │    │    └── length:9
+ │         │    └── filter:12
+ │         └── const-agg [as=this_.c_name:2, outer=(2)]
+ │              └── this_.c_name:2
  └── projections
-      └── length(this_.c_name:2) [as=formula0_0_:10, outer=(2), immutable]
+      └── length:9 [as=formula0_0_:10, outer=(9)]
 
 exec-ddl
 drop table t_name

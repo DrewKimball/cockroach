@@ -1572,3 +1572,27 @@ func (c *CustomFuncs) MakeAnyNotNullScalarGroupBy(input memo.RelExpr) memo.RelEx
 func (c *CustomFuncs) CanHoistUnboundFilterFromExistsSubquery() bool {
 	return c.f.evalCtx.SessionData().OptimizerUseExistsFilterHoistRule
 }
+
+func (c *CustomFuncs) AddOrdinality(in memo.RelExpr) (memo.RelExpr, opt.ColumnID) {
+	colID := c.f.Metadata().AddColumn("rownum", types.Int)
+	private := memo.OrdinalityPrivate{ColID: colID, ForDuplicateRemoval: true}
+	return c.f.ConstructOrdinality(in, &private), colID
+}
+
+func (c *CustomFuncs) ShouldDecomposeLeftJoin(left, right memo.RelExpr, on memo.FiltersExpr) bool {
+	if len(on) == 0 {
+		return false
+	}
+	return !right.Relational().OuterCols.Empty()
+}
+
+func (c *CustomFuncs) MakeProjectionFromFilters(
+	filters memo.FiltersExpr,
+) (memo.ProjectionsExpr, opt.ColumnID) {
+	colID := c.f.Metadata().AddColumn("filter", types.Bool)
+	var filterProj opt.ScalarExpr = memo.TrueSingleton
+	for i := range filters {
+		filterProj = c.f.ConstructAnd(filterProj, filters[i].Condition)
+	}
+	return memo.ProjectionsExpr{c.f.ConstructProjectionsItem(filterProj, colID)}, colID
+}
