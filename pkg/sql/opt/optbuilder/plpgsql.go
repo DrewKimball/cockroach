@@ -321,16 +321,13 @@ func newPLpgSQLBuilder(
 	// Build the initial block for the routine parameters, which are considered
 	// PL/pgSQL variables.
 	b.pushBlock(plBlock{
-		label:    rootBlockLabel,
-		vars:     make([]ast.Variable, 0, len(routineParams)),
-		varTypes: make(map[ast.Variable]*types.T),
+		label:     rootBlockLabel,
+		vars:      make([]*types.T, 0, len(routineParams)),
+		nameToIdx: make(map[ast.Variable]int),
+		varNames:  make(map[int]ast.Variable),
 	})
 	for _, param := range routineParams {
-		if param.name != "" {
-			// TODO(119502): unnamed parameters can only be accessed via $i
-			// notation.
-			b.addVariable(param.name, param.typ)
-		}
+		b.addVariable(param.name, param.typ)
 		if tree.IsOutParamClass(param.class) {
 			b.outParams = append(b.outParams, param.name)
 		}
@@ -345,41 +342,46 @@ type plBlock struct {
 	// resolving a PL/pgSQL variable.
 	label string
 
-	// vars is an ordered list of variables declared in a PL/pgSQL block.
+	// vars is an ordered list of variables declared in a PL/pgSQL block,
+	// identified by position within the block.
 	//
 	// INVARIANT: the variables of a parent (ancestor) block *always* form a
 	// prefix of the variables of a child (descendant) block when creating or
 	// calling a continuation.
-	vars []ast.Variable
+	vars []*types.T
 
-	// varTypes maps from the name of each variable in the scope to its type.
-	varTypes map[ast.Variable]*types.T
-
-	// constants tracks the variables that were declared as constant.
-	constants map[ast.Variable]struct{}
-
-	// cursors is the set of cursor declarations for a PL/pgSQL block. It is set
-	// for bound cursor declarations, which allow a query to be associated with a
-	// cursor before it is opened.
-	cursors map[ast.Variable]ast.CursorDeclaration
-
-	// hiddenVars lists the names of *hidden* variables that were not declared by
-	// the user, but are used internally by the builder. Hidden variables are
-	// not visible to the user, and are identified only by their ordinal position.
-	// They can only be assigned to by directly calling assignToHiddenVariable().
-	// The name of a hidden variable is only used for display purposes.
+	// userVarCount is the number of user-declared variables in vars. All
+	// variables before this index are user-declared; all variables at or after
+	// this index are hidden/internal variables.
+	//
+	// Hidden variables are not visible to the user. They are used internally by
+	// the builder and only referenced by ordinal position. They can only be
+	// assigned to by directly calling assignToHiddenVariable().
 	//
 	// As an example, the internal counter variable for a FOR loop is a
 	// hidden variable.
-	//
-	// INVARIANT: the hidden variables of a given block *always* follow the
-	// variables when creating or calling a continuation.
-	hiddenVars []string
+	userVarCount int
 
-	// hiddenVarTypes maps from each hidden variable in the scope to its type.
-	// It is a list instead of a map because hidden variables are only identified
-	// by their ordinal position.
-	hiddenVarTypes []*types.T
+	// hiddenVarCount is the number of hidden variables in vars (see also
+	// userVarCount). This is used for validation.
+	hiddenVarCount int
+
+	// nameToIdx maps from the name of each variable in the block to its index
+	// within vars. Unnamed variables are not included in this map.
+	nameToIdx map[ast.Variable]int
+
+	// varNames tracks the names of named variables. It tracks variables by index
+	// within vars.
+	varNames map[int]ast.Variable
+
+	// constants tracks the variables that were declared as constant. It tracks
+	// variables by index with vars.
+	constants map[int]struct{}
+
+	// cursors is the set of cursor declarations for a PL/pgSQL block. It is set
+	// for bound cursor declarations, which allow a query to be associated with a
+	// cursor before it is opened. It tracks variables by index with vars
+	cursors map[int]ast.CursorDeclaration
 
 	// hasExceptionHandler tracks whether this block has an exception handler.
 	hasExceptionHandler bool
@@ -455,10 +457,11 @@ func (b *plpgsqlBuilder) pushNewBlock(astBlock *ast.Block) *plBlock {
 	}
 	block := b.pushBlock(plBlock{
 		label:     astBlock.Label,
-		vars:      make([]ast.Variable, 0, len(astBlock.Decls)),
-		varTypes:  make(map[ast.Variable]*types.T),
-		constants: make(map[ast.Variable]struct{}),
-		cursors:   make(map[ast.Variable]ast.CursorDeclaration),
+		vars:      make([]*types.T, 0, len(astBlock.Decls)),
+		nameToIdx: make(map[ast.Variable]int),
+		varNames:  make(map[int]ast.Variable),
+		constants: make(map[int]struct{}),
+		cursors:   make(map[int]ast.CursorDeclaration),
 	})
 	if len(astBlock.Exceptions) > 0 || b.hasExceptionHandler() {
 		// If the current block or some ancestor block has an exception handler, it
@@ -495,7 +498,7 @@ func (b *plpgsqlBuilder) addDeclarations(decls []ast.Statement, block *plBlock, 
 					"variable \"%s\" has pseudo-type %s", dec.Var, typ.Name(),
 				))
 			}
-			b.addVariable(dec.Var, typ)
+			varIdx := b.addVariable(dec.Var, typ)
 			if dec.Expr != nil {
 				// Some variable declarations initialize the variable.
 				s = b.addPLpgSQLAssign(s, dec.Var, dec.Expr, noIndirection)
@@ -508,15 +511,15 @@ func (b *plpgsqlBuilder) addDeclarations(decls []ast.Statement, block *plBlock, 
 			if dec.Constant {
 				// Add to the constants map after initializing the variable, since
 				// constant variables only prevent assignment, not initialization.
-				block.constants[dec.Var] = struct{}{}
+				block.constants[varIdx] = struct{}{}
 			}
 		case *ast.CursorDeclaration:
 			// Declaration of a bound cursor declares a variable of type refcursor.
-			b.addVariable(dec.Name, types.RefCursor)
+			varIdx := b.addVariable(dec.Name, types.RefCursor)
 			s = b.addPLpgSQLAssign(
 				s, dec.Name, &tree.CastExpr{Expr: tree.DNull, Type: types.RefCursor}, noIndirection,
 			)
-			block.cursors[dec.Name] = *dec
+			block.cursors[varIdx] = *dec
 		}
 	}
 	return s
@@ -1042,25 +1045,14 @@ func (b *plpgsqlBuilder) buildPLpgSQLStatements(stmts []ast.Statement, s *scope)
 			}
 			openCon := b.makeContinuation("_stmt_open")
 			openCon.def.Volatility = volatility.Volatile
-			_, source, _, err := openCon.s.FindSourceProvidingColumn(b.ob.ctx, t.CurVar)
-			if err != nil {
-				if pgerror.GetPGCode(err) == pgcode.UndefinedColumn {
-					panic(pgerror.Newf(pgcode.Syntax, "\"%s\" is not a known variable", t.CurVar))
-				}
-				panic(err)
-			}
-			if !source.(*scopeColumn).typ.Identical(types.RefCursor) {
-				panic(pgerror.Newf(pgcode.DatatypeMismatch,
-					"variable \"%s\" must be of type cursor or refcursor", t.CurVar,
-				))
-			}
+
 			// Initialize the routine with the information needed to pipe the first
 			// body statement into a cursor.
-			query := b.resolveOpenQuery(t)
+			query, varOrd := b.resolveOpen(t)
 			fmtCtx := b.ob.evalCtx.FmtCtx(tree.FmtSimple)
 			fmtCtx.FormatNode(query)
 			openCon.def.FirstStmtOutput.CursorDeclaration = &tree.RoutineOpenCursor{
-				NameArgIdx: source.(*scopeColumn).getParamOrd(),
+				NameArgIdx: varOrd,
 				Scroll:     t.Scroll,
 				CursorSQL:  fmtCtx.CloseAndGetString(),
 			}
@@ -1078,7 +1070,7 @@ func (b *plpgsqlBuilder) buildPLpgSQLStatements(stmts []ast.Statement, s *scope)
 			// resulting projected column as input to the OPEN continuation.
 			nameCon := b.makeContinuation("_gen_cursor_name")
 			nameCon.def.Volatility = volatility.Volatile
-			nameScope := b.buildCursorNameGen(&nameCon, t.CurVar)
+			nameScope := b.buildCursorNameGen(&nameCon, varOrd)
 			b.appendBodyStmtFromScope(&nameCon, b.callContinuation(&openCon, nameScope), "" /* stmtTag */)
 			return b.callContinuation(&nameCon, s)
 
@@ -1364,10 +1356,10 @@ func (b *plpgsqlBuilder) handleIntForLoop(
 	)
 	// User-visible variable must be declared before hidden variables in a block.
 	b.addVariable(forLoop.Target[0], types.Int)
-	lowerOrd := b.addHiddenVariable(lowerName, types.Int)
-	upperOrd := b.addHiddenVariable(upperName, types.Int)
-	stepOrd := b.addHiddenVariable(stepName, types.Int)
-	counterOrd := b.addHiddenVariable(counterName, types.Int)
+	lowerOrd := b.addHiddenVariable(types.Int)
+	upperOrd := b.addHiddenVariable(types.Int)
+	stepOrd := b.addHiddenVariable(types.Int)
+	counterOrd := b.addHiddenVariable(types.Int)
 
 	// Initialize the constant bounds and step size.
 	stepSize := control.Step
@@ -1375,9 +1367,9 @@ func (b *plpgsqlBuilder) handleIntForLoop(
 		// The default step size is 1.
 		stepSize = tree.NewDInt(1)
 	}
-	s = b.assignToHiddenVariable(s, lowerOrd, control.Lower)
-	s = b.assignToHiddenVariable(s, upperOrd, control.Upper)
-	s = b.assignToHiddenVariable(s, stepOrd, stepSize)
+	s = b.assignToHiddenVariable(s, lowerOrd, control.Lower, lowerName)
+	s = b.assignToHiddenVariable(s, upperOrd, control.Upper, upperName)
+	s = b.assignToHiddenVariable(s, stepOrd, stepSize, stepName)
 
 	// Add runtime checks for the bounds and step size.
 	branches := make(memo.ScalarListExpr, 0, 4)
@@ -1405,7 +1397,7 @@ func (b *plpgsqlBuilder) handleIntForLoop(
 	b.addRuntimeCheck(s, branches, raiseErrArgs)
 
 	// Initialize the loop counter target variables with the lower bound.
-	s = b.assignToHiddenVariable(s, counterOrd, s.findFuncArgCol(lowerOrd))
+	s = b.assignToHiddenVariable(s, counterOrd, s.findFuncArgCol(lowerOrd), counterName)
 	s = b.addPLpgSQLAssign(s, forLoop.Target[0], s.findFuncArgCol(lowerOrd), noIndirection)
 
 	// The looping will be implemented by two continuations: one to execute the
@@ -1451,7 +1443,7 @@ func (b *plpgsqlBuilder) handleIntForLoop(
 		Left:     incScope.findFuncArgCol(counterOrd),
 		Right:    incScope.findFuncArgCol(stepOrd),
 	}
-	incScope = b.assignToHiddenVariable(incScope, counterOrd, inc)
+	incScope = b.assignToHiddenVariable(incScope, counterOrd, inc, counterName)
 	incScope = b.addPLpgSQLAssign(
 		incScope, forLoop.Target[0], incScope.findFuncArgCol(counterOrd), noIndirection,
 	)
@@ -1465,20 +1457,31 @@ func (b *plpgsqlBuilder) handleIntForLoop(
 	return b.callContinuation(&loopCon, s)
 }
 
-// resolveOpenQuery finds and validates the query that is bound to cursor for
-// the given OPEN statement.
-func (b *plpgsqlBuilder) resolveOpenQuery(open *ast.Open) tree.Statement {
+// resolveOpen finds and validates the query that is bound to cursor for the
+// given OPEN statement. It also validates the existence and type of the target
+// variable. It returns the bound query and the ordinal of the variable within
+// the current scope.
+func (b *plpgsqlBuilder) resolveOpen(open *ast.Open) (boundStmt tree.Statement, varOrd int) {
 	// Search the blocks in reverse order to ensure that more recent declarations
 	// are encountered first.
-	var boundStmt tree.Statement
+	varOrd = -1
 	for i := len(b.blocks) - 1; i >= 0; i-- {
 		block := &b.blocks[i]
-		for name := range block.cursors {
-			if open.CurVar == name {
-				boundStmt = block.cursors[name].Query
-				break
+		if varIdx, ok := block.nameToIdx[open.CurVar]; ok {
+			if !block.vars[varIdx].Identical(types.RefCursor) {
+				panic(pgerror.Newf(pgcode.DatatypeMismatch,
+					"variable \"%s\" must be of type cursor or refcursor", open.CurVar,
+				))
 			}
+			varOrd = b.variableCount(i) + varIdx
+			if cursorDec, isBoundCursor := block.cursors[varIdx]; isBoundCursor {
+				boundStmt = cursorDec.Query
+			}
+			break
 		}
+	}
+	if varOrd == -1 {
+		panic(pgerror.Newf(pgcode.Syntax, "\"%s\" is not a known variable", open.CurVar))
 	}
 	stmt := open.Query
 	if stmt != nil && boundStmt != nil {
@@ -1505,22 +1508,22 @@ func (b *plpgsqlBuilder) resolveOpenQuery(open *ast.Open) tree.Statement {
 			pgcode.InvalidCursorDefinition, "cannot open %s query as cursor", stmt.StatementTag(),
 		))
 	}
-	return stmt
+	return stmt, varOrd
 }
 
 // buildCursorNameGen builds a statement that generates a unique name for the
 // cursor if the variable containing the name is unset. The unique name
 // generation is implemented by the crdb_internal.plpgsql_gen_cursor_name
 // builtin function.
-func (b *plpgsqlBuilder) buildCursorNameGen(nameCon *continuation, nameVar ast.Variable) *scope {
-	_, source, _, _ := nameCon.s.FindSourceProvidingColumn(b.ob.ctx, nameVar)
+func (b *plpgsqlBuilder) buildCursorNameGen(nameCon *continuation, nameVarOrd int) *scope {
+	inCol := nameCon.s.findFuncArgCol(nameVarOrd)
 	const nameFnName = "crdb_internal.plpgsql_gen_cursor_name"
 	props, overloads := builtinsregistry.GetBuiltinProperties(nameFnName)
 	if len(overloads) != 1 {
 		panic(errors.AssertionFailedf("expected one overload for %s", nameFnName))
 	}
 	nameCall := b.ob.factory.ConstructFunction(
-		memo.ScalarListExpr{b.ob.factory.ConstructVariable(source.(*scopeColumn).id)},
+		memo.ScalarListExpr{b.ob.factory.ConstructVariable(inCol.id)},
 		&memo.FunctionPrivate{
 			Name:       nameFnName,
 			Typ:        types.RefCursor,
@@ -1529,7 +1532,8 @@ func (b *plpgsqlBuilder) buildCursorNameGen(nameCon *continuation, nameVar ast.V
 		},
 	)
 	nameScope := nameCon.s.push()
-	b.ob.synthesizeColumn(nameScope, scopeColName(nameVar), types.RefCursor, nil /* expr */, nameCall)
+	col := b.ob.synthesizeColumn(nameScope, inCol.name, types.RefCursor, nil /* expr */, nameCall)
+	col.setParamOrd(nameVarOrd)
 	b.ob.constructProjectForScope(nameCon.s, nameScope)
 	return nameScope
 }
@@ -1577,8 +1581,10 @@ func (b *plpgsqlBuilder) addPLpgSQLAssign(
 
 // assignToHiddenVariable is similar to addPLpgSQLAssign, but it assigns to a
 // hidden variable that is not visible to the user.
-func (b *plpgsqlBuilder) assignToHiddenVariable(inScope *scope, ord int, val ast.Expr) *scope {
-	typ, name := b.resolveVariableForAssignByOrd(ord)
+func (b *plpgsqlBuilder) assignToHiddenVariable(
+	inScope *scope, ord int, val ast.Expr, metadataName string,
+) *scope {
+	typ := b.resolveVariableForAssignByOrd(ord)
 	assignScope := inScope.push()
 	for i := range inScope.cols {
 		col := &inScope.cols[i]
@@ -1590,7 +1596,7 @@ func (b *plpgsqlBuilder) assignToHiddenVariable(inScope *scope, ord int, val ast
 		// column from the previous scope.
 		assignScope.appendColumn(col)
 	}
-	colName := scopeColName("").WithMetadataName(string(name))
+	colName := scopeColName("").WithMetadataName(metadataName)
 	scalar := b.buildSQLExpr(val, typ, inScope)
 	b.addBarrierIfVolatile(inScope, scalar)
 	col := b.ob.synthesizeColumn(assignScope, colName, typ, nil, scalar)
@@ -2217,6 +2223,10 @@ func (b *plpgsqlBuilder) makeContinuation(conName string) continuation {
 	s := b.ob.allocScope()
 	params := make(opt.ColList, 0, b.variableCount(len(b.blocks)))
 	addParam := func(name scopeColumnName, typ *types.T) {
+		if name.metadataName == "" {
+			// Generate a metadata name using the parameter ordinal.
+			name = name.WithMetadataName(fmt.Sprintf("$%d", len(params)+1))
+		}
 		col := b.ob.synthesizeColumn(s, name, typ, nil /* expr */, nil /* scalar */)
 		// TODO(mgartner): Lift the 100 parameter restriction for synthesized
 		// continuation UDFs.
@@ -2236,13 +2246,8 @@ func (b *plpgsqlBuilder) makeContinuation(conName string) continuation {
 	// set of variables that are in scope for that block (see callContinuation).
 	for i := range b.blocks {
 		block := &b.blocks[i]
-		for _, name := range block.vars {
-			addParam(scopeColName(name), block.varTypes[name])
-		}
-		for varIdx, name := range block.hiddenVars {
-			// Do not give the column constructed for a hidden variable a reference
-			// name, since hidden variables cannot be referenced by the user.
-			addParam(scopeColName("").WithMetadataName(name), block.hiddenVarTypes[varIdx])
+		for varIdx, varTyp := range block.vars {
+			addParam(scopeColName(block.varNames[varIdx]), varTyp)
 		}
 	}
 	b.ensureScopeHasExpr(s)
@@ -2370,19 +2375,10 @@ func (b *plpgsqlBuilder) makeContinuationArgs(con *continuation, s *scope) memo.
 			break
 		}
 		block := &b.blocks[i]
-		for _, name := range block.vars {
-			_, source, _, err := s.FindSourceProvidingColumn(b.ob.ctx, name)
-			if err != nil && !errors.Is(err, unimplementedArgvErr) {
-				// Swallow unimplementedArgvErr, since it's ok to reference the TG_ARGV
-				// parameter when calling a continuation.
-				panic(err)
-			}
-			args = append(args, b.ob.factory.ConstructVariable(source.(*scopeColumn).id))
-		}
-		for _, name := range block.hiddenVars {
+		for varIdx := range block.vars {
 			col := s.findFuncArgCol(len(args))
 			if col == nil {
-				panic(errors.AssertionFailedf("hidden variable %s not found", name))
+				panic(errors.AssertionFailedf("variable $%d not found", varIdx+1))
 			}
 			args = append(args, b.ob.factory.ConstructVariable(col.id))
 		}
@@ -2503,56 +2499,44 @@ func (b *plpgsqlBuilder) resolveVariableForAssign(name ast.Variable) (typ *types
 	// are encountered first.
 	for i := len(b.blocks) - 1; i >= 0; i-- {
 		block := &b.blocks[i]
-		varTyp, ok := block.varTypes[name]
-		if !ok {
+		varIdx, ok := block.nameToIdx[name]
+		if !ok || varIdx >= block.userVarCount {
+			// The variable is not in this block.
 			continue
 		}
-		if block.constants != nil {
-			if _, ok := block.constants[name]; ok {
-				panic(pgerror.Newf(pgcode.ErrorInAssignment, "variable \"%s\" is declared CONSTANT", name))
-			}
+		if _, ok := block.constants[varIdx]; ok {
+			panic(pgerror.Newf(pgcode.ErrorInAssignment, "variable \"%s\" is declared CONSTANT", name))
 		}
-		// Get the ordinal position of the variable within the set of variables in
-		// the current scope.
-		ord = b.variableCount(i)
-		for j := range block.vars {
-			if block.vars[j] == name {
-				ord += j
-				break
-			}
-		}
-		return varTyp, ord
+		// The variable ordinal is the count of variables in all preceding blocks
+		// plus the index within the current block.
+		return block.vars[varIdx], b.variableCount(i) + varIdx
 	}
 	panic(pgerror.Newf(pgcode.Syntax, "\"%s\" is not a known variable", name))
 }
 
 // resolveVariableForAssignByOrd is similar to resolveVariableForAssign, but
 // resolves a variable by its ordinal position in the list of all variables in
-// the current scope. It returns the name and type of the variable. It panics if
-// the variable is not found.
+// the current scope. It returns the type of the variable. It panics if the
+// variable is not found.
 //
 // NOTE: unlike resolveVariableForAssign, resolveVariableForAssignByOrd is able
 // to resolve hidden variables.
-func (b *plpgsqlBuilder) resolveVariableForAssignByOrd(ord int) (typ *types.T, name ast.Variable) {
+func (b *plpgsqlBuilder) resolveVariableForAssignByOrd(ord int) (typ *types.T) {
 	originalOrd := ord
 	for i := range b.blocks {
 		block := &b.blocks[i]
 		if ord < len(block.vars) {
-			// This is a user-visible variable.
-			name = block.vars[ord]
-			if block.constants != nil {
-				if _, ok := block.constants[name]; ok {
-					panic(pgerror.Newf(pgcode.ErrorInAssignment, "variable \"%s\" is declared CONSTANT", name))
+			// The variable is in this block.
+			if _, ok := block.constants[ord]; ok {
+				name := block.varNames[ord]
+				if name == "" {
+					name = ast.Variable(fmt.Sprintf("$%d", originalOrd+1))
 				}
+				panic(pgerror.Newf(pgcode.ErrorInAssignment, "variable \"%s\" is declared CONSTANT", name))
 			}
-			return block.varTypes[name], name
+			return block.vars[ord]
 		}
 		ord -= len(block.vars)
-		if ord < len(block.hiddenVars) {
-			// This is a hidden variable.
-			return block.hiddenVarTypes[ord], ast.Variable(block.hiddenVars[ord])
-		}
-		ord -= len(block.hiddenVars)
 	}
 	// Increment the ordinal for the error message, since the placeholder syntax
 	// is 1-based.
@@ -2606,12 +2590,10 @@ func (b *plpgsqlBuilder) checkDuplicateTargets(target []ast.Variable, stmtName s
 // "a.b" syntax.
 func (b *plpgsqlBuilder) checkBlockLabelReference(name string) {
 	for i := len(b.blocks) - 1; i >= 0; i-- {
-		for _, blockVarName := range b.blocks[i].vars {
-			if name == string(blockVarName) {
-				// We found the variable. Even if there is a block with the same name,
-				// it is shadowed by the variable.
-				return
-			}
+		if _, ok := b.blocks[i].nameToIdx[ast.Variable(name)]; ok {
+			// We found the variable. Even if there is a block with the same name,
+			// it is shadowed by the variable.
+			return
 		}
 		if b.blocks[i].label == name {
 			panic(unimplemented.NewWithIssuef(122322,
@@ -2745,37 +2727,43 @@ func (b *plpgsqlBuilder) getContinuation(
 }
 
 // addVariable adds a variable with the given name and type to the current
-// PL/pgSQL block scope.
-func (b *plpgsqlBuilder) addVariable(name ast.Variable, typ *types.T) {
+// PL/pgSQL block scope. It returns the index of the variable within the block.
+func (b *plpgsqlBuilder) addVariable(name ast.Variable, typ *types.T) int {
 	curBlock := b.block()
-	if len(curBlock.hiddenVars) > 0 {
+	if curBlock.hiddenVarCount > 0 {
 		panic(errors.AssertionFailedf("hidden variables must be declared after all visible variables"))
 	}
-	if _, ok := curBlock.varTypes[name]; ok {
+	if _, ok := curBlock.nameToIdx[name]; ok {
 		panic(pgerror.Newf(pgcode.Syntax, "duplicate declaration at or near \"%s\"", name))
 	}
 	for i := range b.blocks {
 		block := &b.blocks[i]
-		if _, ok := block.varTypes[name]; ok {
+		if _, ok := block.nameToIdx[name]; ok {
 			panic(errors.WithHintf(
 				unimplemented.NewWithIssue(117508, "variable shadowing is not yet implemented"),
 				"variable \"%s\" shadows a previously defined variable", name,
 			))
 		}
 	}
-	curBlock.vars = append(curBlock.vars, name)
-	curBlock.varTypes[name] = typ
+	varIdx := len(curBlock.vars)
+	curBlock.vars = append(curBlock.vars, typ)
+	if name != "" {
+		curBlock.nameToIdx[name] = varIdx
+		curBlock.varNames[varIdx] = name
+	}
+	curBlock.userVarCount++
+	return varIdx
 }
 
-// addHiddenVariable adds a hidden variable with the given (metadata) name and
-// type to the current PL/pgSQL block scope. It returns the ordinal position of
-// the variable within the set of all variables in the current scope. This will
-// be used to uniquely identify the hidden variable going forward.
-func (b *plpgsqlBuilder) addHiddenVariable(metadataName string, typ *types.T) (ord int) {
+// addHiddenVariable adds a hidden variable with the given type to the current
+// PL/pgSQL block scope. It returns the ordinal position of the variable within
+// the set of all variables in the current scope. This will be used to uniquely
+// identify the hidden variable going forward.
+func (b *plpgsqlBuilder) addHiddenVariable(typ *types.T) (ord int) {
 	ord = b.variableCount(len(b.blocks))
 	curBlock := b.block()
-	curBlock.hiddenVars = append(curBlock.hiddenVars, metadataName)
-	curBlock.hiddenVarTypes = append(curBlock.hiddenVarTypes, typ)
+	curBlock.vars = append(curBlock.vars, typ)
+	curBlock.hiddenVarCount++
 	return ord
 }
 
@@ -2832,7 +2820,6 @@ func (b *plpgsqlBuilder) variableCount(numBlocks int) int {
 	var count int
 	for i := range numBlocks {
 		count += len(b.blocks[i].vars)
-		count += len(b.blocks[i].hiddenVars)
 	}
 	return count
 }

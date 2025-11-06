@@ -7127,7 +7127,7 @@ values
                                │    ├── variable: "_loop_upper":5
                                │    ├── variable: "_loop_step":6
                                │    └── variable: "_loop_counter":8
-                               ├── params: i:10 "_loop_lower":11 "_loop_upper":12 "_loop_step":13 "_loop_counter":14
+                               ├── params: i:10 "$2":11 "$3":12 "$4":13 "$5":14
                                └── body
                                     └── values
                                          ├── columns: stmt_if_11:35
@@ -7136,17 +7136,17 @@ values
                                                    ├── true
                                                    ├── when
                                                    │    ├── le
-                                                   │    │    ├── variable: "_loop_counter":14
-                                                   │    │    └── variable: "_loop_upper":12
+                                                   │    │    ├── variable: "$5":14
+                                                   │    │    └── variable: "$3":12
                                                    │    └── udf: _stmt_raise_9
                                                    │         ├── tail-call
                                                    │         ├── args
                                                    │         │    ├── variable: i:10
-                                                   │         │    ├── variable: "_loop_lower":11
-                                                   │         │    ├── variable: "_loop_upper":12
-                                                   │         │    ├── variable: "_loop_step":13
-                                                   │         │    └── variable: "_loop_counter":14
-                                                   │         ├── params: i:26 "_loop_lower":27 "_loop_upper":28 "_loop_step":29 "_loop_counter":30
+                                                   │         │    ├── variable: "$2":11
+                                                   │         │    ├── variable: "$3":12
+                                                   │         │    ├── variable: "$4":13
+                                                   │         │    └── variable: "$5":14
+                                                   │         ├── params: i:26 "$2":27 "$3":28 "$4":29 "$5":30
                                                    │         └── body
                                                    │              ├── values
                                                    │              │    ├── columns: stmt_raise_10:31
@@ -7171,11 +7171,11 @@ values
                                                    │                             ├── tail-call
                                                    │                             ├── args
                                                    │                             │    ├── variable: i:26
-                                                   │                             │    ├── variable: "_loop_lower":27
-                                                   │                             │    ├── variable: "_loop_upper":28
-                                                   │                             │    ├── variable: "_loop_step":29
-                                                   │                             │    └── variable: "_loop_counter":30
-                                                   │                             ├── params: i:15 "_loop_lower":16 "_loop_upper":17 "_loop_step":18 "_loop_counter":19
+                                                   │                             │    ├── variable: "$2":27
+                                                   │                             │    ├── variable: "$3":28
+                                                   │                             │    ├── variable: "$4":29
+                                                   │                             │    └── variable: "$5":30
+                                                   │                             ├── params: i:15 "$2":16 "$3":17 "$4":18 "$5":19
                                                    │                             └── body
                                                    │                                  └── project
                                                    │                                       ├── columns: stmt_loop_6:38
@@ -7187,8 +7187,8 @@ values
                                                    │                                       │         │    ├── columns: "_loop_counter":36
                                                    │                                       │         │    └── tuple
                                                    │                                       │         │         └── plus
-                                                   │                                       │         │              ├── variable: "_loop_counter":19
-                                                   │                                       │         │              └── variable: "_loop_step":18
+                                                   │                                       │         │              ├── variable: "$5":19
+                                                   │                                       │         │              └── variable: "$4":18
                                                    │                                       │         └── projections
                                                    │                                       │              └── variable: "_loop_counter":36 [as=i:37]
                                                    │                                       └── projections
@@ -7196,9 +7196,9 @@ values
                                                    │                                                 ├── tail-call
                                                    │                                                 ├── args
                                                    │                                                 │    ├── variable: i:37
-                                                   │                                                 │    ├── variable: "_loop_lower":16
-                                                   │                                                 │    ├── variable: "_loop_upper":17
-                                                   │                                                 │    ├── variable: "_loop_step":18
+                                                   │                                                 │    ├── variable: "$2":16
+                                                   │                                                 │    ├── variable: "$3":17
+                                                   │                                                 │    ├── variable: "$4":18
                                                    │                                                 │    └── variable: "_loop_counter":36
                                                    │                                                 └── recursive-call
                                                    └── udf: loop_exit_1
@@ -7562,7 +7562,7 @@ project
                      │                                  │    ├── variable: "_loop_upper":27
                      │                                  │    ├── variable: "_loop_step":28
                      │                                  │    └── variable: "_loop_counter":30
-                     │                                  ├── params: x:32 i:33 "_loop_lower":34 "_loop_upper":35 "_loop_step":36 "_loop_counter":37
+                     │                                  ├── params: x:32 i:33 "$3":34 "$4":35 "$5":36 "$6":37
                      │                                  └── body
                      │                                       └── project
                      │                                            ├── columns: stmt_if_12:83
@@ -7573,8 +7573,8 @@ project
                      │                                                      ├── true
                      │                                                      ├── when
                      │                                                      │    ├── le
-                     │                                                      │    │    ├── variable: "_loop_counter":37
-                     │                                                      │    │    └── variable: "_loop_upper":35
+                     │                                                      │    │    ├── variable: "$6":37
+                     │                                                      │    │    └── variable: "$4":35
                      │                                                      │    └── subquery
                      │                                                      │         ├── tail-call
                      │                                                      │         └── project
@@ -7587,11 +7587,11 @@ project
                      │                                                      │                        ├── args
                      │                                                      │                        │    ├── variable: x:32
                      │                                                      │                        │    ├── variable: i:33
-                     │                                                      │                        │    ├── variable: "_loop_lower":34
-                     │                                                      │                        │    ├── variable: "_loop_upper":35
-                     │                                                      │                        │    ├── variable: "_loop_step":36
-                     │                                                      │                        │    └── variable: "_loop_counter":37
-                     │                                                      │                        ├── params: x:51 i:52 "_loop_lower":53 "_loop_upper":54 "_loop_step":55 "_loop_counter":56
+                     │                                                      │                        │    ├── variable: "$3":34
+                     │                                                      │                        │    ├── variable: "$4":35
+                     │                                                      │                        │    ├── variable: "$5":36
+                     │                                                      │                        │    └── variable: "$6":37
+                     │                                                      │                        ├── params: x:51 i:52 "$3":53 "$4":54 "$5":55 "$6":56
                      │                                                      │                        └── body
                      │                                                      │                             ├── project
                      │                                                      │                             │    ├── columns: stmt_raise_10:57
@@ -7640,11 +7640,11 @@ project
                      │                                                      │                                            ├── args
                      │                                                      │                                            │    ├── variable: x:60
                      │                                                      │                                            │    ├── variable: i:52
-                     │                                                      │                                            │    ├── variable: "_loop_lower":53
-                     │                                                      │                                            │    ├── variable: "_loop_upper":54
-                     │                                                      │                                            │    ├── variable: "_loop_step":55
-                     │                                                      │                                            │    └── variable: "_loop_counter":56
-                     │                                                      │                                            ├── params: x:61 i:62 "_loop_lower":63 "_loop_upper":64 "_loop_step":65 "_loop_counter":66
+                     │                                                      │                                            │    ├── variable: "$3":53
+                     │                                                      │                                            │    ├── variable: "$4":54
+                     │                                                      │                                            │    ├── variable: "$5":55
+                     │                                                      │                                            │    └── variable: "$6":56
+                     │                                                      │                                            ├── params: x:61 i:62 "$3":63 "$4":64 "$5":65 "$6":66
                      │                                                      │                                            └── body
                      │                                                      │                                                 ├── with &5 (foo)
                      │                                                      │                                                 │    ├── insert kv
@@ -7680,11 +7680,11 @@ project
                      │                                                      │                                                                ├── args
                      │                                                      │                                                                │    ├── variable: x:61
                      │                                                      │                                                                │    ├── variable: i:62
-                     │                                                      │                                                                │    ├── variable: "_loop_lower":63
-                     │                                                      │                                                                │    ├── variable: "_loop_upper":64
-                     │                                                      │                                                                │    ├── variable: "_loop_step":65
-                     │                                                      │                                                                │    └── variable: "_loop_counter":66
-                     │                                                      │                                                                ├── params: x:44 i:45 "_loop_lower":46 "_loop_upper":47 "_loop_step":48 "_loop_counter":49
+                     │                                                      │                                                                │    ├── variable: "$3":63
+                     │                                                      │                                                                │    ├── variable: "$4":64
+                     │                                                      │                                                                │    ├── variable: "$5":65
+                     │                                                      │                                                                │    └── variable: "$6":66
+                     │                                                      │                                                                ├── params: x:44 i:45 "$3":46 "$4":47 "$5":48 "$6":49
                      │                                                      │                                                                └── body
                      │                                                      │                                                                     └── project
                      │                                                      │                                                                          ├── columns: stmt_loop_inc_7:50
@@ -7696,11 +7696,11 @@ project
                      │                                                      │                                                                                    ├── args
                      │                                                      │                                                                                    │    ├── variable: x:44
                      │                                                      │                                                                                    │    ├── variable: i:45
-                     │                                                      │                                                                                    │    ├── variable: "_loop_lower":46
-                     │                                                      │                                                                                    │    ├── variable: "_loop_upper":47
-                     │                                                      │                                                                                    │    ├── variable: "_loop_step":48
-                     │                                                      │                                                                                    │    └── variable: "_loop_counter":49
-                     │                                                      │                                                                                    ├── params: x:38 i:39 "_loop_lower":40 "_loop_upper":41 "_loop_step":42 "_loop_counter":43
+                     │                                                      │                                                                                    │    ├── variable: "$3":46
+                     │                                                      │                                                                                    │    ├── variable: "$4":47
+                     │                                                      │                                                                                    │    ├── variable: "$5":48
+                     │                                                      │                                                                                    │    └── variable: "$6":49
+                     │                                                      │                                                                                    ├── params: x:38 i:39 "$3":40 "$4":41 "$5":42 "$6":43
                      │                                                      │                                                                                    └── body
                      │                                                      │                                                                                         └── project
                      │                                                      │                                                                                              ├── columns: stmt_loop_6:86
@@ -7714,8 +7714,8 @@ project
                      │                                                      │                                                                                              │         │    │    └── tuple
                      │                                                      │                                                                                              │         │    └── projections
                      │                                                      │                                                                                              │         │         └── plus [as="_loop_counter":84]
-                     │                                                      │                                                                                              │         │              ├── variable: "_loop_counter":43
-                     │                                                      │                                                                                              │         │              └── variable: "_loop_step":42
+                     │                                                      │                                                                                              │         │              ├── variable: "$6":43
+                     │                                                      │                                                                                              │         │              └── variable: "$5":42
                      │                                                      │                                                                                              │         └── projections
                      │                                                      │                                                                                              │              └── variable: "_loop_counter":84 [as=i:85]
                      │                                                      │                                                                                              └── projections
@@ -7724,9 +7724,9 @@ project
                      │                                                      │                                                                                                        ├── args
                      │                                                      │                                                                                                        │    ├── variable: x:38
                      │                                                      │                                                                                                        │    ├── variable: i:85
-                     │                                                      │                                                                                                        │    ├── variable: "_loop_lower":40
-                     │                                                      │                                                                                                        │    ├── variable: "_loop_upper":41
-                     │                                                      │                                                                                                        │    ├── variable: "_loop_step":42
+                     │                                                      │                                                                                                        │    ├── variable: "$3":40
+                     │                                                      │                                                                                                        │    ├── variable: "$4":41
+                     │                                                      │                                                                                                        │    ├── variable: "$5":42
                      │                                                      │                                                                                                        │    └── variable: "_loop_counter":84
                      │                                                      │                                                                                                        └── recursive-call
                      │                                                      └── subquery
@@ -8104,3 +8104,72 @@ values
                                          │              └── filters (true)
                                          └── projections
                                               └── const: 2 [as="_stmt_exec_ret_2":19]
+
+# Regression test for #145407. Make sure unnamed routine parameters are handled.
+exec-ddl
+CREATE FUNCTION tftest(INT) RETURNS TABLE(a INT, b INT) AS $$
+  BEGIN
+    RETURN QUERY SELECT $1, $1+i FROM generate_series(1,5) g(i);
+  END;
+$$ LANGUAGE PLpgSQL IMMUTABLE STRICT;
+----
+
+build format=show-scalars
+SELECT * FROM tftest(10);
+----
+project-set
+ ├── columns: a:12 b:13
+ ├── values
+ │    └── tuple
+ └── zip
+      └── udf: tftest
+           ├── strict
+           ├── args
+           │    └── const: 10
+           ├── params: arg1:1
+           └── body
+                └── project
+                     ├── columns: return_next_1:11
+                     ├── project
+                     │    ├── columns: b:3 a:2
+                     │    ├── project
+                     │    │    ├── columns: a:2
+                     │    │    ├── values
+                     │    │    │    └── tuple
+                     │    │    └── projections
+                     │    │         └── cast: INT8 [as=a:2]
+                     │    │              └── null
+                     │    └── projections
+                     │         └── cast: INT8 [as=b:3]
+                     │              └── null
+                     └── projections
+                          └── udf: return_next_1 [as=return_next_1:11]
+                               ├── args
+                               │    ├── variable: arg1:1
+                               │    ├── variable: a:2
+                               │    └── variable: b:3
+                               ├── params: "$1":4 a:5 b:6
+                               └── body
+                                    ├── add-to-srf-result
+                                    │    └── project
+                                    │         ├── columns: "?column?":8 "?column?":9
+                                    │         ├── project-set
+                                    │         │    ├── columns: generate_series:7
+                                    │         │    ├── values
+                                    │         │    │    └── tuple
+                                    │         │    └── zip
+                                    │         │         └── function: generate_series
+                                    │         │              ├── const: 1
+                                    │         │              └── const: 5
+                                    │         └── projections
+                                    │              ├── variable: "$1":4 [as="?column?":8]
+                                    │              └── plus [as="?column?":9]
+                                    │                   ├── variable: "$1":4
+                                    │                   └── variable: generate_series:7
+                                    └── project
+                                         ├── columns: "_implicit_return":10
+                                         ├── values
+                                         │    └── tuple
+                                         └── projections
+                                              └── cast: VOID [as="_implicit_return":10]
+                                                   └── null

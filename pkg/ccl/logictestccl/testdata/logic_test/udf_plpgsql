@@ -3409,3 +3409,48 @@ NOTICE: i: 4 j: 2
 NOTICE: outer_counter: 4 inner_counter: 8
 
 subtest end
+
+# Regression test for #145407. Make sure unnamed routine parameters are handled.
+subtest regression_145407
+
+statement ok
+CREATE FUNCTION tftest(INT) RETURNS TABLE(a INT, b INT) AS $$
+  BEGIN
+    RETURN QUERY SELECT $1, $1+i FROM generate_series(1,5) g(i);
+  END;
+$$ LANGUAGE PLpgSQL IMMUTABLE STRICT;
+
+query II rowsort
+SELECT * FROM tftest(10);
+----
+10  11
+10  12
+10  13
+10  14
+10  15
+
+statement ok
+CREATE TABLE flight (flightid INT, flightdate DATE);
+
+statement ok
+INSERT INTO flight VALUES
+(1, '2024-01-01'),
+(2, '2024-01-01'),
+(3, '2024-01-02'),
+(4, '2024-01-03');
+
+statement ok
+CREATE OR REPLACE FUNCTION get_available_flightid(DATE) RETURNS SETOF INT AS $BODY$
+  BEGIN
+    RETURN QUERY SELECT flightid FROM flight WHERE flightdate >= $1 AND flightdate < ($1 + 1);
+    RETURN;
+  END;
+$BODY$ LANGUAGE PLpgSQL;
+
+query I rowsort
+SELECT get_available_flightid('2024-01-01');
+----
+1
+2
+
+subtest end
