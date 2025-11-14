@@ -493,6 +493,13 @@ func (rf *Fetcher) Init(ctx context.Context, args FetcherInitArgs) error {
 		}
 	}
 
+	// The per-scan key limit may cut off the KVs in the middle of a SQL row.
+	// Prevent this by setting WholeRowsOfSize.
+	var wholeRowsOfSize int32
+	if args.PerScanRequestKeyLimit > 0 {
+		wholeRowsOfSize = int32(args.Spec.MaxKeysPerRow)
+	}
+
 	if args.StreamingKVFetcher != nil {
 		if args.WillUseKVProvider {
 			return errors.AssertionFailedf(
@@ -516,6 +523,7 @@ func (rf *Fetcher) Init(ctx context.Context, args FetcherInitArgs) error {
 			kvPairsRead:                &kvPairsRead,
 			batchRequestsIssued:        &batchRequestsIssued,
 			perScanRequestKeyLimit:     args.PerScanRequestKeyLimit,
+			wholeRowsOfSize:            wholeRowsOfSize,
 		}
 		if args.Txn != nil {
 			fetcherArgs.sendFn = makeSendFunc(args.Txn, args.Spec.External, &batchRequestsIssued)

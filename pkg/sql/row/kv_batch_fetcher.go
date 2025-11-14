@@ -166,6 +166,10 @@ type txnKVFetcher struct {
 	// will be returned for each scan request issued by the fetcher. The fetcher
 	// may return extra KV pairs beyond this limit.
 	perScanRequestKeyLimit rowinfra.KeyLimit
+	// wholeRowsOfSize, if set to a non-zero value, indicates the maximum number
+	// of KVs corresponding to a SQL row. It must be set if perScanRequestKeyLimit
+	// is set, since otherwise we could return only a partial SQL row.
+	wholeRowsOfSize int32
 
 	// scanFormat indicates the scan format that should be used for Scans and
 	// ReverseScans. With COL_BATCH_RESPONSE scan format, indexFetchSpec must be
@@ -356,6 +360,7 @@ type newTxnKVFetcherArgs struct {
 	batchRequestsIssued        *int64
 	rawMVCCValues              bool
 	perScanRequestKeyLimit     rowinfra.KeyLimit
+	wholeRowsOfSize            int32
 
 	admission struct { // groups AC-related fields
 		requestHeader  kvpb.AdmissionHeader
@@ -387,6 +392,7 @@ func newTxnKVFetcherInternal(args newTxnKVFetcherArgs) *txnKVFetcher {
 		requestAdmissionHeader:     args.admission.requestHeader,
 		responseAdmissionQ:         args.admission.responseQ,
 		perScanRequestKeyLimit:     args.perScanRequestKeyLimit,
+		wholeRowsOfSize:            args.wholeRowsOfSize,
 	}
 
 	f.maybeInitAdmissionPacer(
@@ -609,6 +615,7 @@ func (f *txnKVFetcher) fetch(ctx context.Context) error {
 	ba.Header.TargetBytes = int64(f.batchBytesLimit)
 	ba.Header.MaxSpanRequestKeys = int64(f.getBatchKeyLimit())
 	ba.Header.MaxPerScanRequestKeys = int64(f.perScanRequestKeyLimit)
+	ba.Header.WholeRowsOfSize = f.wholeRowsOfSize
 	ba.Header.IsReverse = f.reverse
 	if buildutil.CrdbTestBuild {
 		if f.scanFormat == kvpb.COL_BATCH_RESPONSE && f.indexFetchSpec == nil {
