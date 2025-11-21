@@ -9,6 +9,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/catalog/colinfo"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/memo"
+	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/volatility"
 	"github.com/cockroachdb/cockroach/pkg/util/intsets"
 	"github.com/cockroachdb/errors"
@@ -461,21 +462,19 @@ func (c *CustomFuncs) ConvertUDFToSubquery(
 	// argForParam returns the argument that can be substituted for the given
 	// column, if the column is a parameter of the UDF. It returns ok=false if
 	// the column is not a UDF parameter.
-	argForParam := func(col opt.ColumnID) (e opt.Expr, ok bool) {
-		for i := range udfp.Def.Params {
-			if udfp.Def.Params[i] == col {
-				return args[i], true
-			}
+	argForParam := func(pl *tree.Placeholder) (e opt.Expr, ok bool) {
+		if int(pl.Idx) > len(args) {
+			panic(errors.AssertionFailedf("routine parameter out of range"))
 		}
-		return nil, false
+		return args[int(pl.Idx)], true
 	}
 
 	// replace substitutes variables that are UDF parameters with the
 	// corresponding argument from the invocation of the UDF.
 	var replace ReplaceFunc
 	replace = func(nd opt.Expr) opt.Expr {
-		if t, ok := nd.(*memo.VariableExpr); ok {
-			if arg, ok := argForParam(t.Col); ok {
+		if t, ok := nd.(*memo.PlaceholderExpr); ok {
+			if arg, ok := argForParam(t.Value.(*tree.Placeholder)); ok {
 				return arg
 			}
 		}

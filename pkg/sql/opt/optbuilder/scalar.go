@@ -1006,3 +1006,14 @@ func reType(expr tree.TypedExpr, typ *types.T) tree.TypedExpr {
 	}
 	return retypedExpr
 }
+
+func (b *Builder) buildVariableRef(col *scopeColumn) opt.ScalarExpr {
+	if col.hasParamOrd() {
+		placeholder, err := tree.NewTypedPlaceholder(col.getParamOrd(), col.typ)
+		if err != nil {
+			panic(err)
+		}
+		return b.factory.ConstructPlaceholder(placeholder)
+	}
+	return b.factory.ConstructVariable(col.id)
+}

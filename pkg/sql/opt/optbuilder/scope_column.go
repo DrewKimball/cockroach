@@ -144,6 +144,10 @@ func (c *scopeColumn) getParamOrd() int {
 	return int(c.paramOrd) - 1
 }
 
+func (c *scopeColumn) hasParamOrd() bool {
+	return c.paramOrd > 0
+}
+
 // funcParamReferencedBy returns true if the scopeColumn is a function parameter
 // column that can be referenced by the given 0-based ordinal.
 func (c *scopeColumn) funcParamReferencedBy(ord int) bool {

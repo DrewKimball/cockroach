@@ -48,9 +48,8 @@ call
                           │         └── body
                           │              ├── values
                           │              │    ├── columns: stmt_raise_3:5
-                          │              │    ├── outer: (4)
                           │              │    ├── cardinality: [1 - 1]
-                          │              │    ├── volatile
+                          │              │    ├── volatile, has-placeholder
                           │              │    ├── key: ()
                           │              │    ├── fd: ()-->(5)
                           │              │    └── tuple
@@ -61,7 +60,7 @@ call
                           │              │              │    │    ├── const: 'foo '
                           │              │              │    │    └── coalesce
                           │              │              │    │         ├── cast: STRING
-                          │              │              │    │         │    └── variable: x:4
+                          │              │              │    │         │    └── placeholder: $1
                           │              │              │    │         └── const: '<NULL>'
                           │              │              │    └── const: ''
                           │              │              ├── const: ''
@@ -90,12 +89,12 @@ call
                                └── body
                                     ├── values
                                     │    ├── columns: x:9
-                                    │    ├── outer: (8)
                                     │    ├── cardinality: [1 - 1]
+                                    │    ├── has-placeholder
                                     │    ├── key: ()
                                     │    ├── fd: ()-->(9)
                                     │    └── tuple
-                                    │         └── variable: x:8
+                                    │         └── placeholder: $1
                                     └── values
                                          ├── columns: stmt_if_1:10
                                          ├── cardinality: [1 - 1]
@@ -111,3 +110,103 @@ call
                                                         ├── fd: ()-->(3)
                                                         └── tuple
                                                              └── null
+
+# Regression test for #157840 - don't apply decorrelation rules targeting
+# routine parameters.
+exec-ddl
+CREATE TABLE t (
+  k INT PRIMARY KEY,
+  s STRING
+);
+----
+
+exec-ddl
+CREATE PROCEDURE p_decorrelation(ts t[]) LANGUAGE SQL AS $$
+  WITH ins AS (
+    SELECT (p).k, (p).s
+    FROM ROWS FROM (unnest(ts)) AS p
+  )
+  UPDATE t
+  SET s = ins.s
+  FROM ins
+  WHERE t.k = ins.k
+$$;
+----
+
+# The filter should remain in the join's ON condition.
+# TODO(drewk): add expect-not for decorrelation rule that was firing.
+norm format=show-scalars
+CALL p_decorrelation(ARRAY[
+  ROW(1, 'one')::t,
+  ROW(2, 'two')::t,
+  ROW(3, 'three')::t
+]);
+----
+call
+ ├── cardinality: [0 - 0]
+ ├── volatile
+ └── procedure: p_decorrelation
+      ├── args
+      │    └── const: ARRAY[((1, 'one') AS k, s),((2, 'two') AS k, s),((3, 'three') AS k, s)]
+      ├── params: ts:1
+      └── body
+           ├── update t
+           │    ├── columns: <none>
+           │    ├── fetch columns: t.k:9 t.s:10
+           │    ├── passthrough columns: k:13 s:14
+           │    ├── update-mapping:
+           │    │    └── s:14 => t.s:6
+           │    ├── cardinality: [0 - 0]
+           │    ├── volatile, mutations, has-placeholder
+           │    └── distinct-on
+           │         ├── columns: t.k:9!null t.s:10 k:13!null s:14
+           │         ├── grouping columns: t.k:9!null
+           │         ├── immutable, has-placeholder
+           │         ├── key: (9)
+           │         ├── fd: (9)-->(10,13,14), (9)==(13), (13)==(9)
+           │         ├── inner-join (hash)
+           │         │    ├── columns: t.k:9!null t.s:10 k:13!null s:14
+           │         │    ├── multiplicity: left-rows(zero-or-more), right-rows(zero-or-one)
+           │         │    ├── immutable, has-placeholder
+           │         │    ├── fd: (9)-->(10), (9)==(13), (13)==(9)
+           │         │    ├── scan t
+           │         │    │    ├── columns: t.k:9!null t.s:10
+           │         │    │    ├── flags: avoid-full-scan
+           │         │    │    ├── key: (9)
+           │         │    │    └── fd: (9)-->(10)
+           │         │    ├── project
+           │         │    │    ├── columns: k:13 s:14
+           │         │    │    ├── immutable, has-placeholder
+           │         │    │    ├── project-set
+           │         │    │    │    ├── columns: unnest:2
+           │         │    │    │    ├── immutable, has-placeholder
+           │         │    │    │    ├── values
+           │         │    │    │    │    ├── cardinality: [1 - 1]
+           │         │    │    │    │    ├── key: ()
+           │         │    │    │    │    └── tuple
+           │         │    │    │    └── zip
+           │         │    │    │         └── function: unnest [immutable]
+           │         │    │    │              └── placeholder: $1
+           │         │    │    └── projections
+           │         │    │         ├── column-access: 0 [as=k:13, outer=(2)]
+           │         │    │         │    └── variable: unnest:2
+           │         │    │         └── column-access: 1 [as=s:14, outer=(2)]
+           │         │    │              └── variable: unnest:2
+           │         │    └── filters
+           │         │         └── eq [outer=(9,13), constraints=(/9: (/NULL - ]; /13: (/NULL - ]), fd=(9)==(13), (13)==(9)]
+           │         │              ├── variable: t.k:9
+           │         │              └── variable: k:13
+           │         └── aggregations
+           │              ├── first-agg [as=t.s:10, outer=(10)]
+           │              │    └── variable: t.s:10
+           │              ├── first-agg [as=k:13, outer=(13)]
+           │              │    └── variable: k:13
+           │              └── first-agg [as=s:14, outer=(14)]
+           │                   └── variable: s:14
+           └── values
+                ├── columns: column1:15
+                ├── cardinality: [1 - 1]
+                ├── key: ()
+                ├── fd: ()-->(15)
+                └── tuple
+                     └── null

@@ -1145,19 +1145,6 @@ func (b *Builder) buildRoutinePlanGenerator(
 	wrapRootExpr wrapRootExprFn,
 	resultBufferID memo.RoutineResultBufferID,
 ) tree.RoutinePlanGenerator {
-	// argOrd returns the ordinal of the argument within the arguments list that
-	// can be substituted for each reference to the given function parameter
-	// column. If the given column does not represent a function parameter,
-	// ok=false is returned.
-	argOrd := func(col opt.ColumnID) (ord int, ok bool) {
-		for i, param := range params {
-			if col == param {
-				return i, true
-			}
-		}
-		return 0, false
-	}
-
 	// We will pre-populate the withExprs of the new execbuilder.
 	var withExprs []builtWithExpr
 	if allowOuterWithRefs {
@@ -1224,8 +1211,9 @@ func (b *Builder) buildRoutinePlanGenerator(
 			var replaceFn norm.ReplaceFunc
 			replaceFn = func(e opt.Expr) opt.Expr {
 				switch t := e.(type) {
-				case *memo.VariableExpr:
-					if ord, ok := argOrd(t.Col); ok {
+				case *memo.PlaceholderExpr:
+					ord := int(t.Value.(*tree.Placeholder).Idx)
+					if ord < len(args) {
 						return f.ConstructConstVal(args[ord], t.Typ)
 					}
 

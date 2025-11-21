@@ -321,7 +321,7 @@ func (b *Builder) finishBuildScalarRef(
 	// If this is not a projection context, then wrap the column reference with
 	// a Variable expression that can be embedded in outer expression(s).
 	if outScope == nil {
-		return b.factory.ConstructVariable(col.id)
+		return b.buildVariableRef(col)
 	}
 
 	// Outer columns must be wrapped in a variable expression and assigned a new
@@ -333,7 +333,7 @@ func (b *Builder) finishBuildScalarRef(
 			if outCol.name.IsAnonymous() {
 				outCol.name = col.name
 			}
-			group := b.factory.ConstructVariable(col.id)
+			group := b.buildVariableRef(col)
 			b.populateSynthesizedColumn(outCol, group)
 			return group
 		}
