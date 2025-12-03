@@ -12,8 +12,7 @@ import (
 
 // AnalysisResult represents a single performance issue found in the bundle
 type AnalysisResult struct {
-	Severity   string                 `json:"severity"` // "critical", "warning", "info"
-	Category   string                 `json:"category"` // "scan", "join", "sort", "network", etc.
+	Category   string                 `json:"category"` // "scan", "join", "sort", etc.
 	Message    string                 `json:"message"`
 	Suggestion string                 `json:"suggestion"`
 	Details    map[string]interface{} `json:"details"`
@@ -27,9 +26,6 @@ type AnalysisResult struct {
 // Report contains the overall analysis results
 type Report struct {
 	Status     string           `json:"status"`
-	Critical   int              `json:"critical"`
-	Warnings   int              `json:"warnings"`
-	Info       int              `json:"info"`
 	Issues     []AnalysisResult `json:"issues"`
 	Version    string           `json:"version,omitempty"`
 	BundlePath string           `json:"bundle_path,omitempty"`
@@ -250,6 +246,7 @@ func (a *Analyzer) analyzeExplainPlan(planContent string) []AnalysisResult {
 	results = append(results, a.checkJoins(planTree)...)
 	results = append(results, a.checkIndexJoins(planTree)...)
 	results = append(results, a.checkSorts(planTree)...)
+	results = append(results, a.checkRowProcessingEfficiency(planTree)...)
 
 	// Populate total execution time in all results
 	totalTime := planTree.GetTotalExecutionTime()
@@ -272,33 +269,14 @@ func (a *Analyzer) generateReport(results []AnalysisResult) *Report {
 		fmt.Println("✓ No significant performance issues detected!")
 		return &Report{
 			Status:     "ok",
-			Critical:   0,
-			Warnings:   0,
-			Info:       0,
 			Issues:     []AnalysisResult{},
 			Version:    a.version,
 			BundlePath: a.bundlePath,
 		}
 	}
 
-	// Group by severity
-	var critical, warnings, info []AnalysisResult
-	for _, result := range results {
-		switch result.Severity {
-		case "critical":
-			critical = append(critical, result)
-		case "warning":
-			warnings = append(warnings, result)
-		case "info":
-			info = append(info, result)
-		}
-	}
-
 	report := &Report{
 		Status:     "issues_found",
-		Critical:   len(critical),
-		Warnings:   len(warnings),
-		Info:       len(info),
 		Issues:     results,
 		Version:    a.version,
 		BundlePath: a.bundlePath,
@@ -309,44 +287,53 @@ func (a *Analyzer) generateReport(results []AnalysisResult) *Report {
 
 // PrintReport prints the analysis report to stdout
 func (a *Analyzer) PrintReport(report *Report) {
-	if report.Critical > 0 {
-		fmt.Printf("🔴 CRITICAL ISSUES (%d):\n", report.Critical)
-		counter := 1
-		for _, result := range report.Issues {
-			if result.Severity == "critical" {
-				fmt.Printf("\n  %d. %s\n", counter, result.Message)
-				fmt.Printf("     Category: %s\n", result.Category)
-				fmt.Printf("     💡 %s\n", result.Suggestion)
-				counter++
+	if len(report.Issues) > 0 {
+		// Sort issues by time impact (most expensive first)
+		sortedIssues := make([]AnalysisResult, len(report.Issues))
+		copy(sortedIssues, report.Issues)
+
+		// Sort by most time-consuming first
+		for i := 0; i < len(sortedIssues)-1; i++ {
+			for j := i + 1; j < len(sortedIssues); j++ {
+				// Compare by KV time + CPU time
+				iTime := sortedIssues[i].KVTime + sortedIssues[i].CPUTime
+				jTime := sortedIssues[j].KVTime + sortedIssues[j].CPUTime
+				if jTime > iTime {
+					sortedIssues[i], sortedIssues[j] = sortedIssues[j], sortedIssues[i]
+				}
 			}
+		}
+
+		fmt.Printf("PERFORMANCE ISSUES (%d):\n", len(sortedIssues))
+		fmt.Println()
+
+		for i, result := range sortedIssues {
+			fmt.Printf("  %d. [%s] %s\n", i+1, strings.ToUpper(result.Category), result.Message)
+
+			// Show time breakdown if available
+			if result.KVTime > 0 || result.CPUTime > 0 {
+				fmt.Printf("     ⏱  ")
+				if result.KVTime > 0 {
+					fmt.Printf("KV: %.2fs ", result.KVTime)
+				}
+				if result.CPUTime > 0 {
+					fmt.Printf("CPU: %.2fs ", result.CPUTime)
+				}
+				if result.ContentionTime > 0 {
+					fmt.Printf("Contention: %.2fs ", result.ContentionTime)
+				}
+
+				// Show percentage if available
+				if timePercent, ok := result.Details["time_percentage"].(float64); ok && timePercent > 0 {
+					fmt.Printf("(%.1f%% of query)", timePercent)
+				}
+				fmt.Println()
+			}
+
+			fmt.Printf("     💡 %s\n", result.Suggestion)
+			fmt.Println()
 		}
 	}
 
-	if report.Warnings > 0 {
-		fmt.Printf("\n🟡 WARNINGS (%d):\n", report.Warnings)
-		counter := 1
-		for _, result := range report.Issues {
-			if result.Severity == "warning" {
-				fmt.Printf("\n  %d. %s\n", counter, result.Message)
-				fmt.Printf("     Category: %s\n", result.Category)
-				fmt.Printf("     💡 %s\n", result.Suggestion)
-				counter++
-			}
-		}
-	}
-
-	if report.Info > 0 {
-		fmt.Printf("\n🔵 INFORMATIONAL (%d):\n", report.Info)
-		counter := 1
-		for _, result := range report.Issues {
-			if result.Severity == "info" {
-				fmt.Printf("\n  %d. %s\n", counter, result.Message)
-				fmt.Printf("     💡 %s\n", result.Suggestion)
-				counter++
-			}
-		}
-	}
-
-	fmt.Println()
 	fmt.Println(strings.Repeat("=", 70))
 }
