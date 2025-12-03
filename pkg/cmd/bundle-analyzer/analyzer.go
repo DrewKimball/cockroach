@@ -241,15 +241,17 @@ func (a *Analyzer) analyzeExplainPlan(planContent string) []AnalysisResult {
 		return results
 	}
 
-	// Apply all analysis rules with tree structure.
-	results = append(results, a.checkTableScans(planTree)...)
-	results = append(results, a.checkJoins(planTree)...)
-	results = append(results, a.checkIndexJoins(planTree)...)
-	results = append(results, a.checkSorts(planTree)...)
-	results = append(results, a.checkRowProcessingEfficiency(planTree)...)
+	// Create a rule-based visitor with all default rules.
+	visitor := NewRuleBasedVisitor(GetDefaultRules())
+
+	// Walk the tree with the visitor.
+	totalTime := planTree.GetTotalExecutionTime()
+	_ = Walk(planTree.Root, totalTime, visitor)
+
+	// Collect issues from the visitor.
+	results = visitor.Issues()
 
 	// Populate total execution time in all results.
-	totalTime := planTree.GetTotalExecutionTime()
 	for i := range results {
 		results[i].TotalTime = totalTime
 	}
