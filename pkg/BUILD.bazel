@@ -1153,6 +1153,8 @@ GO_TARGETS = [
     "//pkg/cmd/bazci/testfilter:testfilter_test",
     "//pkg/cmd/bazci:bazci",
     "//pkg/cmd/bazci:bazci_lib",
+    "//pkg/cmd/bundle-analyzer:bundle-analyzer",
+    "//pkg/cmd/bundle-analyzer:bundle_analyzer_lib",
     "//pkg/cmd/cmdutil:cmdutil",
     "//pkg/cmd/cmp-protocol/pgconnect:pgconnect",
     "//pkg/cmd/cmp-protocol:cmp-protocol",

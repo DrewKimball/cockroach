@@ -76,6 +76,7 @@ var buildTargetMapping = map[string]string{
 	"bazel-remote":         bazelRemoteTarget,
 	"buildifier":           "@com_github_bazelbuild_buildtools//buildifier:buildifier",
 	"buildozer":            "@com_github_bazelbuild_buildtools//buildozer:buildozer",
+	"bundle-analyzer":      "//pkg/cmd/bundle-analyzer:bundle-analyzer",
 	"cockroach":            cockroachTarget,
 	"cockroach-sql":        "//pkg/cmd/cockroach-sql:cockroach-sql",
 	"cockroach-short":      "//pkg/cmd/cockroach-short:cockroach-short",
