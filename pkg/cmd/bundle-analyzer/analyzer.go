@@ -17,6 +17,11 @@ type AnalysisResult struct {
 	Message    string                 `json:"message"`
 	Suggestion string                 `json:"suggestion"`
 	Details    map[string]interface{} `json:"details"`
+	// Performance metrics for this issue
+	KVTime         float64 `json:"kv_time,omitempty"`          // KV time in seconds
+	CPUTime        float64 `json:"cpu_time,omitempty"`         // CPU time in seconds
+	ContentionTime float64 `json:"contention_time,omitempty"`  // Contention time in seconds
+	TotalTime      float64 `json:"total_time,omitempty"`       // Total execution time in seconds
 }
 
 // Report contains the overall analysis results
@@ -233,9 +238,24 @@ func (a *Analyzer) analyzeExplainPlan(planContent string) []AnalysisResult {
 	results = append(results, a.checkJoins(planContent)...)
 	results = append(results, a.checkIndexJoins(planContent)...)
 	results = append(results, a.checkSorts(planContent)...)
-	results = append(results, a.checkNetworkOperations(planContent)...)
+
+	// Extract total execution time and populate it in all results
+	totalTime := extractTotalExecutionTime(planContent)
+	for i := range results {
+		results[i].TotalTime = totalTime
+	}
 
 	return results
+}
+
+// extractTotalExecutionTime extracts the total execution time from the plan
+func extractTotalExecutionTime(planContent string) float64 {
+	executionTimeRegex := regexp.MustCompile(`(?i)execution time:\s*(.+?)(?:\n|$)`)
+	match := executionTimeRegex.FindStringSubmatch(planContent)
+	if match != nil {
+		return parseTimeString(match[1])
+	}
+	return 0
 }
 
 // generateReport creates the final analysis report
