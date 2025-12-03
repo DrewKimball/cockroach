@@ -43,7 +43,7 @@ The tool can analyze either a zip file or an extracted bundle directory.`,
 				analyzer.PrintReport(report)
 			}
 
-			// Exit code 1 if issues found
+			// Exit code 1 if issues found.
 			if len(report.Issues) > 0 {
 				os.Exit(1)
 			}

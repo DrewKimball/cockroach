@@ -6,14 +6,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/cockroachdb/cockroach/pkg/util/humanizeutil"
 )
 
-// checkTableScans detects problematic table scans
+// checkTableScans detects problematic table scans.
 func (a *Analyzer) checkTableScans(planTree *PlanTree) []AnalysisResult {
 	var results []AnalysisResult
 	totalTime := planTree.GetTotalExecutionTime()
 
-	// Find all scan nodes
+	// Find all scan nodes.
 	scans := planTree.Root.FindNodes(func(n *PlanNode) bool {
 		return n.Operator == "scan"
 	})
@@ -30,23 +32,24 @@ func (a *Analyzer) checkTableScans(planTree *PlanTree) []AnalysisResult {
 		cpuTime := scan.GetCPUTime()
 		contentionTime := scan.GetContentionTime()
 
-		// Calculate percentage of total time
+		// Calculate percentage of total time.
 		var timePercentage float64
 		if totalTime > 0 && kvTime > 0 {
 			timePercentage = (kvTime / totalTime) * 100
 		}
 
-		// Only flag scans with high row counts or significant time
+		// Only flag scans with high row counts or significant time.
 		if rows > 1000 || kvTime > 1.0 || timePercentage > 10.0 {
-			// Check if there are upstream filters or joins that could help constrain this scan
+			// Check if there are upstream filters or joins that could help
+			// constrain this scan.
 			hasUpstreamFilter := hasUpstreamFilterOrJoin(scan)
 
-			message := fmt.Sprintf("Large scan on %s@%s (~%s rows)", table, index, formatNumber(rows))
+			message := fmt.Sprintf("Large scan on %s@%s (~%s rows)", table, index, humanizeutil.Count(uint64(rows)))
 			suggestion := "Consider adding an index to support the query filters, or add constraints to limit the scan."
 
-			// Provide more specific messaging based on analysis
+			// Provide more specific messaging based on analysis.
 			if isFullScan {
-				message = fmt.Sprintf("Full scan on %s@%s (~%s rows)", table, index, formatNumber(rows))
+				message = fmt.Sprintf("Full scan on %s@%s (~%s rows)", table, index, humanizeutil.Count(uint64(rows)))
 				suggestion = "Full scan detected. Consider adding WHERE clause constraints or an index that matches query filters."
 			}
 
@@ -55,7 +58,7 @@ func (a *Analyzer) checkTableScans(planTree *PlanTree) []AnalysisResult {
 				suggestion = "This scan has filters applied afterward. Consider pushing filters down to the scan by creating an index on filtered columns, or converting to a lookup join if joining with another table."
 			}
 
-			// Add time information
+			// Add time information.
 			if kvTime > 0 {
 				message += fmt.Sprintf(" (%.2fs KV time", kvTime)
 				if timePercentage > 0 {
@@ -86,22 +89,24 @@ func (a *Analyzer) checkTableScans(planTree *PlanTree) []AnalysisResult {
 	return results
 }
 
-// hasUpstreamFilterOrJoin checks if there are filter or join nodes upstream of this scan
+// hasUpstreamFilterOrJoin checks if there are filter or join nodes upstream
+// of this scan.
 func hasUpstreamFilterOrJoin(scan *PlanNode) bool {
-	// Walk up the tree from the scan node
+	// Walk up the tree from the scan node.
 	current := scan.Parent
 	for current != nil {
 		op := strings.ToLower(current.Operator)
 
-		// Check for filter operators
+		// Check for filter operators.
 		if strings.Contains(op, "filter") {
 			return true
 		}
 
-		// Check for selective join operators (hash join, merge join, lookup join)
-		// that might have selectivity that could be pushed down
+		// Check for selective join operators (hash join, merge join,
+		// lookup join) that might have selectivity that could be pushed
+		// down.
 		if strings.Contains(op, "join") && !strings.Contains(op, "index join") {
-			// Only flag if the join has a filter condition
+			// Only flag if the join has a filter condition.
 			if current.GetAttribute("pred") != "" || current.GetAttribute("equality") != "" {
 				return true
 			}
@@ -112,12 +117,12 @@ func hasUpstreamFilterOrJoin(scan *PlanNode) bool {
 	return false
 }
 
-// checkJoins detects inefficient join operations
+// checkJoins detects inefficient join operations.
 func (a *Analyzer) checkJoins(planTree *PlanTree) []AnalysisResult {
 	var results []AnalysisResult
 	totalTime := planTree.GetTotalExecutionTime()
 
-	// Find cross join nodes
+	// Find cross join nodes.
 	crossJoins := planTree.Root.FindNodes(func(n *PlanNode) bool {
 		return strings.Contains(strings.ToLower(n.Operator), "cross join")
 	})
@@ -133,7 +138,7 @@ func (a *Analyzer) checkJoins(planTree *PlanTree) []AnalysisResult {
 		})
 	}
 
-	// Find all join nodes (hash join, merge join, lookup join)
+	// Find all join nodes (hash join, merge join, lookup join).
 	allJoins := planTree.Root.FindNodes(func(n *PlanNode) bool {
 		op := strings.ToLower(n.Operator)
 		return (strings.Contains(op, "hash join") ||
@@ -143,13 +148,13 @@ func (a *Analyzer) checkJoins(planTree *PlanTree) []AnalysisResult {
 	})
 
 	for _, join := range allJoins {
-		// Check for cardinality blowup: output rows >> input rows
+		// Check for cardinality blowup: output rows >> input rows.
 		outputRows := join.GetRowCount()
 		if outputRows == 0 {
 			continue
 		}
 
-		// Get input row counts from children
+		// Get input row counts from children.
 		var inputRows int
 		for _, child := range join.Children {
 			childRows := child.GetRowCount()
@@ -162,11 +167,11 @@ func (a *Analyzer) checkJoins(planTree *PlanTree) []AnalysisResult {
 			continue
 		}
 
-		// Calculate blowup factor
+		// Calculate blowup factor.
 		blowupFactor := float64(outputRows) / float64(inputRows)
 
-		// Flag if output is significantly larger than largest input (>5x)
-		// This suggests poor join ordering or missing filters
+		// Flag if output is significantly larger than largest input (>5x).
+		// This suggests poor join ordering or missing filters.
 		if blowupFactor > 5.0 && outputRows > 10000 {
 			kvTime := join.GetKVTime()
 			cpuTime := join.GetCPUTime()
@@ -177,7 +182,7 @@ func (a *Analyzer) checkJoins(planTree *PlanTree) []AnalysisResult {
 			}
 
 			message := fmt.Sprintf("Join producing large intermediate result: %s output rows from %s input rows (%.1fx blowup)",
-				formatNumber(outputRows), formatNumber(inputRows), blowupFactor)
+				humanizeutil.Count(uint64(outputRows)), humanizeutil.Count(uint64(inputRows)), blowupFactor)
 
 			if kvTime > 0 {
 				message += fmt.Sprintf(" (%.2fs", kvTime)
@@ -207,13 +212,13 @@ func (a *Analyzer) checkJoins(planTree *PlanTree) []AnalysisResult {
 	return results
 }
 
-// checkIndexJoins detects expensive index joins
+// checkIndexJoins detects expensive index joins.
 func (a *Analyzer) checkIndexJoins(planTree *PlanTree) []AnalysisResult {
 	var results []AnalysisResult
 
 	totalTime := planTree.GetTotalExecutionTime()
 
-	// Find all index join nodes
+	// Find all index join nodes.
 	indexJoins := planTree.Root.FindNodes(func(n *PlanNode) bool {
 		return strings.Contains(strings.ToLower(n.Operator), "index join")
 	})
@@ -225,27 +230,29 @@ func (a *Analyzer) checkIndexJoins(planTree *PlanTree) []AnalysisResult {
 		cpuTime := indexJoin.GetCPUTime()
 		contentionTime := indexJoin.GetContentionTime()
 
-		// Calculate percentage of total time spent in this index join
+		// Calculate percentage of total time spent in this index join.
 		var timePercentage float64
 		if totalTime > 0 && kvTime > 0 {
 			timePercentage = (kvTime / totalTime) * 100
 		}
 
-		// Flag if it takes >10% of total time OR has high absolute time/rows
-		// This surfaces index joins that are a significant fraction of execution
+		// Flag if it takes >10% of total time OR has high absolute
+		// time/rows. This surfaces index joins that are a significant
+		// fraction of execution.
 		isExpensive := (timePercentage > 10.0) || (kvTime > 1.0) || (rows > 10000)
 
 		if isExpensive {
 			suggestion := "Consider creating a covering index that includes the retrieved columns to eliminate the index join"
 
-			// Try to enhance suggestion with schema analysis
+			// Try to enhance suggestion with schema analysis.
 			if table != "" && index != "" {
 				if enhanced := a.enhanceIndexJoinSuggestion(table, index); enhanced != "" {
 					suggestion = enhanced
 				}
 			}
 
-			// Build informative message showing both absolute and relative time
+			// Build informative message showing both absolute and relative
+			// time.
 			timeDesc := ""
 			if kvTime > 0 {
 				timeDesc = fmt.Sprintf(" (%.2fs KV time", kvTime)
@@ -275,7 +282,8 @@ func (a *Analyzer) checkIndexJoins(planTree *PlanTree) []AnalysisResult {
 	return results
 }
 
-// enhanceIndexJoinSuggestion provides enhanced suggestions based on schema analysis
+// enhanceIndexJoinSuggestion provides enhanced suggestions based on schema
+// analysis.
 func (a *Analyzer) enhanceIndexJoinSuggestion(tableName, indexName string) string {
 	statementPath := filepath.Join(a.extractedDir, "statement.sql")
 
@@ -287,7 +295,7 @@ func (a *Analyzer) enhanceIndexJoinSuggestion(tableName, indexName string) strin
 
 	statement := string(statementContent)
 
-	// Extract WHERE clause columns
+	// Extract WHERE clause columns.
 	whereRegex := regexp.MustCompile(`(?i)WHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+LIMIT|\s+GROUP\s+BY|$)`)
 	whereMatch := whereRegex.FindStringSubmatch(statement)
 
@@ -301,7 +309,7 @@ func (a *Analyzer) enhanceIndexJoinSuggestion(tableName, indexName string) strin
 		}
 	}
 
-	// Extract SELECT columns
+	// Extract SELECT columns.
 	selectRegex := regexp.MustCompile(`(?i)SELECT\s+(.+?)\s+FROM`)
 	selectMatch := selectRegex.FindStringSubmatch(statement)
 
@@ -329,7 +337,7 @@ func (a *Analyzer) enhanceIndexJoinSuggestion(tableName, indexName string) strin
 		}
 		suggestion += fmt.Sprintf("Example: CREATE INDEX %s_enhanced ON %s (", indexName, tableName)
 
-		// Add index key columns
+		// Add index key columns.
 		if len(whereColumns) > 0 {
 			suggestion += strings.Join(whereColumns, ", ")
 		} else {
@@ -337,7 +345,7 @@ func (a *Analyzer) enhanceIndexJoinSuggestion(tableName, indexName string) strin
 		}
 		suggestion += ")"
 
-		// Add STORING clause for SELECT * or specific columns
+		// Add STORING clause for SELECT * or specific columns.
 		if hasSelectAll {
 			suggestion += " STORING (other_columns)"
 		} else if len(selectCols) > 0 {
@@ -350,12 +358,12 @@ func (a *Analyzer) enhanceIndexJoinSuggestion(tableName, indexName string) strin
 	return ""
 }
 
-// checkSorts detects expensive sort operations
+// checkSorts detects expensive sort operations.
 func (a *Analyzer) checkSorts(planTree *PlanTree) []AnalysisResult {
 	var results []AnalysisResult
 	totalTime := planTree.GetTotalExecutionTime()
 
-	// Find all sort nodes
+	// Find all sort nodes.
 	sorts := planTree.Root.FindNodes(func(n *PlanNode) bool {
 		return n.Operator == "sort"
 	})
@@ -366,7 +374,8 @@ func (a *Analyzer) checkSorts(planTree *PlanTree) []AnalysisResult {
 		cpuTime := sort.GetCPUTime()
 		contentionTime := sort.GetContentionTime()
 
-		// Calculate time percentage (use CPU time for sorts as they're CPU-bound)
+		// Calculate time percentage (use CPU time for sorts as they're
+		// CPU-bound).
 		var timePercentage float64
 		relevantTime := cpuTime
 		if relevantTime == 0 {
@@ -376,9 +385,10 @@ func (a *Analyzer) checkSorts(planTree *PlanTree) []AnalysisResult {
 			timePercentage = (relevantTime / totalTime) * 100
 		}
 
-		// Flag sorts that are expensive (high row count OR significant time)
+		// Flag sorts that are expensive (high row count OR significant
+		// time).
 		if rows > 10000 || timePercentage > 5.0 || relevantTime > 0.5 {
-			message := fmt.Sprintf("Sort operation on ~%s rows", formatNumber(rows))
+			message := fmt.Sprintf("Sort operation on ~%s rows", humanizeutil.Count(uint64(rows)))
 
 			if relevantTime > 0 {
 				if cpuTime > 0 {
@@ -410,21 +420,22 @@ func (a *Analyzer) checkSorts(planTree *PlanTree) []AnalysisResult {
 	return results
 }
 
-// checkRowProcessingEfficiency detects when many rows are processed low in the plan
-// but filtered significantly higher up, indicating missed index opportunities
+// checkRowProcessingEfficiency detects when many rows are processed low in
+// the plan but filtered significantly higher up, indicating missed index
+// opportunities.
 func (a *Analyzer) checkRowProcessingEfficiency(planTree *PlanTree) []AnalysisResult {
 	var results []AnalysisResult
 	totalTime := planTree.GetTotalExecutionTime()
 
-	// Walk the tree looking for nodes with significant row reduction
+	// Walk the tree looking for nodes with significant row reduction.
 	_ = planTree.Root.Walk(func(node *PlanNode) error {
 		outputRows := node.GetRowCount()
 		if outputRows == 0 || outputRows > 100000 {
-			// Skip nodes with no data or already very large output
+			// Skip nodes with no data or already very large output.
 			return nil
 		}
 
-		// Calculate total rows processed by all children (inputs)
+		// Calculate total rows processed by all children (inputs).
 		var totalInputRows int
 		for _, child := range node.Children {
 			childRows := child.GetRowCount()
@@ -435,11 +446,11 @@ func (a *Analyzer) checkRowProcessingEfficiency(planTree *PlanTree) []AnalysisRe
 			return nil
 		}
 
-		// Calculate reduction factor
+		// Calculate reduction factor.
 		reductionFactor := float64(totalInputRows) / float64(outputRows)
 
-		// Look for significant reductions (>10x) at filter or join nodes
-		// This suggests we're processing many rows that get filtered out
+		// Look for significant reductions (>10x) at filter or join nodes.
+		// This suggests we're processing many rows that get filtered out.
 		op := strings.ToLower(node.Operator)
 		isSelectiveOp := strings.Contains(op, "filter") ||
 			strings.Contains(op, "join") ||
@@ -458,10 +469,10 @@ func (a *Analyzer) checkRowProcessingEfficiency(planTree *PlanTree) []AnalysisRe
 				timePercentage = (relevantTime / totalTime) * 100
 			}
 
-			// Only report if this is taking significant time
+			// Only report if this is taking significant time.
 			if timePercentage > 5.0 || kvTime > 0.5 || cpuTime > 0.5 {
 				message := fmt.Sprintf("Inefficient row processing: %s rows input → %s rows output (%.1fx reduction)",
-					formatNumber(totalInputRows), formatNumber(outputRows), reductionFactor)
+					humanizeutil.Count(uint64(totalInputRows)), humanizeutil.Count(uint64(outputRows)), reductionFactor)
 
 				if kvTime > 0 || cpuTime > 0 {
 					message += " ("
@@ -511,26 +522,4 @@ func (a *Analyzer) checkRowProcessingEfficiency(planTree *PlanTree) []AnalysisRe
 	})
 
 	return results
-}
-
-// formatNumber formats a number with commas for readability
-func formatNumber(n int) string {
-	if n == 0 {
-		return "0"
-	}
-
-	str := fmt.Sprintf("%d", n)
-	if len(str) <= 3 {
-		return str
-	}
-
-	var result []string
-	for i, char := range str {
-		if i > 0 && (len(str)-i)%3 == 0 {
-			result = append(result, ",")
-		}
-		result = append(result, string(char))
-	}
-
-	return strings.Join(result, "")
 }
