@@ -233,29 +233,31 @@ func (a *Analyzer) Analyze() (*Report, error) {
 func (a *Analyzer) analyzeExplainPlan(planContent string) []AnalysisResult {
 	var results []AnalysisResult
 
-	// Apply all analysis rules
-	results = append(results, a.checkTableScans(planContent)...)
-	results = append(results, a.checkJoins(planContent)...)
-	results = append(results, a.checkIndexJoins(planContent)...)
-	results = append(results, a.checkSorts(planContent)...)
+	// Parse the plan into a tree structure
+	planTree, err := ParsePlanTree(planContent)
+	if err != nil {
+		// Fall back to text-based analysis if parsing fails
+		fmt.Fprintf(os.Stderr, "Warning: failed to parse plan tree: %v\n", err)
+		return results
+	}
 
-	// Extract total execution time and populate it in all results
-	totalTime := extractTotalExecutionTime(planContent)
+	if planTree.Root == nil {
+		return results
+	}
+
+	// Apply all analysis rules with tree structure
+	results = append(results, a.checkTableScans(planTree)...)
+	results = append(results, a.checkJoins(planTree)...)
+	results = append(results, a.checkIndexJoins(planTree)...)
+	results = append(results, a.checkSorts(planTree)...)
+
+	// Populate total execution time in all results
+	totalTime := planTree.GetTotalExecutionTime()
 	for i := range results {
 		results[i].TotalTime = totalTime
 	}
 
 	return results
-}
-
-// extractTotalExecutionTime extracts the total execution time from the plan
-func extractTotalExecutionTime(planContent string) float64 {
-	executionTimeRegex := regexp.MustCompile(`(?i)execution time:\s*(.+?)(?:\n|$)`)
-	match := executionTimeRegex.FindStringSubmatch(planContent)
-	if match != nil {
-		return parseTimeString(match[1])
-	}
-	return 0
 }
 
 // generateReport creates the final analysis report

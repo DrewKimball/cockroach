@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "analyzer.go",
         "main.go",
+        "plan_tree.go",
         "rules.go",
     ],
     importpath = "github.com/cockroachdb/cockroach/pkg/cmd/bundle-analyzer",

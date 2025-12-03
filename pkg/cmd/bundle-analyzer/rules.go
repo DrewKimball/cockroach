@@ -5,83 +5,36 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
-// checkTableScans detects full table scans without indexes
-func (a *Analyzer) checkTableScans(planContent string) []AnalysisResult {
+// checkTableScans detects problematic table scans
+func (a *Analyzer) checkTableScans(planTree *PlanTree) []AnalysisResult {
 	var results []AnalysisResult
 
-	// Look for "scan" operations
-	scanRegex := regexp.MustCompile(`(?i)scan\s+(\w+)@(\w+)`)
-	matches := scanRegex.FindAllStringSubmatch(planContent, -1)
+	// Find all scan nodes
+	scans := planTree.Root.FindNodes(func(n *PlanNode) bool {
+		return n.Operator == "scan"
+	})
 
-	for _, match := range matches {
-		if len(match) < 3 {
+	for _, scan := range scans {
+		table, index := scan.GetTableAndIndex()
+		if table == "" {
 			continue
 		}
 
-		table := match[1]
-		index := match[2]
+		rows := scan.GetRowCount()
+		isFullScan := scan.IsFullScan()
+		kvTime := scan.GetKVTime()
+		cpuTime := scan.GetCPUTime()
+		contentionTime := scan.GetContentionTime()
 
-		// Get context around the scan to extract more information
-		contextStart := strings.LastIndex(planContent[:strings.Index(planContent, match[0])], "\n")
-		if contextStart == -1 {
-			contextStart = 0
-		}
-		contextEnd := strings.Index(planContent[strings.Index(planContent, match[0]):], "\n\n")
-		if contextEnd == -1 {
-			contextEnd = len(planContent)
-		} else {
-			contextEnd += strings.Index(planContent, match[0])
-		}
-
-		context := planContent[contextStart:contextEnd]
-
-		// Look for row count in various formats
-		rowRegex := regexp.MustCompile(`(\d+(?:,\d+)*)\s+rows`)
-		rowMatch := rowRegex.FindStringSubmatch(context)
-
-		rows := 0
-		if rowMatch != nil {
-			rowStr := strings.ReplaceAll(rowMatch[1], ",", "")
-			if parsed, err := strconv.Atoi(rowStr); err == nil {
-				rows = parsed
-			}
-		}
-
-		// Extract performance metrics from the context
-		kvTimeRegex := regexp.MustCompile(`(?i)KV time:\s*(.+?)(?:\n|│|$)`)
-		cpuTimeRegex := regexp.MustCompile(`(?i)CPU time:\s*(.+?)(?:\n|│|$)`)
-		contentionTimeRegex := regexp.MustCompile(`(?i)contention time:\s*(.+?)(?:\n|│|$)`)
-
-		kvTime := 0.0
-		cpuTime := 0.0
-		contentionTime := 0.0
-
-		if kvMatch := kvTimeRegex.FindStringSubmatch(context); kvMatch != nil {
-			kvTime = parseTimeString(kvMatch[1])
-		}
-		if cpuMatch := cpuTimeRegex.FindStringSubmatch(context); cpuMatch != nil {
-			cpuTime = parseTimeString(cpuMatch[1])
-		}
-		if contentionMatch := contentionTimeRegex.FindStringSubmatch(context); contentionMatch != nil {
-			contentionTime = parseTimeString(contentionMatch[1])
-		}
-
-		// Check for spans indicating a constrained scan vs full scan
-		// Look for "spans: FULL SCAN" or similar indicators
-		isFullScan := strings.Contains(strings.ToLower(context), "full scan") ||
-			strings.Contains(strings.ToLower(context), "spans: all")
-
-		// Only flag scans with high row counts
-		// Note: A scan of any index (primary or secondary) can be either full or constrained
-		if rows > 1000 {
+		// Only flag scans with high row counts or significant time
+		if rows > 1000 || kvTime > 1.0 {
 			severity := "warning"
 			message := fmt.Sprintf("Large scan on %s@%s (~%s rows)", table, index, formatNumber(rows))
 
-			if rows > 100000 {
+			if rows > 100000 || kvTime > 5.0 {
 				severity = "critical"
 			}
 
@@ -115,13 +68,15 @@ func (a *Analyzer) checkTableScans(planContent string) []AnalysisResult {
 }
 
 // checkJoins detects inefficient join operations
-func (a *Analyzer) checkJoins(planContent string) []AnalysisResult {
+func (a *Analyzer) checkJoins(planTree *PlanTree) []AnalysisResult {
 	var results []AnalysisResult
 
-	// Look for cross joins (Cartesian products)
-	// These are almost always unintentional and produce excessive rows
-	crossJoinRegex := regexp.MustCompile(`(?i)\bcross\s+join\b`)
-	if crossJoinRegex.MatchString(planContent) {
+	// Find cross join nodes
+	crossJoins := planTree.Root.FindNodes(func(n *PlanNode) bool {
+		return strings.Contains(strings.ToLower(n.Operator), "cross join")
+	})
+
+	for range crossJoins {
 		results = append(results, AnalysisResult{
 			Severity:   "critical",
 			Category:   "join",
@@ -141,73 +96,20 @@ func (a *Analyzer) checkJoins(planContent string) []AnalysisResult {
 }
 
 // checkIndexJoins detects expensive index joins
-func (a *Analyzer) checkIndexJoins(planContent string) []AnalysisResult {
+func (a *Analyzer) checkIndexJoins(planTree *PlanTree) []AnalysisResult {
 	var results []AnalysisResult
 
-	// Look for index join operations
-	indexJoinRegex := regexp.MustCompile(`(?i)index join.*?(\(streamer\))?`)
-	matches := indexJoinRegex.FindAllStringIndex(planContent, -1)
+	// Find all index join nodes
+	indexJoins := planTree.Root.FindNodes(func(n *PlanNode) bool {
+		return strings.Contains(strings.ToLower(n.Operator), "index join")
+	})
 
-	for _, match := range matches {
-		// Get context around the index join
-		contextStart := match[0] - 300
-		if contextStart < 0 {
-			contextStart = 0
-		}
-		contextEnd := match[1] + 1000
-		if contextEnd > len(planContent) {
-			contextEnd = len(planContent)
-		}
-
-		context := planContent[contextStart:contextEnd]
-
-		// Extract performance metrics
-		kvTimeRegex := regexp.MustCompile(`(?i)KV time:\s*(.+?)(?:\n|│|$)`)
-		cpuTimeRegex := regexp.MustCompile(`(?i)CPU time:\s*(.+?)(?:\n|│|$)`)
-		contentionTimeRegex := regexp.MustCompile(`(?i)contention time:\s*(.+?)(?:\n|│|$)`)
-
-		kvTimeMatch := kvTimeRegex.FindStringSubmatch(context)
-		cpuTimeMatch := cpuTimeRegex.FindStringSubmatch(context)
-		contentionTimeMatch := contentionTimeRegex.FindStringSubmatch(context)
-
-		// Extract row counts
-		postContext := context[strings.Index(strings.ToLower(context), "index join"):]
-		rowCountRegex := regexp.MustCompile(`actual row count:\s*(\d+(?:,\d+)*)`)
-		rowCountMatch := rowCountRegex.FindStringSubmatch(postContext)
-
-		rows := 0
-		if rowCountMatch != nil {
-			rowStr := strings.ReplaceAll(rowCountMatch[1], ",", "")
-			if parsed, err := strconv.Atoi(rowStr); err == nil {
-				rows = parsed
-			}
-		}
-
-		kvTime := 0.0
-		cpuTime := 0.0
-		contentionTime := 0.0
-
-		if kvTimeMatch != nil {
-			kvTime = parseTimeString(kvTimeMatch[1])
-		}
-		if cpuTimeMatch != nil {
-			cpuTime = parseTimeString(cpuTimeMatch[1])
-		}
-		if contentionTimeMatch != nil {
-			contentionTime = parseTimeString(contentionTimeMatch[1])
-		}
-
-		// Extract table information
-		tableRegex := regexp.MustCompile(`table:\s*(\w+)@(\w+)`)
-		tableMatch := tableRegex.FindStringSubmatch(context)
-
-		tableName := ""
-		indexName := ""
-
-		if tableMatch != nil && len(tableMatch) >= 3 {
-			tableName = tableMatch[1]
-			indexName = tableMatch[2]
-		}
+	for _, indexJoin := range indexJoins {
+		table, index := indexJoin.GetTableAndIndex()
+		rows := indexJoin.GetRowCount()
+		kvTime := indexJoin.GetKVTime()
+		cpuTime := indexJoin.GetCPUTime()
+		contentionTime := indexJoin.GetContentionTime()
 
 		// Check if this is expensive based on absolute KV time or row count
 		// Note: We'll compare to total execution time later at the reporting level
@@ -217,8 +119,10 @@ func (a *Analyzer) checkIndexJoins(planContent string) []AnalysisResult {
 			suggestion := "Consider adding filtered columns to the index to avoid the index join"
 
 			// Try to enhance suggestion with schema analysis
-			if suggestion = a.enhanceIndexJoinSuggestion(tableName, indexName); suggestion == "" {
-				suggestion = "Consider adding filtered columns to the index to avoid the index join"
+			if table != "" && index != "" {
+				if enhanced := a.enhanceIndexJoinSuggestion(table, index); enhanced != "" {
+					suggestion = enhanced
+				}
 			}
 
 			severity := "warning"
@@ -234,14 +138,14 @@ func (a *Analyzer) checkIndexJoins(planContent string) []AnalysisResult {
 			results = append(results, AnalysisResult{
 				Severity:       severity,
 				Category:       "index_join",
-				Message:        fmt.Sprintf("Expensive index join on %s%s", tableName, timeDesc),
+				Message:        fmt.Sprintf("Expensive index join on %s%s", table, timeDesc),
 				Suggestion:     suggestion,
 				KVTime:         kvTime,
 				CPUTime:        cpuTime,
 				ContentionTime: contentionTime,
 				Details: map[string]interface{}{
-					"table":          tableName,
-					"index_used":     indexName,
+					"table":          table,
+					"index_used":     index,
 					"rows_processed": rows,
 				},
 			})
@@ -327,57 +231,19 @@ func (a *Analyzer) enhanceIndexJoinSuggestion(tableName, indexName string) strin
 }
 
 // checkSorts detects expensive sort operations
-func (a *Analyzer) checkSorts(planContent string) []AnalysisResult {
+func (a *Analyzer) checkSorts(planTree *PlanTree) []AnalysisResult {
 	var results []AnalysisResult
 
-	// Look for actual sort operators (not just the word "sort" appearing anywhere)
-	// Match "sort" as a distinct operator name, typically appearing at start of line or after whitespace
-	sortRegex := regexp.MustCompile(`(?i)(?:^|\s)(sort)(?:\s|$)`)
-	matches := sortRegex.FindAllStringIndex(planContent, -1)
+	// Find all sort nodes
+	sorts := planTree.Root.FindNodes(func(n *PlanNode) bool {
+		return n.Operator == "sort"
+	})
 
-	for _, match := range matches {
-		// Get context around the sort to check row counts and metrics
-		contextStart := match[0] - 100
-		if contextStart < 0 {
-			contextStart = 0
-		}
-		contextEnd := match[1] + 500
-		if contextEnd > len(planContent) {
-			contextEnd = len(planContent)
-		}
-
-		context := planContent[contextStart:contextEnd]
-
-		// Look for row count
-		rowRegex := regexp.MustCompile(`(\d+(?:,\d+)*)\s+rows`)
-		rowMatch := rowRegex.FindStringSubmatch(context)
-
-		rows := 0
-		if rowMatch != nil {
-			rowStr := strings.ReplaceAll(rowMatch[1], ",", "")
-			if parsed, err := strconv.Atoi(rowStr); err == nil {
-				rows = parsed
-			}
-		}
-
-		// Extract performance metrics
-		kvTimeRegex := regexp.MustCompile(`(?i)KV time:\s*(.+?)(?:\n|│|$)`)
-		cpuTimeRegex := regexp.MustCompile(`(?i)CPU time:\s*(.+?)(?:\n|│|$)`)
-		contentionTimeRegex := regexp.MustCompile(`(?i)contention time:\s*(.+?)(?:\n|│|$)`)
-
-		kvTime := 0.0
-		cpuTime := 0.0
-		contentionTime := 0.0
-
-		if kvMatch := kvTimeRegex.FindStringSubmatch(context); kvMatch != nil {
-			kvTime = parseTimeString(kvMatch[1])
-		}
-		if cpuMatch := cpuTimeRegex.FindStringSubmatch(context); cpuMatch != nil {
-			cpuTime = parseTimeString(cpuMatch[1])
-		}
-		if contentionMatch := contentionTimeRegex.FindStringSubmatch(context); contentionMatch != nil {
-			contentionTime = parseTimeString(contentionMatch[1])
-		}
+	for _, sort := range sorts {
+		rows := sort.GetRowCount()
+		kvTime := sort.GetKVTime()
+		cpuTime := sort.GetCPUTime()
+		contentionTime := sort.GetContentionTime()
 
 		// Only flag sorts on significant row counts
 		if rows > 10000 {
@@ -406,50 +272,13 @@ func (a *Analyzer) checkSorts(planContent string) []AnalysisResult {
 	return results
 }
 
-// parseTimeString parses time strings like "1m39s", "1.5s", "30ms"
-func parseTimeString(timeStr string) float64 {
-	if timeStr == "" {
-		return 0
-	}
-
-	timeStr = strings.TrimSpace(timeStr)
-	totalSeconds := 0.0
-
-	// Extract all number+unit pairs
-	timeRegex := regexp.MustCompile(`(\d+(?:\.\d+)?)\s*([smhµ]+)`)
-	matches := timeRegex.FindAllStringSubmatch(timeStr, -1)
-
-	for _, match := range matches {
-		if len(match) < 3 {
-			continue
-		}
-
-		value, err := strconv.ParseFloat(match[1], 64)
-		if err != nil {
-			continue
-		}
-
-		unit := match[2]
-		switch {
-		case strings.Contains(unit, "h"):
-			totalSeconds += value * 3600
-		case strings.Contains(unit, "m") && !strings.Contains(unit, "s"):
-			totalSeconds += value * 60
-		case strings.Contains(unit, "s") && !strings.Contains(unit, "m"):
-			totalSeconds += value
-		case strings.Contains(unit, "ms"):
-			totalSeconds += value / 1000
-		case strings.Contains(unit, "µs"):
-			totalSeconds += value / 1000000
-		}
-	}
-
-	return totalSeconds
-}
-
 // formatNumber formats a number with commas for readability
 func formatNumber(n int) string {
-	str := strconv.Itoa(n)
+	if n == 0 {
+		return "0"
+	}
+
+	str := fmt.Sprintf("%d", n)
 	if len(str) <= 3 {
 		return str
 	}
