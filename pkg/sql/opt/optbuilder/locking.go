@@ -462,13 +462,6 @@ func (b *Builder) buildLock(lb *lockBuilder, locking opt.Locking, inScope *scope
 			panic(errors.AssertionFailedf("cols missing key column %d", keyCol))
 		}
 	}
-	if private.Locking.WaitPolicy == tree.LockWaitSkipLocked && tab.FamilyCount() > 1 {
-		// TODO(rytaft): We may be able to support this if enough columns are
-		// pruned that only a single family is scanned.
-		panic(pgerror.Newf(pgcode.FeatureNotSupported,
-			"SKIP LOCKED cannot be used for tables with multiple column families",
-		))
-	}
 	inScope.expr = b.factory.ConstructLock(inScope.expr, private)
 }
 

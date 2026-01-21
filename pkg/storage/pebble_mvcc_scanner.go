@@ -99,6 +99,10 @@ type results interface {
 	//
 	// Only called when wholeRows option is enabled.
 	lastRowHasFinalColumnFamily(reverse bool) bool
+	// truncateTo truncates the results back to the given key count. This is used
+	// by SKIP LOCKED scans with multiple column families to remove partially-added
+	// rows when a lock is encountered mid-row.
+	truncateTo(targetCount int64)
 }
 
 // Struct to store MVCCScan / MVCCGet in the same binary format as that
@@ -343,6 +347,54 @@ func (p *pebbleResults) maybeTrimPartialLastRow(nextKey roachpb.Key) (roachpb.Ke
 	return nil, errors.Errorf("row exceeds expected max size (%d): %s", len(p.lastOffsets), nextKey)
 }
 
+// truncateTo truncates the results back to the given key count. This is used
+// by SKIP LOCKED scans with multiple column families to remove partially-added
+// rows when a lock is encountered mid-row.
+func (p *pebbleResults) truncateTo(targetCount int64) {
+	if targetCount >= p.count {
+		// Nothing to truncate.
+		return
+	}
+	if targetCount < 0 {
+		targetCount = 0
+	}
+
+	// Calculate how many KVs to remove, and iterate backwards through the ring
+	// buffer removing them one at a time. This is simpler than the forward
+	// scanning approach and reuses the same pattern as maybeTrimPartialLastRow.
+	removedCount := p.count - targetCount
+
+	for i := int64(0); i < removedCount; i++ {
+		lastOffsetIdx := p.lastOffsetIdx - 1 // p.lastOffsetIdx is where next offset would be stored
+		if lastOffsetIdx < 0 {
+			lastOffsetIdx = len(p.lastOffsets) - 1
+		}
+		lastOffset := p.lastOffsets[lastOffsetIdx]
+
+		// The remainder of repr from the offset is a single KV.
+		kvLen := len(p.repr) - lastOffset
+
+		// Remove this KV pair.
+		p.repr = p.repr[:lastOffset]
+		p.count--
+		p.bytes -= int64(kvLen)
+
+		p.lastOffsetIdx = lastOffsetIdx
+		p.lastOffsets[lastOffsetIdx] = 0
+
+		if len(p.repr) == 0 && i < removedCount-1 {
+			// We still have more KVs to remove, but repr is empty.
+			// Pop the last buf back into repr.
+			if len(p.bufs) == 0 {
+				// This shouldn't happen - we're trying to remove more KVs than exist.
+				break
+			}
+			p.repr = p.bufs[len(p.bufs)-1]
+			p.bufs = p.bufs[:len(p.bufs)-1]
+		}
+	}
+}
+
 func (p *pebbleResults) finish() [][]byte {
 	if len(p.repr) > 0 {
 		p.bufs = append(p.bufs, p.repr)
@@ -483,6 +535,11 @@ type pebbleMVCCScanner struct {
 		// advancing the iterator at the new key. It is backed by keyBuf.
 		origKey []byte
 	}
+	// skipLockedMultiFamily tracks state for SKIP LOCKED with multiple column
+	// families. Only used when skipLocked=true and scanning a table with
+	// multiple column families. This ensures we don't return partial rows when
+	// some column families are locked and others are not.
+	skipLockedMultiFamily skipLockedMultiFamilyState
 	// alloc holds fields embedded within the scanner struct only to reduce
 	// allocations in common cases.
 	alloc struct {
@@ -492,6 +549,57 @@ type pebbleMVCCScanner struct {
 		// different implementation of the results interface.
 		pebbleResults pebbleResults
 	}
+}
+
+// skipLockedMultiFamilyState tracks row boundaries for SKIP LOCKED scans with
+// multiple column families.
+type skipLockedMultiFamilyState struct {
+	enabled               bool
+	currentRowStartOffset int64
+	currentRowPrefix      []byte
+	isSkipped             bool
+}
+
+//gcassert:inline
+func (s *skipLockedMultiFamilyState) isEnabled() bool {
+	return s.enabled
+}
+
+// updateRowTracking checks if we're at a new row and updates tracking state.
+// If resetSkipped is true, clears the isSkipped flag for the new row.
+func (s *skipLockedMultiFamilyState) updateRowTracking(
+	rawKey []byte, results results, resetSkipped bool,
+) {
+	rowPrefix := extractRowPrefixFast(rawKey)
+	if rowPrefix == nil {
+		// No column family - treat as single-key row.
+		numKeys, _, _ := results.sizeInfo(0, 0)
+		s.currentRowStartOffset = numKeys
+		s.currentRowPrefix = s.currentRowPrefix[:0]
+		if resetSkipped {
+			s.isSkipped = false
+		}
+	} else if !bytes.Equal(rowPrefix, s.currentRowPrefix) {
+		// New row - update tracking.
+		numKeys, _, _ := results.sizeInfo(0, 0)
+		s.currentRowStartOffset = numKeys
+		s.currentRowPrefix = append(s.currentRowPrefix[:0], rowPrefix...)
+		if resetSkipped {
+			s.isSkipped = false
+		}
+	}
+}
+
+// rollbackAndSkip truncates results back to the current row start and marks
+// the row as skipped.
+func (s *skipLockedMultiFamilyState) rollbackAndSkip(results results) {
+	results.truncateTo(s.currentRowStartOffset)
+	s.isSkipped = true
+}
+
+// shouldSkip returns true if the current row should be skipped.
+func (s *skipLockedMultiFamilyState) shouldSkip() bool {
+	return s.isSkipped
 }
 
 type advanceFn int
@@ -857,6 +965,13 @@ func (p *pebbleMVCCScanner) getOne(ctx context.Context) (ok, added bool) {
 						// 2a. the scanner was configured to skip locked keys, and
 						// this key was locked, so we can advance past it without
 						// raising the write too old error.
+
+						// Handle multi-family row tracking: if we encounter a lock on any KV,
+						// mark the row as skipped and rollback any partial row we've accumulated.
+						if p.skipLockedMultiFamily.isEnabled() {
+							p.skipLockedMultiFamily.updateRowTracking(p.curRawKey, p.results, false /* resetSkipped */)
+							p.skipLockedMultiFamily.rollbackAndSkip(p.results)
+						}
 						return true /* ok */, false
 					}
 				}
@@ -892,6 +1007,13 @@ func (p *pebbleMVCCScanner) getOne(ctx context.Context) (ok, added bool) {
 					// 4a. the scanner was configured to skip locked keys, and
 					// this key was locked, so we can advance past it without
 					// raising the write too old error.
+
+					// Handle multi-family row tracking: if we encounter a lock on any KV,
+					// mark the row as skipped and rollback any partial row we've accumulated.
+					if p.skipLockedMultiFamily.isEnabled() {
+						p.skipLockedMultiFamily.updateRowTracking(p.curRawKey, p.results, false /* resetSkipped */)
+						p.skipLockedMultiFamily.rollbackAndSkip(p.results)
+					}
 					return true /* ok */, false
 				}
 			}
@@ -1011,6 +1133,12 @@ func (p *pebbleMVCCScanner) getOne(ctx context.Context) (ok, added bool) {
 				if !p.addCurIntent(ctx) {
 					return false, false
 				}
+			}
+			// Handle multi-family row tracking: if we encounter an intent on any KV,
+			// mark the row as skipped and rollback any partial row we've accumulated.
+			if p.skipLockedMultiFamily.isEnabled() {
+				p.skipLockedMultiFamily.updateRowTracking(p.curRawKey, p.results, false /* resetSkipped */)
+				p.skipLockedMultiFamily.rollbackAndSkip(p.results)
 			}
 			return true /* ok */, false
 		}
@@ -1238,6 +1366,28 @@ func IncludeStartKeyIntoErr(startKey roachpb.Key, err error) error {
 	return errors.Wrapf(err, "scan with start key %s", startKey)
 }
 
+// extractRowPrefixFast extracts the row prefix (everything before the column
+// family ID) from an MVCC key. The row prefix uniquely identifies a SQL row,
+// allowing us to determine when we've moved from one row to the next.
+//
+// This is used by SKIP LOCKED scans with multiple column families to track row
+// boundaries and ensure partial rows are not returned.
+//
+// The key format is: /tenant/table/index/pk-cols.../family-id/col-id
+// This function returns everything up to (but not including) the family-id.
+func extractRowPrefixFast(mvccKey []byte) []byte {
+	// Strip the MVCC timestamp suffix to get the roachpb.Key.
+	key, ok := DecodeEngineKey(mvccKey)
+	if !ok {
+		// If we can't decode the key, we can't extract a row prefix.
+		return nil
+	}
+
+	// Use the existing getRowPrefix helper which handles all edge cases,
+	// including distinguishing between keys with and without column families.
+	return getRowPrefix(key.Key)
+}
+
 // Adds the specified key and value to the result set, excluding
 // tombstones unless p.tombstones is true. If p.rawMVCCValues is true,
 // then the mvccRawBytes argument will be added to the results set
@@ -1275,9 +1425,24 @@ func (p *pebbleMVCCScanner) add(
 	// locks will be represented as intents, which will be skipped over in
 	// getAndAdvance.
 	if p.skipLocked {
+		if p.skipLockedMultiFamily.isEnabled() {
+			// Multi-family row tracking: check if we're starting a new row.
+			p.skipLockedMultiFamily.updateRowTracking(rawKey, p.results, true /* resetSkipped */)
+
+			// If we've already decided to skip this row, bail early.
+			if p.skipLockedMultiFamily.shouldSkip() {
+				return true /* ok */, false
+			}
+		}
+
 		if locked, ok := p.isKeyLockedByConflictingTxn(ctx, rawKey); !ok {
 			return false, false
 		} else if locked {
+			// Handle the lock.
+			if p.skipLockedMultiFamily.isEnabled() {
+				p.skipLockedMultiFamily.rollbackAndSkip(p.results)
+			}
+			// Single-family or no state: just skip this KV.
 			return true /* ok */, false
 		}
 	}

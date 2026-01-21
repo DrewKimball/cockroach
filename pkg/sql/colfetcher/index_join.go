@@ -652,6 +652,7 @@ func NewColIndexJoin(
 			kvFetcherMemAcc,
 			flowCtx.EvalCtx.TestingKnobs.ForceProductionValues,
 			spec.FetchSpec.External,
+			int(spec.FetchSpec.MaxKeysPerRow),
 		)
 	}
 

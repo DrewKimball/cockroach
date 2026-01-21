@@ -378,6 +378,19 @@ func (s *singleResults) lastRowHasFinalColumnFamily(reverse bool) bool {
 	return keyHasFinalColumnFamily(key, s.maxFamilyID, reverse)
 }
 
+// truncateTo implements the results interface. For singleResults, we can only
+// truncate back to 0 since we only hold one KV pair at a time.
+func (s *singleResults) truncateTo(targetCount int64) {
+	if targetCount <= 0 && s.count > 0 {
+		// Truncate to empty.
+		s.count = 0
+		s.bytes = 0
+		s.mvccKey = nil
+		s.value = nil
+	}
+	// If targetCount >= s.count, nothing to truncate.
+}
+
 func (s *singleResults) getLastKV() roachpb.KeyValue {
 	return roachpb.KeyValue{
 		Key:   s.mvccKey,

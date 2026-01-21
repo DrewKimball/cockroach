@@ -61,6 +61,7 @@ func newTxnKVFetcher(
 	acc *mon.BoundAccount,
 	forceProductionKVBatchSize bool,
 	ext *fetchpb.IndexFetchSpec_ExternalRowData,
+	maxKeysPerRow int,
 ) *txnKVFetcher {
 	alloc := new(struct {
 		batchRequestsIssued int64
@@ -69,7 +70,22 @@ func newTxnKVFetcher(
 	})
 	var sendFn sendFunc
 	if bsHeader == nil {
-		sendFn = makeSendFunc(txn, ext, &alloc.batchRequestsIssued, &alloc.kvCPUTime)
+		baseSendFn := makeSendFunc(txn, ext, &alloc.batchRequestsIssued, &alloc.kvCPUTime)
+		// For SKIP LOCKED scans, we need to ensure that entire rows are skipped
+		// atomically when any KV in the row is locked. This requires the MVCC
+		// scanner to track row boundaries using WholeRowsOfSize.
+		if lockWaitPolicy == descpb.ScanLockingWaitPolicy_SKIP_LOCKED {
+			sendFn = func(ctx context.Context, ba *kvpb.BatchRequest) (*kvpb.BatchResponse, error) {
+				wholeRowsOfSize := maxKeysPerRow
+				if wholeRowsOfSize == 0 {
+					wholeRowsOfSize = 1
+				}
+				ba.Header.WholeRowsOfSize = int32(wholeRowsOfSize)
+				return baseSendFn(ctx, ba)
+			}
+		} else {
+			sendFn = baseSendFn
+		}
 	} else {
 		negotiated := false
 		sendFn = func(ctx context.Context, ba *kvpb.BatchRequest) (br *kvpb.BatchResponse, _ error) {
@@ -151,7 +167,7 @@ func NewDirectKVBatchFetcher(
 ) KVBatchFetcher {
 	f := newTxnKVFetcher(
 		txn, bsHeader, reverse, rawMVCCValues, lockStrength, lockWaitPolicy, lockDurability,
-		lockTimeout, deadlockTimeout, acc, forceProductionKVBatchSize, ext,
+		lockTimeout, deadlockTimeout, acc, forceProductionKVBatchSize, ext, int(spec.MaxKeysPerRow),
 	)
 	f.scanFormat = kvpb.COL_BATCH_RESPONSE
 	f.indexFetchSpec = spec
@@ -177,10 +193,11 @@ func NewKVFetcher(
 	acc *mon.BoundAccount,
 	forceProductionKVBatchSize bool,
 	ext *fetchpb.IndexFetchSpec_ExternalRowData,
+	maxKeysPerRow int,
 ) *KVFetcher {
 	return newKVFetcher(newTxnKVFetcher(
 		txn, bsHeader, reverse, rawMVCCValues, lockStrength, lockWaitPolicy, lockDurability,
-		lockTimeout, deadlockTimeout, acc, forceProductionKVBatchSize, ext,
+		lockTimeout, deadlockTimeout, acc, forceProductionKVBatchSize, ext, maxKeysPerRow,
 	))
 }
 
@@ -212,7 +229,23 @@ func NewStreamingKVFetcher(
 	var kvPairsRead int64
 	var batchRequestsIssued int64
 	var kvCPUTime int64
-	sendFn := makeSendFunc(txn, ext, &batchRequestsIssued, &kvCPUTime)
+	baseSendFn := makeSendFunc(txn, ext, &batchRequestsIssued, &kvCPUTime)
+
+	// For SKIP LOCKED scans, we need to ensure that entire rows are skipped
+	// atomically when any KV in the row is locked. This requires the MVCC
+	// scanner to track row boundaries using WholeRowsOfSize.
+	sendFn := baseSendFn
+	if lockWaitPolicy == descpb.ScanLockingWaitPolicy_SKIP_LOCKED {
+		sendFn = func(ctx context.Context, ba *kvpb.BatchRequest) (*kvpb.BatchResponse, error) {
+			wholeRowsOfSize := maxKeysPerRow
+			if wholeRowsOfSize == 0 {
+				wholeRowsOfSize = 1
+			}
+			ba.Header.WholeRowsOfSize = int32(wholeRowsOfSize)
+			return baseSendFn(ctx, ba)
+		}
+	}
+
 	streamer := kvstreamer.NewStreamer(
 		distSender,
 		metrics,

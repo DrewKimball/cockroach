@@ -380,6 +380,7 @@ func NewColBatchScan(
 		kvFetcherMemAcc,
 		flowCtx.EvalCtx.TestingKnobs.ForceProductionValues,
 		spec.FetchSpec.External,
+		int(spec.FetchSpec.MaxKeysPerRow),
 	)
 	fetcher := cFetcherPool.Get().(*cFetcher)
 	shouldCollectStats := execstats.ShouldCollectStats(ctx, flowCtx.CollectStats)

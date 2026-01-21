@@ -520,7 +520,27 @@ func (rf *Fetcher) Init(ctx context.Context, args FetcherInitArgs) error {
 			kvCPUTime:                  &kvCPUTime,
 		}
 		if args.Txn != nil {
-			fetcherArgs.sendFn = makeSendFunc(args.Txn, args.Spec.External, &batchRequestsIssued, &kvCPUTime)
+			baseSendFn := makeSendFunc(args.Txn, args.Spec.External, &batchRequestsIssued, &kvCPUTime)
+			// For SKIP LOCKED scans, we need to ensure that entire rows are skipped
+			// atomically when any KV in the row is locked. This requires the MVCC
+			// scanner to track row boundaries using WholeRowsOfSize. We set this to
+			// the maximum keys per row, or 1 if not set (single-family tables).
+			//
+			// Note: Even if MaxKeysPerRow is not accurately set, we should still set
+			// WholeRowsOfSize to enable proper row boundary tracking. The MVCC scanner
+			// will use this to allocate the lastOffsets ring buffer.
+			if args.LockWaitPolicy == descpb.ScanLockingWaitPolicy_SKIP_LOCKED {
+				fetcherArgs.sendFn = func(ctx context.Context, ba *kvpb.BatchRequest) (*kvpb.BatchResponse, error) {
+					wholeRowsOfSize := args.Spec.MaxKeysPerRow
+					if wholeRowsOfSize == 0 {
+						wholeRowsOfSize = 1
+					}
+					ba.Header.WholeRowsOfSize = int32(wholeRowsOfSize)
+					return baseSendFn(ctx, ba)
+				}
+			} else {
+				fetcherArgs.sendFn = baseSendFn
+			}
 			fetcherArgs.admission.requestHeader = args.Txn.AdmissionHeader()
 			fetcherArgs.admission.responseQ = args.Txn.DB().SQLKVResponseAdmissionQ
 			fetcherArgs.admission.pacerFactory = args.Txn.DB().AdmissionPacerFactory

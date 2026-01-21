@@ -729,13 +729,6 @@ func (b *Builder) buildScan(
 			// best-effort locks for better performance.)
 			private.Locking.Durability = tree.LockDurabilityGuaranteed
 		}
-		if private.Locking.WaitPolicy == tree.LockWaitSkipLocked && tab.FamilyCount() > 1 {
-			// TODO(rytaft): We may be able to support this if enough columns are
-			// pruned that only a single family is scanned.
-			panic(pgerror.Newf(pgcode.FeatureNotSupported,
-				"SKIP LOCKED cannot be used for tables with multiple column families",
-			))
-		}
 	}
 	if b.evalCtx.AsOfSystemTime != nil && b.evalCtx.AsOfSystemTime.BoundedStaleness {
 		private.Flags.NoIndexJoin = true

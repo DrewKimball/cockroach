@@ -4688,6 +4688,13 @@ func mvccScanInit(
 	}
 
 	mvccScanner.init(opts.Txn, opts.Uncertainty, results)
+
+	// Enable multi-family row tracking for SKIP LOCKED if needed.
+	if opts.SkipLocked && opts.WholeRowsOfSize > 1 {
+		mvccScanner.skipLockedMultiFamily.enabled = true
+		mvccScanner.skipLockedMultiFamily.currentRowPrefix = make([]byte, 0, 64)
+	}
+
 	return true /* ok */, MVCCScanResult{}, nil
 }
 
@@ -4703,7 +4710,13 @@ func mvccScanToBytes(
 	*results = pebbleResults{}
 	if opts.WholeRowsOfSize > 1 {
 		results.lastOffsetsEnabled = true
-		results.lastOffsets = make([]int, opts.WholeRowsOfSize)
+		// Use 2x the row size to ensure we can track at least 2 complete rows.
+		// This is necessary for SKIP LOCKED with multiple column families:
+		// when we start adding KVs for a new row, we immediately start overwriting
+		// the previous row's offsets in the ring buffer. If we encounter a lock
+		// and need to rollback, we need the previous row's offsets to still be
+		// available.
+		results.lastOffsets = make([]int, 2*opts.WholeRowsOfSize)
 	}
 	ok, res, err := mvccScanInit(mvccScanner, iter, key, endKey, timestamp, opts, results)
 	if !ok {
@@ -4905,6 +4918,10 @@ type MVCCScanOptions struct {
 	// the result -- except if the result only consists of a single partial row
 	// and AllowEmpty is false, in which case the remaining KV pairs of the row
 	// will be fetched and returned too.
+	//
+	// Additionally, when SkipLocked is true and this value is > 1, the scanner
+	// will track row boundaries to ensure that partial rows (where some column
+	// families are locked and others are not) are not returned.
 	WholeRowsOfSize int32
 	// MaxLockConflicts is a maximum number of locks (intents) collected by
 	// scanner in consistent mode before returning LockConflictError.

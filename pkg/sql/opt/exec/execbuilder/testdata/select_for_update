@@ -3118,5 +3118,37 @@ vectorized: true
       table: t@t_pkey
       spans: /5/0
 
+# Test SKIP LOCKED with multiple column families.
+statement ok
+CREATE TABLE families (a INT PRIMARY KEY, b INT, c INT, FAMILY (a, b), FAMILY (c))
+
+query T
+EXPLAIN (VERBOSE) SELECT * FROM families FOR UPDATE SKIP LOCKED
+----
+distribution: local
+vectorized: true
+·
+• scan
+  columns: (a, b, c)
+  estimated row count: 1,000 (missing stats)
+  table: families@families_pkey
+  spans: FULL SCAN
+  locking strength: for update
+  locking wait policy: skip locked
+
+query T
+EXPLAIN (VERBOSE) SELECT * FROM families FOR SHARE SKIP LOCKED
+----
+distribution: local
+vectorized: true
+·
+• scan
+  columns: (a, b, c)
+  estimated row count: 1,000 (missing stats)
+  table: families@families_pkey
+  spans: FULL SCAN
+  locking strength: for share
+  locking wait policy: skip locked
+
 statement ok
 RESET optimizer_use_lock_op_for_serializable

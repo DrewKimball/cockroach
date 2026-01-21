@@ -147,6 +147,7 @@ go_test(
         "pebble_iterator_test.go",
         "pebble_iterator_tracking_test.go",
         "pebble_merge_test.go",
+        "pebble_mvcc_scanner_skip_locked_test.go",
         "pebble_mvcc_scanner_test.go",
         "pebble_test.go",
         "read_as_of_iterator_test.go",

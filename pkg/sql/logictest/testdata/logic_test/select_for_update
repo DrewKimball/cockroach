@@ -825,6 +825,135 @@ SELECT * FROM t129145 INNER LOOKUP JOIN abc ON abc.a = t129145.a FOR UPDATE OF a
 Scan /Table/112/{1-2}
 Scan /Table/113/1/{1-2}, /Table/113/1/{6-7} lock Exclusive (Block, Replicated)
 
+# Test SKIP LOCKED with multiple column families.
+statement ok
+CREATE TABLE families (a INT PRIMARY KEY, b INT, c INT, FAMILY (a, b), FAMILY (c))
+
+statement ok
+INSERT INTO families VALUES (1, 10, 100), (2, 20, 200), (3, 30, 300)
+
+statement ok
+GRANT SELECT ON families TO testuser
+
+statement ok
+GRANT UPDATE ON families TO testuser
+
+# Test in-memory locks - SKIP LOCKED should skip entire rows when any KV in the
+# row is locked, even if other KVs in the same row (different column families)
+# are not locked.
+
+# First test by locking family 0 (columns a, b).
+statement ok
+BEGIN; UPDATE families SET b = 25 WHERE a = 2
+
+user testuser
+
+query III rowsort
+SELECT * FROM families FOR UPDATE SKIP LOCKED
+----
+1  10  100
+3  30  300
+
+query III rowsort
+SELECT * FROM families FOR SHARE SKIP LOCKED
+----
+1  10  100
+3  30  300
+
+user root
+
+statement ok
+ROLLBACK
+
+# Now test by locking family 1 (column c).
+statement ok
+BEGIN; UPDATE families SET c = 250 WHERE a = 2
+
+user testuser
+
+query III rowsort
+SELECT * FROM families FOR UPDATE SKIP LOCKED
+----
+1  10  100
+3  30  300
+
+query III rowsort
+SELECT * FROM families FOR SHARE SKIP LOCKED
+----
+1  10  100
+3  30  300
+
+user root
+
+statement ok
+ROLLBACK
+
+# Test replicated locks with multiple column families.
+statement ok
+SET enable_durable_locking_for_serializable = true
+
+# Turn off buffered writes since we want to ensure a durable lock is actually acquired.
+statement ok
+SET kv_transaction_buffered_writes_enabled=false
+
+statement ok
+BEGIN; SELECT * FROM families WHERE a = 2 FOR UPDATE
+
+user testuser
+
+# The replicated lock on row 2 should cause it to be skipped.
+query III rowsort
+SELECT * FROM families FOR UPDATE SKIP LOCKED
+----
+1  10  100
+3  30  300
+
+query III rowsort
+SELECT * FROM families FOR SHARE SKIP LOCKED
+----
+1  10  100
+3  30  300
+
+user root
+
+statement ok
+COMMIT
+
+statement ok
+RESET kv_transaction_buffered_writes_enabled
+
+statement ok
+RESET enable_durable_locking_for_serializable
+
+# Test with optimizer_use_lock_op_for_serializable.
+statement ok
+SET optimizer_use_lock_op_for_serializable = true
+
+statement ok
+BEGIN; UPDATE families SET c = 250 WHERE a = 2
+
+user testuser
+
+query III rowsort
+SELECT * FROM families FOR UPDATE SKIP LOCKED
+----
+1  10  100
+3  30  300
+
+query III rowsort
+SELECT * FROM families FOR SHARE SKIP LOCKED
+----
+1  10  100
+3  30  300
+
+user root
+
+statement ok
+ROLLBACK
+
+statement ok
+RESET optimizer_use_lock_op_for_serializable
+
 statement ok
 RESET distsql
 
