@@ -541,6 +541,10 @@ func ExtractTailCalls(expr opt.Expr, tailCalls map[opt.ScalarExpr]struct{}) {
 		if !t.Def.SetReturning {
 			tailCalls[t] = struct{}{}
 		}
+
+	case *DistributeExpr:
+		// Routine execution is currently always local, so Distribute is a no-op.
+		ExtractTailCalls(t.Input, tailCalls)
 	}
 }
 

@@ -69,6 +69,7 @@ go_test(
     srcs = [
         "cost_test.go",
         "expr_test.go",
+        "extract_test.go",
         "interner_test.go",
         "logical_props_builder_test.go",
         "memo_test.go",
@@ -116,6 +117,7 @@ go_test(
         "//pkg/util/timeutil/pgdate",
         "@com_github_cockroachdb_datadriven//:datadriven",
         "@com_github_cockroachdb_errors//:errors",
+        "@com_github_stretchr_testify//require",
     ],
 )
 

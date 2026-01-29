@@ -128,7 +128,7 @@ func (p *planner) EvalRoutineExpr(
 		return expr.CachedResult, nil
 	}
 
-	if tailCallOptimizationEnabled && expr.TailCall && !expr.Generator {
+	if /*tailCallOptimizationEnabled &&*/ expr.TailCall && !expr.Generator {
 		// This is a nested routine in tail-call position.
 		sender := p.EvalContext().RoutineSender
 		if sender != nil && sender.CanOptimizeTailCall(expr) {
@@ -158,20 +158,20 @@ func (p *planner) EvalRoutineExpr(
 		}
 		ctx = context.WithValue(ctx, triggerDepthKey{}, triggerDepth+1)
 	}
-	if buildutil.CrdbTestBuild && !tailCallOptimizationEnabled {
-		// In test builds when we disable tail-call optimization, we might hit
-		// stack overflow with infinite loops.
-		var routineDepth int
-		if routineDepthValue := ctx.Value(routineDepthKey{}); routineDepthValue != nil {
-			routineDepth = routineDepthValue.(int)
-		}
-		const maxDepth = 100
-		if routineDepth > maxDepth {
-			return nil, pgerror.Newf(pgcode.ProgramLimitExceeded,
-				"routine reached recursion depth limit: %d (probably infinite loop)", maxDepth)
-		}
-		ctx = context.WithValue(ctx, routineDepthKey{}, routineDepth+1)
-	}
+	//if buildutil.CrdbTestBuild && !tailCallOptimizationEnabled {
+	//	// In test builds when we disable tail-call optimization, we might hit
+	//	// stack overflow with infinite loops.
+	//	var routineDepth int
+	//	if routineDepthValue := ctx.Value(routineDepthKey{}); routineDepthValue != nil {
+	//		routineDepth = routineDepthValue.(int)
+	//	}
+	//	const maxDepth = 100
+	//	if routineDepth > maxDepth {
+	//		return nil, pgerror.Newf(pgcode.ProgramLimitExceeded,
+	//			"routine reached recursion depth limit: %d (probably infinite loop)", maxDepth)
+	//	}
+	//	ctx = context.WithValue(ctx, routineDepthKey{}, routineDepth+1)
+	//}
 
 	var g routineGenerator
 	g.init(p, expr, args)
@@ -301,6 +301,9 @@ func (g *routineGenerator) Start(ctx context.Context, txn *kv.Txn) (err error) {
 // is cache-able (i.e., there are no arguments to the routine and stepping is
 // disabled).
 func (g *routineGenerator) startInternal(ctx context.Context, txn *kv.Txn) (err error) {
+	if err = g.p.cancelChecker.Check(); err != nil {
+		return err
+	}
 	rt := g.expr.ResolvedType()
 	var retTypes []*types.T
 	if g.expr.MultiColOutput {
