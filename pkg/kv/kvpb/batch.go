@@ -547,8 +547,11 @@ func LockSpanIterate(req Request, resp Response, fn func(roachpb.Span, lock.Dura
 // requests are used, but when a response contains a ResumeSpan the
 // ResumeSpan is subtracted from the request span to provide a more
 // minimal span of keys affected by the request. The supplied function
-// is called with each span.
-func (ba *BatchRequest) RefreshSpanIterate(br *BatchResponse, fn func(roachpb.Span)) error {
+// is called with each span and a boolean indicating if the request
+// was a locking read (but not an intent write).
+func (ba *BatchRequest) RefreshSpanIterate(
+	br *BatchResponse, fn func(sp roachpb.Span, locking bool),
+) error {
 	for i, arg := range ba.Requests {
 		req := arg.GetInner()
 		if !NeedsRefresh(req) {
@@ -575,14 +578,14 @@ func (ba *BatchRequest) RefreshSpanIterate(br *BatchResponse, fn func(roachpb.Sp
 			// request, it does not need to validate that they have not changed if the
 			// transaction ever needs to refresh.
 			if err := ResponseKeyIterate(req, resp, func(k roachpb.Key) {
-				fn(roachpb.Span{Key: k})
+				fn(roachpb.Span{Key: k}, IsLocking(req) && !IsIntentWrite(req))
 			}, false /* includeLockedNonExisting */); err != nil {
 				return err
 			}
 		} else {
 			// Otherwise, call the function with the span which was operated on.
 			if span, ok := actualSpan(req, resp); ok {
-				fn(span)
+				fn(span, IsLocking(req) && !IsIntentWrite(req))
 			}
 		}
 	}

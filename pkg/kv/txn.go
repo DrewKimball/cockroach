@@ -1877,6 +1877,20 @@ func (txn *Txn) HasBufferedWrites() bool {
 	return txn.mu.sender.HasBufferedWrites()
 }
 
+// MaybeRefreshLocks attempts to refresh all locking reads performed in a
+// read-committed transaction up to the write timestamp. This is called for
+// read-committed transactions to validate that locking reads haven't been
+// invalidated by writes occurring between the read timestamp and write
+// timestamp. Returns an error if the refresh fails.
+func (txn *Txn) MaybeRefreshLocks(ctx context.Context) error {
+	if txn.typ != RootTxn {
+		return errors.WithContextTags(errors.AssertionFailedf("MaybeRefreshLocks() called on leaf txn"), ctx)
+	}
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	return txn.mu.sender.MaybeRefreshLocks(ctx)
+}
+
 // AdmissionHeader returns the admission header for work done in the context
 // of this transaction.
 func (txn *Txn) AdmissionHeader() kvpb.AdmissionHeader {

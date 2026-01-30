@@ -292,6 +292,11 @@ func (m *MockTransactionalSender) TestingShouldRetry() bool {
 	return false
 }
 
+// MaybeRefreshLocks is part of the TxnSender interface.
+func (m *MockTransactionalSender) MaybeRefreshLocks(ctx context.Context) error {
+	return nil
+}
+
 // MockTxnSenderFactory is a TxnSenderFactory producing MockTxnSenders.
 type MockTxnSenderFactory struct {
 	senderFunc func(context.Context, *roachpb.Transaction, *kvpb.BatchRequest) (

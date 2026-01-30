@@ -390,6 +390,13 @@ type TxnSender interface {
 	// (*kv.DB).Txn() to return the retries. This lives here since the
 	// TxnSender is what has access to the server's client testing knobs.
 	TestingShouldRetry() bool
+
+	// MaybeRefreshLocks attempts to refresh all locking reads performed in a
+	// read-committed transaction up to the write timestamp. This is called for
+	// read-committed transactions to validate that locking reads haven't been
+	// invalidated by writes occurring between the read timestamp and write
+	// timestamp. Returns an error if the refresh fails.
+	MaybeRefreshLocks(ctx context.Context) error
 }
 
 // SteppingMode is the argument type to ConfigureStepping.

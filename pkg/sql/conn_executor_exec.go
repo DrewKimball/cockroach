@@ -2655,9 +2655,13 @@ func (ex *connExecutor) dispatchReadCommittedStmtToExecutionEngine(
 		}
 		maybeRetryableErr := res.Err()
 		if maybeRetryableErr == nil {
-			// If there was no error, then we must release the savepoint and break.
-			if err := ex.state.mu.txn.ReleaseSavepoint(ctx, readCommittedSavePointToken); err != nil {
-				return err
+			// If there was no error, then we must refresh lock spans, release the
+			// savepoint, and break.
+			if refreshErr := ex.state.mu.txn.MaybeRefreshLocks(ctx); refreshErr != nil {
+				return refreshErr
+			}
+			if releaseErr := ex.state.mu.txn.ReleaseSavepoint(ctx, readCommittedSavePointToken); releaseErr != nil {
+				return releaseErr
 			}
 			break
 		}

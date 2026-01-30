@@ -1706,6 +1706,13 @@ func (tc *TxnCoordSender) TestingShouldRetry() bool {
 	return false
 }
 
+// MaybeRefreshLocks is part of the TxnSender interface.
+func (tc *TxnCoordSender) MaybeRefreshLocks(ctx context.Context) error {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	return tc.interceptorAlloc.txnSpanRefresher.maybeRefreshLocks(ctx, &tc.mu.txn)
+}
+
 // TODO(148760): this doesn't work under Read Committed isolation.
 func (tc *TxnCoordSender) hasPerformedReadsLocked() bool {
 	return !tc.interceptorAlloc.txnSpanRefresher.refreshFootprint.empty()

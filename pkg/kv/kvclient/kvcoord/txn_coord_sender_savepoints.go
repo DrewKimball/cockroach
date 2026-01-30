@@ -43,6 +43,10 @@ type savepoint struct {
 	// need these two fields anymore.
 	refreshSpans   []roachpb.Span
 	refreshInvalid bool
+
+	// txnSpanRefresher fields for locking reads in read-committed transactions.
+	lockingReadSpans   []roachpb.Span
+	lockingReadInvalid bool
 }
 
 var _ kv.SavepointToken = (*savepoint)(nil)
