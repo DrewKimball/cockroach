@@ -668,7 +668,7 @@ func (b *Builder) buildExistsSubquery(
 			args[i] = indexedVar
 		}
 
-		// Create a single-element RelListExpr representing the subquery.
+		// Create a single-element RelExpr list representing the subquery.
 		existsCol := exists.LazyEvalProjectionCol
 		aliasedCol := opt.AliasedColumn{
 			Alias: b.mem.Metadata().ColumnMeta(existsCol).Alias,
@@ -809,7 +809,7 @@ func (b *Builder) buildSubquery(
 			args[i] = indexedVar
 		}
 
-		// Create a single-element RelListExpr representing the subquery.
+		// Create a single-element RelExpr list representing the subquery.
 		outputCol := input.Relational().OutputCols.SingleColumn()
 		aliasedCol := opt.AliasedColumn{
 			Alias: b.mem.Metadata().ColumnMeta(outputCol).Alias,
