@@ -188,3 +188,20 @@ func (p Presentation) format(buf *bytes.Buffer) {
 		fmt.Fprintf(buf, "%s:%d", col.Alias, col.ID)
 	}
 }
+
+// Duplicate returns a copy of this Presentation with all column IDs duplicated
+// using the provided duplicator. This is used by DuplicateSubtree to create copies
+// of expression subtrees with fresh column IDs.
+func (p Presentation) Duplicate(d opt.ColumnIDDuplicator) Presentation {
+	if len(p) == 0 {
+		return nil
+	}
+	newPres := make(Presentation, len(p))
+	for i, col := range p {
+		newPres[i] = opt.AliasedColumn{
+			Alias: col.Alias,
+			ID:    d.DuplicateColumnID(col.ID),
+		}
+	}
+	return newPres
+}

@@ -113,3 +113,20 @@ func (o Ordering) Equals(rhs Ordering) bool {
 	}
 	return true
 }
+
+// Duplicate returns a copy of this Ordering with all column IDs duplicated using
+// the provided duplicator. This is used by DuplicateSubtree to create copies
+// of expression subtrees with fresh column IDs.
+func (o Ordering) Duplicate(d ColumnIDDuplicator) Ordering {
+	if len(o) == 0 {
+		return nil
+	}
+	newOrd := make(Ordering, len(o))
+	for i, col := range o {
+		newOrd[i] = MakeOrderingColumn(
+			d.DuplicateColumnID(col.ID()),
+			col.Descending(),
+		)
+	}
+	return newOrd
+}

@@ -159,6 +159,24 @@ func (s ColSet) CopyAndMaybeRemap(colMap ColMap) ColSet {
 	return newCols
 }
 
+// ColumnIDDuplicator is an interface for duplicating column IDs. This allows
+// ColSet.Duplicate to work with the subtreeDuplicator in the norm package
+// without creating a circular dependency.
+type ColumnIDDuplicator interface {
+	DuplicateColumnID(id ColumnID) ColumnID
+}
+
+// Duplicate returns a copy of this ColSet with all column IDs duplicated using
+// the provided duplicator. This is used by DuplicateSubtree to create copies
+// of expression subtrees with fresh column IDs.
+func (s ColSet) Duplicate(d ColumnIDDuplicator) ColSet {
+	var newCols ColSet
+	s.ForEach(func(col ColumnID) {
+		newCols.Add(d.DuplicateColumnID(col))
+	})
+	return newCols
+}
+
 // TranslateColSet is used to translate a ColSet from one set of column IDs
 // to an equivalent set. This is relevant for set operations such as UNION,
 // INTERSECT and EXCEPT, and can be used to map a ColSet defined on the left

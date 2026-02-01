@@ -98,6 +98,20 @@ func (cl ColList) remapColumnsImpl(m ColMap, allowMissingEntries bool) (res ColL
 	return res
 }
 
+// Duplicate returns a copy of this ColList with all column IDs duplicated using
+// the provided duplicator. This is used by DuplicateSubtree to create copies
+// of expression subtrees with fresh column IDs.
+func (cl ColList) Duplicate(d ColumnIDDuplicator) ColList {
+	if len(cl) == 0 {
+		return nil
+	}
+	newCols := make(ColList, len(cl))
+	for i, col := range cl {
+		newCols[i] = d.DuplicateColumnID(col)
+	}
+	return newCols
+}
+
 // OptionalColList is a list of column IDs where some of the IDs can be unset.
 // It is used when the columns map 1-to-1 to a known list of objects (e.g. table
 // columns).
@@ -180,6 +194,22 @@ func (ocl OptionalColList) CopyAndMaybeRemapColumns(m ColMap) (res OptionalColLi
 		}
 	}
 	return res
+}
+
+// Duplicate returns a copy of this OptionalColList with all non-zero column IDs
+// duplicated using the provided duplicator. This is used by DuplicateSubtree
+// to create copies of expression subtrees with fresh column IDs.
+func (ocl OptionalColList) Duplicate(d ColumnIDDuplicator) OptionalColList {
+	if len(ocl) == 0 {
+		return nil
+	}
+	newCols := make(OptionalColList, len(ocl))
+	for i, col := range ocl {
+		if col != 0 {
+			newCols[i] = d.DuplicateColumnID(col)
+		}
+	}
+	return newCols
 }
 
 // ColumnMeta stores information about one of the columns stored in the

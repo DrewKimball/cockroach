@@ -6,6 +6,7 @@ go_library(
         "bool_funcs.go",
         "comp_funcs.go",
         "decorrelate_funcs.go",
+        "duplicate_utils.go",
         "factory.go",
         "fold_constants_funcs.go",
         "general_funcs.go",
@@ -27,6 +28,7 @@ go_library(
         "set_funcs.go",
         "window_funcs.go",
         "with_funcs.go",
+        ":gen-duplicate",  # keep
         ":gen-factory",  # keep
     ],
     importpath = "github.com/cockroachdb/cockroach/pkg/sql/opt/norm",
@@ -73,6 +75,7 @@ go_test(
     size = "small",
     srcs = [
         "decorrelate_funcs_test.go",
+        "duplicate_test.go",
         "factory_test.go",
         "general_funcs_test.go",
         "norm_test.go",
@@ -101,6 +104,7 @@ go_test(
         "@com_github_cockroachdb_datadriven//:datadriven",
         "@com_github_cockroachdb_errors//:errors",
         "@com_github_cockroachdb_redact//:redact",
+        "@com_github_stretchr_testify//require",
     ],
 )
 
@@ -121,6 +125,23 @@ genrule(
     outs = ["factory.og.go"],
     cmd = """
       $(location //pkg/sql/opt/optgen/cmd/optgen) -out $@ factory $(locations //pkg/sql/opt:ops) $(locations :rules)
+    """,
+    tools = ["//pkg/sql/opt/optgen/cmd/optgen"],
+    visibility = [
+        ":__pkg__",
+        "//pkg/gen:__pkg__",
+    ],
+)
+
+# Define a generator for expression subtree duplication functions.
+genrule(
+    name = "gen-duplicate",
+    srcs = [
+        "//pkg/sql/opt:ops",
+    ],
+    outs = ["duplicate_funcs.og.go"],
+    cmd = """
+      $(location //pkg/sql/opt/optgen/cmd/optgen) -out $@ duplicate $(locations //pkg/sql/opt:ops)
     """,
     tools = ["//pkg/sql/opt/optgen/cmd/optgen"],
     visibility = [

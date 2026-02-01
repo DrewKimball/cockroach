@@ -605,3 +605,21 @@ func (f *Factory) RemapCols(scalar opt.ScalarExpr, colMap opt.ColMap) opt.Scalar
 
 	return replace(scalar).(opt.ScalarExpr)
 }
+
+// DuplicateSubtree creates a copy of the given expression subtree with fresh
+// column and table IDs. This is useful for inlining subtrees multiple times
+// (e.g., CTEs, routines, subqueries) without ID conflicts.
+//
+// Column and table IDs are allocated dynamically as the subtree is traversed.
+// The same source ID always maps to the same destination ID within a single
+// duplication operation.
+func (f *Factory) DuplicateSubtree(e opt.Expr) opt.Expr {
+	d := &subtreeDuplicator{
+		f:        f,
+		md:       f.Metadata(),
+		colMap:   make(map[opt.ColumnID]opt.ColumnID),
+		tableMap: make(map[opt.TableID]opt.TableID),
+		withMap:  make(map[opt.WithID]opt.WithID),
+	}
+	return d.duplicateExpr(e)
+}

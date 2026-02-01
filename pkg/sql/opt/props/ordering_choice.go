@@ -1179,3 +1179,34 @@ func (h *colSetHelper) next(startVal opt.ColumnID) (opt.ColumnID, bool) {
 func (h *colSetHelper) empty() bool {
 	return h.colSet.Empty()
 }
+
+// Duplicate returns a copy of this OrderingChoice with all column IDs duplicated
+// using the provided duplicator. This is used by DuplicateSubtree to create copies
+// of expression subtrees with fresh column IDs.
+func (oc OrderingChoice) Duplicate(d opt.ColumnIDDuplicator) OrderingChoice {
+	if oc.Optional.Empty() && len(oc.Columns) == 0 {
+		return OrderingChoice{}
+	}
+
+	newOC := OrderingChoice{
+		Optional: oc.Optional.Duplicate(d),
+	}
+
+	if len(oc.Columns) > 0 {
+		newOC.Columns = make([]OrderingColumnChoice, len(oc.Columns))
+		for i, col := range oc.Columns {
+			newOC.Columns[i] = col.Duplicate(d)
+		}
+	}
+
+	return newOC
+}
+
+// Duplicate returns a copy of this OrderingColumnChoice with all column IDs
+// duplicated using the provided duplicator.
+func (occ OrderingColumnChoice) Duplicate(d opt.ColumnIDDuplicator) OrderingColumnChoice {
+	return OrderingColumnChoice{
+		Group:      occ.Group.Duplicate(d),
+		Descending: occ.Descending,
+	}
+}

@@ -92,6 +92,7 @@ func (g *optgen) run(args ...string) bool {
 	case "factory":
 	case "ops":
 	case "rulenames":
+	case "duplicate":
 
 	case "execfactory", "execexplain", "execplangist":
 		runValidate = false
@@ -175,6 +176,10 @@ func (g *optgen) run(args ...string) bool {
 
 	case "rulenames":
 		var gen ruleNamesGen
+		err = g.generate(compiled, gen.generate)
+
+	case "duplicate":
+		var gen duplicateGen
 		err = g.generate(compiled, gen.generate)
 
 	case "execfactory":
@@ -265,6 +270,7 @@ func (g *optgen) usage() {
 	fmt.Fprintf(g.stdErr, "\tfactory      generate expression tree creation and normalization functions\n")
 	fmt.Fprintf(g.stdErr, "\tops          generate operator definitions and functions\n")
 	fmt.Fprintf(g.stdErr, "\trulenames    generate enumeration of rule names\n")
+	fmt.Fprintf(g.stdErr, "\tduplicate    generate expression subtree duplication functions\n")
 	fmt.Fprintf(g.stdErr, "\texecfactory  generate exec.Factory interface\n")
 	fmt.Fprintf(g.stdErr, "\texecexplain  generate explain factory\n")
 	fmt.Fprintf(g.stdErr, "\texecplangist generate plan gist factory\n")

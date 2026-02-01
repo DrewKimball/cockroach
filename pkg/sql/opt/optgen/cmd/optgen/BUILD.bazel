@@ -3,6 +3,7 @@ load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 go_library(
     name = "optgen_lib",
     srcs = [
+        "duplicate_gen.go",
         "exec_explain_gen.go",
         "exec_factory_gen.go",
         "exec_plan_gist_gen.go",
