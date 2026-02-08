@@ -195,6 +195,20 @@ This metric is thus not an indicator of KV health.`,
 		Measurement: "Bytes",
 		Unit:        metric.Unit_BYTES,
 	}
+
+	metaNodeBatchCount = metric.Metadata{
+		Name:        "rpc.node_batches.recv",
+		Help:        "Number of node batches processed (each may contain multiple range batches)",
+		Measurement: "Node Batches",
+		Unit:        metric.Unit_COUNT,
+	}
+
+	metaNodeBatchRangeCount = metric.Metadata{
+		Name:        "rpc.node_batches.range_count",
+		Help:        "Total number of range batches processed within node batches",
+		Measurement: "Range Batches",
+		Unit:        metric.Unit_COUNT,
+	}
 )
 
 // Cluster settings.
@@ -257,6 +271,8 @@ type nodeMetrics struct {
 	CrossRegionBatchResponseBytes *metric.Counter
 	CrossZoneBatchRequestBytes    *metric.Counter
 	CrossZoneBatchResponseBytes   *metric.Counter
+	NodeBatchCount                *metric.Counter
+	NodeBatchRangeCount           *metric.Counter
 	// StreamManagerMetrics is for monitoring of StreamManagers for rangefeed.
 	// Note that there could be multiple stream managers in a node.
 	StreamManagerMetrics *rangefeed.StreamManagerMetrics
@@ -283,6 +299,8 @@ func makeNodeMetrics(reg *metric.Registry, histogramWindow time.Duration) *nodeM
 		CrossRegionBatchResponseBytes: metric.NewCounter(metaCrossRegionBatchResponse),
 		CrossZoneBatchRequestBytes:    metric.NewCounter(metaCrossZoneBatchRequest),
 		CrossZoneBatchResponseBytes:   metric.NewCounter(metaCrossZoneBatchResponse),
+		NodeBatchCount:                metric.NewCounter(metaNodeBatchCount),
+		NodeBatchRangeCount:           metric.NewCounter(metaNodeBatchRangeCount),
 		StreamManagerMetrics:          rangefeed.NewStreamManagerMetrics(),
 		BufferedSenderMetrics:         rangefeed.NewBufferedSenderMetrics(),
 		LockedMuxStreamMetrics:        rangefeed.NewLockedMuxStreamMetrics(),
@@ -1885,6 +1903,96 @@ func (n *Node) Batch(ctx context.Context, args *kvpb.BatchRequest) (*kvpb.BatchR
 		n.testingErrorEvent(ctx, args, errors.DecodeError(ctx, br.Error.EncodedError))
 	}
 	return br, nil
+}
+
+// NodeBatch implements the kvpb.InternalServer interface.
+// Handles requests for multiple ranges on this node, reducing per-request overhead.
+func (n *Node) NodeBatch(
+	ctx context.Context, args *kvpb.NodeBatchRequest,
+) (*kvpb.NodeBatchResponse, error) {
+	// Update metrics
+	n.metrics.NodeBatchCount.Inc(1)
+	n.metrics.NodeBatchRangeCount.Inc(int64(len(args.Batches)))
+
+	// Setup context (similar to Batch)
+	ctx = n.storeCfg.AmbientCtx.ResetAndAnnotateCtxPrealloc(ctx)
+
+	tenantID, ok := roachpb.ClientTenantFromContext(ctx)
+	if !ok {
+		tenantID = roachpb.SystemTenantID
+	} else {
+		ctx = logtags.AddTag(ctx, "tenant", tenantID)
+	}
+
+	// Apply profiler labels if configured
+	if len(args.ProfileLabels) != 0 &&
+		n.execCfg.Settings.CPUProfileType() == cluster.CPUProfileWithLabels {
+		var undo func()
+		ctx, undo = pprofutil.SetProfilerLabels(ctx, args.ProfileLabels...)
+		defer undo()
+	}
+
+	// Validate all range descriptors upfront to catch stale cache early
+	if err := n.validateNodeBatchDescriptors(ctx, args.Batches); err != nil {
+		// Return error in first response, rest are empty
+		// Client will fix cache and retry (same as existing stale descriptor handling)
+		resp := &kvpb.NodeBatchResponse{
+			Responses: make([]kvpb.BatchResponse, len(args.Batches)),
+		}
+		resp.Responses[0].Error = kvpb.NewError(err)
+		resp.Now = n.storeCfg.Clock.NowAsClockTimestamp()
+		return resp, nil
+	}
+
+	// Process each batch sequentially
+	// (Parallel processing can be added later as optimization)
+	resp := &kvpb.NodeBatchResponse{
+		Responses: make([]kvpb.BatchResponse, len(args.Batches)),
+	}
+
+	for i := range args.Batches {
+		ba := &args.Batches[i]
+
+		// Propagate gateway node ID if not already set
+		if ba.GatewayNodeID == 0 && args.GatewayNodeID != 0 {
+			ba.GatewayNodeID = args.GatewayNodeID
+		}
+
+		// Use existing batchInternal logic
+		br, err := n.batchInternal(ctx, tenantID, ba)
+
+		if err != nil {
+			// Convert error to BatchResponse.Error
+			resp.Responses[i].Error = kvpb.NewError(err)
+		} else {
+			resp.Responses[i] = *br
+		}
+	}
+
+	resp.Now = n.storeCfg.Clock.NowAsClockTimestamp()
+	return resp, nil
+}
+
+// validateNodeBatchDescriptors performs basic validation on all batches.
+// More detailed validation (descriptor staleness, lease checks) happens
+// during individual batch processing in batchInternal.
+func (n *Node) validateNodeBatchDescriptors(
+	ctx context.Context,
+	batches []kvpb.BatchRequest,
+) error {
+	for _, ba := range batches {
+		if ba.RangeID == 0 {
+			return errors.New("range ID must be set for each batch in NodeBatchRequest")
+		}
+
+		// Quick check that the range exists on this node
+		// Detailed validation happens in batchInternal -> stores.SendWithWriteBytes
+		if _, err := n.stores.GetReplica(ba.RangeID); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // BatchStream implements the kvpb.InternalServer interface.

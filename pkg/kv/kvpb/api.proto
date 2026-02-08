@@ -3022,9 +3022,15 @@ message Header {
   // evaluated in descending range order.
   bool is_reverse = 38;
 
+  // PerNodeBatchingEnabled controls whether DistSender should group
+  // requests by node and use the NodeBatch RPC. When enabled, multiple
+  // per-range BatchRequests targeting the same node will be bundled into
+  // a single NodeBatchRequest, reducing RPC overhead.
+  bool per_node_batching_enabled = 39;
+
   reserved 7, 10, 12, 14, 20, 24;
 
-  // Next ID: 39
+  // Next ID: 40
 }
 
 message WriteOptions {
@@ -3134,6 +3140,35 @@ message AdmissionHeader {
   // already been accounted for, and can start reserving more only when it
   // exceeds.
   bool no_memory_reserved_at_source = 5;
+}
+
+// NodeBatchRequest bundles multiple BatchRequests to the same node.
+// Each BatchRequest is for a single range and will be processed independently.
+// This reduces per-request overhead when multiple ranges are located on the
+// same node, particularly beneficial for operations like Streamer that span
+// many ranges.
+message NodeBatchRequest {
+  // batches contains one BatchRequest per range.
+  // Each must be a valid single-range BatchRequest with RangeID set.
+  repeated BatchRequest batches = 1 [(gogoproto.nullable) = false];
+
+  // gateway_node_id is propagated to all batches if not already set.
+  int32 gateway_node_id = 2 [(gogoproto.customname) = "GatewayNodeID",
+    (gogoproto.casttype) = "github.com/cockroachdb/cockroach/pkg/roachpb.NodeID"];
+
+  // profile_labels, if set, are applied to all batch evaluations.
+  repeated string profile_labels = 3;
+}
+
+// NodeBatchResponse contains responses for each BatchRequest.
+message NodeBatchResponse {
+  // responses contains one BatchResponse per BatchRequest, in the same order.
+  // responses[i] corresponds to batches[i] from the request.
+  repeated BatchResponse responses = 1 [(gogoproto.nullable) = false];
+
+  // now is the current time from this node, used to update HLC.
+  util.hlc.Timestamp now = 2 [(gogoproto.nullable) = false,
+    (gogoproto.casttype) = "github.com/cockroachdb/cockroach/pkg/util/hlc.ClockTimestamp"];
 }
 
 // A BatchRequest contains one or more requests to be executed in
@@ -3804,6 +3839,10 @@ service Internal {
   // gRPC streams to avoid the overhead of creating and discarding a new stream
   // for each unary Batch RPC invocation. See rpc.BatchStreamPool.
   rpc BatchStream (stream BatchRequest) returns (stream BatchResponse) {}
+
+  // NodeBatch handles multiple BatchRequests targeting ranges on the same node.
+  // This reduces RPC overhead when operations span multiple ranges on a node.
+  rpc NodeBatch (NodeBatchRequest) returns (NodeBatchResponse) {}
 
   rpc RangeLookup        (RangeLookupRequest)        returns (RangeLookupResponse)            {}
   rpc MuxRangeFeed       (stream RangeFeedRequest)   returns (stream MuxRangeFeedEvent)       {}

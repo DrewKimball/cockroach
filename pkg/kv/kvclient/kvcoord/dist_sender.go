@@ -3375,3 +3375,35 @@ func (s *sendError) Unwrap() error { return s.cause }
 func IsSendError(err error) bool {
 	return errors.HasType(err, &sendError{})
 }
+
+// rangeBatchInfo bundles information needed for per-node batching.
+type rangeBatchInfo struct {
+	ba        *kvpb.BatchRequest
+	rs        roachpb.RSpan
+	positions []int
+	token     rangecache.EvictionToken
+	nodeID    roachpb.NodeID
+}
+
+// sendNodeBatch sends a NodeBatchRequest containing multiple range batches
+// to a single node.
+//
+// TODO(per-node-batching): This function needs to be integrated with the
+// transport infrastructure. DistSender doesn't have direct access to nodedialer
+// - it's encapsulated in the Transport. Options:
+// 1. Add a nodeDialer field to DistSender (passed via DistSenderConfig)
+// 2. Extend Transport interface to support NodeBatch
+// 3. Create a special transport that handles NodeBatch internally
+//
+// For now, this is a placeholder that returns an error.
+func (ds *DistSender) sendNodeBatch(
+	ctx context.Context,
+	nodeID roachpb.NodeID,
+	batches []rangeBatchInfo,
+	originalBA *kvpb.BatchRequest,
+) (*kvpb.NodeBatchResponse, error) {
+	// TODO: Implement node connection and RPC call
+	// This requires access to nodedialer which is currently only available
+	// through the transport layer.
+	return nil, errors.New("sendNodeBatch not yet implemented - requires transport integration")
+}
