@@ -75,7 +75,6 @@ go_test(
     size = "small",
     srcs = [
         "decorrelate_funcs_test.go",
-        "duplicate_test.go",
         "factory_test.go",
         "general_funcs_test.go",
         "norm_test.go",
@@ -104,7 +103,6 @@ go_test(
         "@com_github_cockroachdb_datadriven//:datadriven",
         "@com_github_cockroachdb_errors//:errors",
         "@com_github_cockroachdb_redact//:redact",
-        "@com_github_stretchr_testify//require",
     ],
 )
 

@@ -456,6 +456,18 @@ func (g *duplicateGen) genDuplicateExpr() {
 		g.w.writeIndent("\treturn d.%s(t)\n", funcName)
 	}
 
+	// Generate cases for List types. These are needed because some List types
+	// like FiltersExpr implement ScalarExpr and can appear in table metadata
+	// (e.g., partial index predicates).
+	lists := g.compiled.Defines.WithTag("List")
+	for _, define := range lists {
+		listTyp := g.md.typeOf(define)
+		funcName := fmt.Sprintf("duplicate%sExpr", define.Name)
+
+		g.w.writeIndent("case *%s:\n", listTyp.name)
+		g.w.writeIndent("\treturn d.%s(t)\n", funcName)
+	}
+
 	// Default case - panic for unhandled types.
 	g.w.writeIndent("default:\n")
 	g.w.writeIndent("\tpanic(errors.AssertionFailedf(\"unhandled expression type in DuplicateSubtree: %%T\", e))\n")

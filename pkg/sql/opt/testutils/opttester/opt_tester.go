@@ -898,6 +898,9 @@ func (ot *OptTester) postProcess(tb testing.TB, d *datadriven.TestData, e opt.Ex
 		}
 	}
 	ot.checkExpectedRules(tb, d)
+
+	// Duplication validation happens automatically via the
+	// NotifyOnConstructedRelational callback set up in makeOptimizer.
 }
 
 // Fills in lazily-derived properties (for display).
@@ -2343,6 +2346,18 @@ func (ot *OptTester) makeOptimizer() *xform.Optimizer {
 			ot.appliedRules.Add(int(ruleName))
 		}
 	})
+
+	// Set up callback to validate each relational expression as it's constructed.
+	// This ensures validation happens when the expression has valid logical
+	// properties, and works for both normalized and optimized expressions.
+	o.Factory().NotifyOnConstructedRelational(func(rel memo.RelExpr) {
+		if err := ot.validateSubtree(o.Factory(), rel); err != nil {
+			// Panic here since we can't return an error from the callback.
+			// The panic will be caught by the deferred error handling in Optimize.
+			panic(errors.Wrap(err, "duplication validation failed"))
+		}
+	})
+
 	if ot.Flags.DisableCheckExpr {
 		o.Memo().DisableCheckExpr()
 	}
@@ -2584,4 +2599,29 @@ func (ot *OptTester) PostQueries(optimize bool) (string, error) {
 	}
 
 	return tp.String(), nil
+}
+
+// validateSubtree duplicates a subtree and validates it using the validator.
+// This is called from the NotifyOnConstructedRelational callback set up in
+// makeOptimizer, ensuring validation happens for every relational expression
+// as it's constructed (both normalized and optimized).
+func (ot *OptTester) validateSubtree(f *norm.Factory, orig opt.Expr) error {
+	var dup opt.Expr
+	var validationErr error
+
+	// Temporarily disable the callback during duplication to avoid infinite
+	// recursion (duplication constructs new expressions, which would trigger
+	// the callback again).
+	f.DisableConstructedRelationalCallback(func() {
+		dup = f.DuplicateSubtree(orig)
+
+		// Create validator and run validation.
+		v := newDuplicateValidator(f)
+		if err := v.validate(orig, dup); err != nil {
+			validationErr = errors.Wrapf(err,
+				"duplication validation failed for subtree %s", orig.Op())
+		}
+	})
+
+	return validationErr
 }

@@ -48,10 +48,17 @@ func (d *subtreeDuplicator) DuplicateTableID(id opt.TableID) opt.TableID {
 	if newID, ok := d.tableMap[id]; ok {
 		return newID
 	}
-	// Allocate fresh table ID - we don't need expression remapping for the
-	// table metadata itself since we'll be duplicating all expressions that
-	// reference these tables.
-	newID := d.md.DuplicateTable(id, nil /* no expression remapping needed */)
+	// Allocate fresh table ID with expression remapping for table metadata
+	// like partial index predicates, computed columns, etc.
+	//
+	// The remapFunc uses Factory.RemapCols to remap column IDs without memoizing.
+	// This is important because expressions stored in table metadata (like partial
+	// index predicates) should not be memoized - they're just metadata that needs
+	// column ID remapping.
+	remapFunc := func(e opt.ScalarExpr, colMap opt.ColMap) opt.ScalarExpr {
+		return d.f.RemapCols(e, colMap)
+	}
+	newID := d.md.DuplicateTable(id, remapFunc)
 	d.tableMap[id] = newID
 	return newID
 }

@@ -4,6 +4,7 @@ go_library(
     name = "opttester",
     testonly = 1,
     srcs = [
+        "duplicate_validator.go",
         "explore_trace.go",
         "forcing_opt.go",
         "memo_groups.go",
