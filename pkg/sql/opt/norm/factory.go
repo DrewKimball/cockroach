@@ -52,12 +52,6 @@ type MatchedRuleFunc func(ruleName opt.RuleName) bool
 // accessed by following the NextExpr links on the target expression.
 type AppliedRuleFunc func(ruleName opt.RuleName, source, target opt.Expr)
 
-// ConstructedRelationalFunc defines the callback function for the
-// NotifyOnConstructedRelational event. It is invoked at the end of
-// onConstructRelational after a relational expression has been fully
-// constructed and has valid logical properties.
-type ConstructedRelationalFunc func(rel memo.RelExpr)
-
 // Factory constructs a normalized expression tree within the memo. As each
 // kind of expression is constructed by the factory, it transitively runs
 // normalization transformations defined for that expression type. This may
@@ -91,12 +85,6 @@ type Factory struct {
 	// rule has been applied by the factory. It can be set via a call to the
 	// NotifyOnAppliedRule method.
 	appliedRule AppliedRuleFunc
-
-	// constructedRelational is the callback function which is invoked at the end
-	// of onConstructRelational after a relational expression has been fully
-	// constructed. It can be set via a call to the NotifyOnConstructedRelational
-	// method.
-	constructedRelational ConstructedRelationalFunc
 
 	// catalog is the opt catalog, used to resolve names during constant folding
 	// of special metadata queries like 'table_name'::regclass.
@@ -242,26 +230,6 @@ func (f *Factory) NotifyOnMatchedRule(matchedRule MatchedRuleFunc) {
 // no further notifications are sent.
 func (f *Factory) NotifyOnAppliedRule(appliedRule AppliedRuleFunc) {
 	f.appliedRule = appliedRule
-}
-
-// NotifyOnConstructedRelational sets a callback function which is invoked at
-// the end of onConstructRelational after a relational expression has been fully
-// constructed and has valid logical properties. If constructedRelational is
-// nil, then no further notifications are sent.
-func (f *Factory) NotifyOnConstructedRelational(constructedRelational ConstructedRelationalFunc) {
-	f.constructedRelational = constructedRelational
-}
-
-// DisableConstructedRelationalCallback disables the ConstructedRelational
-// callback during the execution of the given function fn. The callback
-// previously set by NotifyOnConstructedRelational is not invoked during
-// execution of fn, but will be invoked for future constructions after fn
-// returns.
-func (f *Factory) DisableConstructedRelationalCallback(fn func()) {
-	originalCallback := f.constructedRelational
-	f.constructedRelational = nil
-	fn()
-	f.constructedRelational = originalCallback
 }
 
 // SetDisabledRules is used to prevent normalization rule cycles when rules are
@@ -496,12 +464,6 @@ func (f *Factory) onConstructRelational(rel memo.RelExpr) memo.RelExpr {
 				return values
 			}
 		}
-	}
-
-	// Invoke the callback at the end of construction, when the expression has
-	// valid logical properties.
-	if f.constructedRelational != nil {
-		f.constructedRelational(rel)
 	}
 
 	return rel

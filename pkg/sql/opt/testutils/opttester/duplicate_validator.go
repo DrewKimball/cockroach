@@ -75,7 +75,7 @@ func (v *duplicateValidator) analyzeTree(e opt.Expr) treeAnalysis {
 			analysis.innerCols.UnionWith(rel.Relational().OutputCols)
 		}
 
-		// Collect TableIDs and WithIDs from Private structs.
+		// Collect TableIDs and WithIDs from expressions.
 		switch t := e.(type) {
 		case *memo.ScanExpr:
 			analysis.innerTables[t.Table] = struct{}{}
@@ -88,8 +88,28 @@ func (v *duplicateValidator) analyzeTree(e opt.Expr) treeAnalysis {
 		case *memo.WithExpr:
 			analysis.innerWiths[t.ID] = struct{}{}
 
-		// Add other operators with TableID fields as needed.
-		// For now, Scan is the main one we care about.
+		case *memo.RecursiveCTEExpr:
+			analysis.innerWiths[t.WithID] = struct{}{}
+
+		case *memo.InsertExpr:
+			if t.WithID != 0 {
+				analysis.innerWiths[t.WithID] = struct{}{}
+			}
+
+		case *memo.UpdateExpr:
+			if t.WithID != 0 {
+				analysis.innerWiths[t.WithID] = struct{}{}
+			}
+
+		case *memo.UpsertExpr:
+			if t.WithID != 0 {
+				analysis.innerWiths[t.WithID] = struct{}{}
+			}
+
+		case *memo.DeleteExpr:
+			if t.WithID != 0 {
+				analysis.innerWiths[t.WithID] = struct{}{}
+			}
 		}
 
 		// Recurse on children.

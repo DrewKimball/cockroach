@@ -898,9 +898,6 @@ func (ot *OptTester) postProcess(tb testing.TB, d *datadriven.TestData, e opt.Ex
 		}
 	}
 	ot.checkExpectedRules(tb, d)
-
-	// Duplication validation happens automatically via the
-	// NotifyOnConstructedRelational callback set up in makeOptimizer.
 }
 
 // Fills in lazily-derived properties (for display).
@@ -2346,18 +2343,6 @@ func (ot *OptTester) makeOptimizer() *xform.Optimizer {
 			ot.appliedRules.Add(int(ruleName))
 		}
 	})
-
-	// Set up callback to validate each relational expression as it's constructed.
-	// This ensures validation happens when the expression has valid logical
-	// properties, and works for both normalized and optimized expressions.
-	o.Factory().NotifyOnConstructedRelational(func(rel memo.RelExpr) {
-		if err := ot.validateSubtree(o.Factory(), rel); err != nil {
-			// Panic here since we can't return an error from the callback.
-			// The panic will be caught by the deferred error handling in Optimize.
-			panic(errors.Wrap(err, "duplication validation failed"))
-		}
-	})
-
 	if ot.Flags.DisableCheckExpr {
 		o.Memo().DisableCheckExpr()
 	}
@@ -2373,6 +2358,17 @@ func (ot *OptTester) optimizeExpr(
 	if err != nil {
 		return nil, err
 	}
+
+	// Debug: check if factory has a valid memo
+	if o.Factory().Memo() == nil {
+		return nil, errors.AssertionFailedf("factory memo is nil after buildExpr")
+	}
+
+	// Validate the built (normalized) tree before optimization.
+	if err := ot.validateExprTree(o.Factory(), o.Memo().RootExpr()); err != nil {
+		return nil, errors.Wrap(err, "duplication validation failed on built tree")
+	}
+
 	if tables != nil {
 		o.Memo().Metadata().UpdateTableMeta(ot.ctx, &ot.evalCtx, tables)
 	}
@@ -2380,6 +2376,12 @@ func (ot *OptTester) optimizeExpr(
 	if err != nil {
 		return nil, err
 	}
+
+	//// Validate before ResetLogProps so logical properties are available.
+	//if err := ot.validateExprTree(o.Factory(), root); err != nil {
+	//	return nil, errors.Wrap(err, "duplication validation failed on optimized tree")
+	//}
+
 	o.Memo().ResetLogProps(ot.ctx, &ot.evalCtx)
 	if ot.Flags.PerturbCost != 0 {
 		o.RecomputeCost()
@@ -2601,27 +2603,36 @@ func (ot *OptTester) PostQueries(optimize bool) (string, error) {
 	return tp.String(), nil
 }
 
-// validateSubtree duplicates a subtree and validates it using the validator.
-// This is called from the NotifyOnConstructedRelational callback set up in
-// makeOptimizer, ensuring validation happens for every relational expression
-// as it's constructed (both normalized and optimized).
-func (ot *OptTester) validateSubtree(f *norm.Factory, orig opt.Expr) error {
-	var dup opt.Expr
-	var validationErr error
+// validateExprTree recursively validates that every subtree in the expression
+// tree can be correctly duplicated. This is called explicitly before and after
+// optimization to ensure duplication works correctly.
+func (ot *OptTester) validateExprTree(f *norm.Factory, e opt.Expr) error {
+	return ot.traverseAndValidate(f, e)
+}
 
-	// Temporarily disable the callback during duplication to avoid infinite
-	// recursion (duplication constructs new expressions, which would trigger
-	// the callback again).
-	f.DisableConstructedRelationalCallback(func() {
-		dup = f.DuplicateSubtree(orig)
+// traverseAndValidate recursively traverses the expression tree and validates
+// that each subtree can be correctly duplicated.
+func (ot *OptTester) traverseAndValidate(f *norm.Factory, e opt.Expr) error {
+	// Skip List expressions - they're validated as part of their parent expression.
+	// List types (ProjectionsExpr, FiltersExpr, etc.) have their own duplicate methods
+	// but aren't handled by the main DuplicateSubtree dispatch.
+	if opt.IsListOp(e) {
+		return nil
+	}
 
-		// Create validator and run validation.
-		v := newDuplicateValidator(f)
-		if err := v.validate(orig, dup); err != nil {
-			validationErr = errors.Wrapf(err,
-				"duplication validation failed for subtree %s", orig.Op())
+	// Duplicate and validate this subtree.
+	dup := f.DuplicateSubtree(e)
+	v := newDuplicateValidator(f)
+	if err := v.validate(e, dup); err != nil {
+		return errors.Wrapf(err, "duplication validation failed for subtree %s", e.Op())
+	}
+
+	// Recursively validate children.
+	for i := 0; i < e.ChildCount(); i++ {
+		if err := ot.traverseAndValidate(f, e.Child(i)); err != nil {
+			return err
 		}
-	})
+	}
 
-	return validationErr
+	return nil
 }

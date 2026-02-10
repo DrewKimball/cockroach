@@ -157,10 +157,10 @@ func (g *duplicateGen) genExprDuplicate(define *lang.DefineExpr) {
 	g.w.nestIndent("func (d *subtreeDuplicator) %s(e *%s) opt.Expr {\n",
 		funcName, exprTyp.name)
 
-	// Special handling for WithExpr - we need to allocate a new WithID,
-	// duplicate the binding, add it to metadata, and track the mapping.
-	if define.Name == "With" {
-		g.genWithExprDuplicate()
+	// Special handling for operators with the WithBinding tag.
+	// These operators bind an expression and need special WithID handling.
+	if define.Tags.Contains("WithBinding") {
+		g.genWithBindingDuplicate(define)
 		g.w.unnest("}\n\n")
 		return
 	}
@@ -170,16 +170,11 @@ func (g *duplicateGen) genExprDuplicate(define *lang.DefineExpr) {
 	// before we encounter references to them.
 	g.genRegisterTables(define)
 
-	// For relational expressions, register output columns before duplicating fields.
-	if isRelational {
-		g.w.writeIndent("d.registerOutputColumns(e.Relational().OutputCols)\n")
-		g.w.writeIndent("\n")
-	}
-
 	// Get all child and private fields.
 	fields := g.md.childAndPrivateFields(define)
 
-	// Duplicate all children.
+	// Duplicate child expressions first (not lists).
+	// Child expressions will register their own output columns.
 	childFields := g.md.childFields(define)
 	for _, field := range childFields {
 		fieldName := g.md.fieldName(field)
@@ -189,22 +184,46 @@ func (g *duplicateGen) genExprDuplicate(define *lang.DefineExpr) {
 		// Special handling for LiteralValues.Rows which needs a type assertion.
 		needsTypeAssertion := define.Name == "LiteralValues" && fieldName == "Rows"
 
-		// List types have their own duplicate methods.
+		// Skip list types for now - we'll duplicate them after registering output columns.
 		if fieldTyp.isListType() {
-			listDuplicateFunc := fmt.Sprintf("duplicate%s", fieldTyp.friendlyName)
-			g.w.writeIndent("%s := d.%s(&e.%s)\n", varName, listDuplicateFunc, fieldName)
-		} else {
-			g.w.writeIndent("%s := d.duplicateExpr(e.%s)", varName, fieldName)
-
-			// Add type assertion if needed.
-			if needsTypeAssertion {
-				g.w.write(".(*opt.LiteralRows)")
-			} else if fieldTyp.isInterface && fieldTyp.friendlyName != "Expr" {
-				// Cast to the appropriate type if needed.
-				g.w.write(".(%s)", fieldTyp.asParam())
-			}
-			g.w.write("\n")
+			continue
 		}
+
+		g.w.writeIndent("%s := d.duplicateExpr(e.%s)", varName, fieldName)
+
+		// Add type assertion if needed.
+		if needsTypeAssertion {
+			g.w.write(".(*opt.LiteralRows)")
+		} else if fieldTyp.isInterface && fieldTyp.friendlyName != "Expr" {
+			// Cast to the appropriate type if needed.
+			g.w.write(".(%s)", fieldTyp.asParam())
+		}
+		g.w.write("\n")
+	}
+
+	// For relational expressions, register output columns now.
+	// This must happen AFTER duplicating child expressions (which register their outputs)
+	// but BEFORE duplicating list fields (which may reference these output columns).
+	if isRelational {
+		g.w.writeIndent("\n")
+		g.w.writeIndent("// Register output columns for this expression.\n")
+		g.w.writeIndent("d.registerOutputColumns(e.Relational().OutputCols)\n")
+		g.w.writeIndent("\n")
+	}
+
+	// Now duplicate list fields (which may reference output columns).
+	for _, field := range childFields {
+		fieldName := g.md.fieldName(field)
+		fieldTyp := g.md.typeOf(field)
+		varName := "new" + fieldName
+
+		// Only process list types here.
+		if !fieldTyp.isListType() {
+			continue
+		}
+
+		listDuplicateFunc := fmt.Sprintf("duplicate%s", fieldTyp.friendlyName)
+		g.w.writeIndent("%s := d.%s(&e.%s)\n", varName, listDuplicateFunc, fieldName)
 	}
 
 	// Duplicate the private field if it exists.
@@ -309,15 +328,159 @@ func (g *duplicateGen) genExprDuplicate(define *lang.DefineExpr) {
 	g.w.unnest("}\n\n")
 }
 
-// genWithExprDuplicate generates special duplication code for WithExpr.
-// CTEs need special handling: we allocate a new WithID, duplicate the binding,
-// add it to metadata, track the mapping, then duplicate the main expression.
-func (g *duplicateGen) genWithExprDuplicate() {
-	g.w.writeIndent("// Register output columns for both binding and main.\n")
-	g.w.writeIndent("d.registerOutputColumns(e.Binding.Relational().OutputCols)\n")
+// genWithBindingDuplicate generates duplication code for CTE expressions
+// (With and RecursiveCTE) that bind an expression to a WithID.
+func (g *duplicateGen) genWithBindingDuplicate(define *lang.DefineExpr) {
+	opName := string(define.Name)
+
+	switch opName {
+	case "With":
+		g.genWithDuplicate()
+	case "RecursiveCTE":
+		g.genRecursiveCTEDuplicate()
+	default:
+		// Mutation operators handled by genMutationDuplicate
+		g.genMutationDuplicate(define)
+	}
+}
+
+// genWithDuplicate generates duplication code for With expressions.
+func (g *duplicateGen) genWithDuplicate() {
+	g.w.writeIndent("// Allocate new WithID and record the mapping.\n")
+	g.w.writeIndent("newWithID := d.f.Memo().NextWithID()\n")
+	g.w.writeIndent("d.withMap[e.ID] = newWithID\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Duplicate the binding expression.\n")
+	g.w.writeIndent("newBinding := d.duplicateExpr(e.Binding).(memo.RelExpr)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Add the binding to metadata so WithScans can reference it.\n")
+	g.w.writeIndent("d.md.AddWithBinding(newWithID, newBinding)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Duplicate the main expression.\n")
+	g.w.writeIndent("newMain := d.duplicateExpr(e.Main).(memo.RelExpr)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Register output columns.\n")
 	g.w.writeIndent("d.registerOutputColumns(e.Relational().OutputCols)\n")
 	g.w.writeIndent("\n")
 
+	g.w.writeIndent("// Duplicate the private.\n")
+	g.w.writeIndent("newPrivate := d.duplicateWithPrivate(&e.WithPrivate)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("return d.f.ConstructWith(newBinding, newMain, newPrivate)\n")
+}
+
+// genRecursiveCTEDuplicate generates duplication code for RecursiveCTE expressions.
+func (g *duplicateGen) genRecursiveCTEDuplicate() {
+	g.w.writeIndent("// Allocate new WithID and record the mapping.\n")
+	g.w.writeIndent("newWithID := d.f.Memo().NextWithID()\n")
+	g.w.writeIndent("d.withMap[e.WithID] = newWithID\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Duplicate non-recursive children (Binding and Initial).\n")
+	g.w.writeIndent("newBinding := d.duplicateExpr(e.Binding).(memo.RelExpr)\n")
+	g.w.writeIndent("newInitial := d.duplicateExpr(e.Initial).(memo.RelExpr)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Add binding to metadata before duplicating Recursive.\n")
+	g.w.writeIndent("d.md.AddWithBinding(newWithID, newBinding)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Duplicate the recursive child (contains WithScans).\n")
+	g.w.writeIndent("newRecursive := d.duplicateExpr(e.Recursive).(memo.RelExpr)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Register output columns.\n")
+	g.w.writeIndent("d.registerOutputColumns(e.Relational().OutputCols)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Duplicate the private.\n")
+	g.w.writeIndent("newPrivate := d.duplicateRecursiveCTEPrivate(&e.RecursiveCTEPrivate)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("return d.f.ConstructRecursiveCTE(newBinding, newInitial, newRecursive, newPrivate)\n")
+}
+
+// genMutationDuplicate generates duplication code for mutation operators
+// (Insert, Update, Upsert, Delete) that may bind their input to a WithID.
+func (g *duplicateGen) genMutationDuplicate(define *lang.DefineExpr) {
+	g.w.writeIndent("// Register table columns.\n")
+	g.w.writeIndent("d.registerTable(e.MutationPrivate.Table)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Duplicate the input.\n")
+	g.w.writeIndent("newInput := d.duplicateExpr(e.Input).(memo.RelExpr)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// If the input is bound to a WithID, create a new binding.\n")
+	g.w.nestIndent("if e.MutationPrivate.WithID != 0 {\n")
+	g.w.writeIndent("newWithID := d.f.Memo().NextWithID()\n")
+	g.w.writeIndent("d.withMap[e.MutationPrivate.WithID] = newWithID\n")
+	g.w.writeIndent("d.md.AddWithBinding(newWithID, newInput)\n")
+	g.w.unnest("}\n")
+	g.w.writeIndent("\n")
+
+	// Duplicate other child fields.
+	childFields := g.md.childFields(define)
+	for _, field := range childFields {
+		fieldName := g.md.fieldName(field)
+		if fieldName == "Input" {
+			continue
+		}
+		fieldTyp := g.md.typeOf(field)
+		varName := "new" + fieldName
+
+		if fieldTyp.isListType() {
+			listDuplicateFunc := fmt.Sprintf("duplicate%s", fieldTyp.friendlyName)
+			g.w.writeIndent("%s := d.%s(&e.%s)\n", varName, listDuplicateFunc, fieldName)
+		} else {
+			g.w.writeIndent("%s := d.duplicateExpr(e.%s).(%s)\n", varName, fieldName, fieldTyp.asParam())
+		}
+	}
+
+	if len(childFields) > 1 {
+		g.w.writeIndent("\n")
+	}
+
+	g.w.writeIndent("// Register output columns.\n")
+	g.w.writeIndent("d.registerOutputColumns(e.Relational().OutputCols)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Duplicate the private.\n")
+	g.w.writeIndent("newPrivate := d.duplicateMutationPrivate(&e.MutationPrivate)\n")
+	g.w.writeIndent("\n")
+
+	// Construct the result.
+	g.w.writeIndent("return d.f.Construct%s(", define.Name)
+	fields := g.md.childAndPrivateFields(define)
+	for i, field := range fields {
+		if i > 0 {
+			g.w.write(", ")
+		}
+		fieldName := g.md.fieldName(field)
+		fieldTyp := g.md.typeOf(field)
+
+		if fieldTyp.isExpr {
+			varName := "new" + fieldName
+			if fieldTyp.isListType() {
+				g.w.write("*%s", varName)
+			} else {
+				g.w.write("%s", varName)
+			}
+		} else {
+			g.w.write("newPrivate")
+		}
+	}
+	g.w.write(")\n")
+}
+
+// genWithExprDuplicate is deprecated - use genWithBindingDuplicate instead.
+// Kept for reference but not called.
+func (g *duplicateGen) genWithExprDuplicate() {
 	g.w.writeIndent("// Allocate new WithID and record the mapping.\n")
 	g.w.writeIndent("newWithID := d.f.Memo().NextWithID()\n")
 	g.w.writeIndent("d.withMap[e.ID] = newWithID\n")
@@ -333,6 +496,10 @@ func (g *duplicateGen) genWithExprDuplicate() {
 
 	g.w.writeIndent("// Duplicate the main expression (may contain WithScans referencing this CTE).\n")
 	g.w.writeIndent("newMain := d.duplicateExpr(e.Main).(memo.RelExpr)\n")
+	g.w.writeIndent("\n")
+
+	g.w.writeIndent("// Register With's output columns AFTER duplicating children.\n")
+	g.w.writeIndent("d.registerOutputColumns(e.Relational().OutputCols)\n")
 	g.w.writeIndent("\n")
 
 	g.w.writeIndent("// Duplicate the WithPrivate with new WithID.\n")
@@ -415,6 +582,10 @@ func (g *duplicateGen) genFieldDuplicate(field *lang.DefineFieldExpr, fieldRef s
 
 	case "Presentation":
 		g.w.write("%s.Duplicate(d)", fieldRef)
+
+	case "RelPropsPtr":
+		// Relational properties contain column IDs that must be remapped.
+		g.w.write("d.duplicateRelProps(%s)", fieldRef)
 
 	default:
 		// For all other types (primitives, pointers, interfaces, etc.), copy as-is.

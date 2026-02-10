@@ -7,6 +7,7 @@ package norm
 
 import (
 	"github.com/cockroachdb/cockroach/pkg/sql/opt"
+	"github.com/cockroachdb/cockroach/pkg/sql/opt/props"
 	"github.com/cockroachdb/errors"
 )
 
@@ -36,6 +37,8 @@ type subtreeDuplicator struct {
 // This method is exported to implement the opt.ColumnIDDuplicator interface.
 func (d *subtreeDuplicator) DuplicateColumnID(id opt.ColumnID) opt.ColumnID {
 	if newID, ok := d.colMap[id]; ok {
+		// Debug: log when we remap a column
+		// fmt.Printf("DEBUG: Remapping column %d -> %d\n", id, newID)
 		return newID
 	}
 	// Not mapped - this is an outer column reference, leave unchanged.
@@ -143,4 +146,26 @@ func (d *subtreeDuplicator) registerOutputColumns(cols opt.ColSet) {
 			d.registerOutputColumn(col)
 		}
 	})
+}
+
+// duplicateRelProps creates a copy of relational properties with remapped column IDs.
+// This is used for FakeRel and other expressions that store Props directly.
+func (d *subtreeDuplicator) duplicateRelProps(p *props.Relational) *props.Relational {
+	if p == nil {
+		return nil
+	}
+
+	// Create a copy of the props with remapped column sets.
+	newProps := &props.Relational{}
+	*newProps = *p // Shallow copy
+
+	// Remap column sets.
+	newProps.OutputCols = p.OutputCols.Duplicate(d)
+	newProps.NotNullCols = p.NotNullCols.Duplicate(d)
+
+	// TODO: FuncDeps also contains column IDs and should be duplicated,
+	// but it doesn't have a Duplicate method yet. For now we copy it as-is,
+	// which may cause issues if the FakeRel's FuncDeps are actually used.
+
+	return newProps
 }
