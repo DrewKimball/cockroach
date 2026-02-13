@@ -177,28 +177,30 @@ define
   \* Temporal properties.
   AllTransactionsFinalize ==
     <>[](\A t \in TXNS: txns[t].status \in {"committed", "aborted"})
+
+  \* Compute valid insertion positions for an event that must come after must_be_after.
+  ValidPositions(must_be_after) ==
+    {p \in 1..(Len(ordering)+1) :
+      \A e \in must_be_after :
+        e = NoEvent \/ \E i \in 1..(p-1) : ordering[i] = e}
 end define;
 
-\* Helper macro to allocate a new timestamp event.
-\* The event must order after all events in must_be_after set.
-\* Non-deterministically chooses where to insert the event in the total ordering.
-macro alloc_event_after(ts_var, must_be_after)
-variables valid_positions;
-begin
-  \* Allocate new event ID.
-  ts_var := eventID;
-  eventID := eventID + 1;
-
-  \* Compute valid insertion positions.
-  \* Position pos is valid if all events in must_be_after appear before pos.
-  valid_positions := {pos \in 1..(Len(ordering)+1) :
-    \A e \in must_be_after :
-      e = NoEvent \/ \E i \in 1..(pos-1) : ordering[i] = e};
-
-  \* Non-deterministically choose a valid position and insert.
-  with pos \in valid_positions do
-    ordering := InsertAt(ordering, ts_var, pos);
+\* Allocate a new event and insert it into the ordering after must_be_after events.
+macro alloc_event_after(ts_var, must_be_after) begin
+  with pos \in ValidPositions(must_be_after) do
+    ts_var := eventID ||
+    eventID := eventID + 1 ||
+    ordering := InsertAt(ordering, eventID, pos);
   end with;
+end macro;
+
+\* Non-deterministically advance provisional_commit_event or skip.
+macro maybe_advance_commit_ts() begin
+  either
+    alloc_event_after(txns[self].provisional_commit_event, {txns[self].provisional_commit_event});
+  or
+    skip;
+  end either;
 end macro;
 
 \* Each transaction process executes one statement that does a read and a write.
@@ -217,12 +219,6 @@ variables
   \* Track which operations have completed.
   read_done = FALSE;
   write_done = FALSE;
-
-  \* Whether provisional_commit_event advances between operations in statement.
-  stmt_ts_skew;
-
-  \* Whether provisional_commit_event advances after statement before commit.
-  commit_ts_skew;
 begin
   \* Choose isolation level for this transaction.
   ChooseIsoLevel:
@@ -232,40 +228,32 @@ begin
       txns[self].iso_level := RC;
     end either;
 
-  \* Choose whether to have timestamp skew within statement.
-  ChooseStmtSkew:
-    either
-      stmt_ts_skew := TRUE;
-    or
-      stmt_ts_skew := FALSE;
-    end either;
-
-  \* Choose whether to have timestamp skew at commit.
-  ChooseCommitSkew:
-    either
-      commit_ts_skew := TRUE;
-    or
-      commit_ts_skew := FALSE;
-    end either;
-
-  \* Begin transaction/statement.
+  \* Begin transaction/statement - allocate read event.
   BeginTxnOrStmt:
     if txns[self].iso_level = SSI then
       \* SSI: allocate transaction-level read timestamp.
       alloc_event_after(txns[self].read_event, {});
-      \* Also allocate initial provisional commit timestamp (must be >= read_event).
-      alloc_event_after(txns[self].provisional_commit_event, {txns[self].read_event});
     else
       \* RC: allocate statement-level read timestamp.
       alloc_event_after(stmt_read_event, {});
       txns[self].read_event := stmt_read_event;
-      \* Also allocate provisional commit timestamp for writes (must be >= read_event).
-      alloc_event_after(txns[self].provisional_commit_event, {stmt_read_event});
     end if;
+
+  \* Allocate provisional commit event.
+  AllocWriteEvent:
+    alloc_event_after(txns[self].provisional_commit_event, {txns[self].read_event});
 
   \* Execute read and write operations in either order.
   ExecuteStatement:
     while ~(read_done /\ write_done) do
+      \* Before each operation, possibly advance provisional_commit_event.
+      MaybeAdvanceTS:
+        either
+          alloc_event_after(txns[self].provisional_commit_event, {txns[self].provisional_commit_event});
+        or
+          skip;
+        end either;
+      ReadOrWrite:
       either
         when ~read_done;
         \* Perform read with intent handling (blocking or pushing).
@@ -319,12 +307,11 @@ begin
         ];
         write_done := TRUE;
       end either;
-      \* After first operation, possibly advance provisional_commit_event.
-      MaybeAdvanceTS:
-        if ~(read_done /\ write_done) /\ stmt_ts_skew then
-          alloc_event_after(txns[self].provisional_commit_event, {txns[self].provisional_commit_event});
-        end if;
     end while;
+
+  \* Possibly advance the provisional commit timestamp again before refreshing.
+  MaybeAdvanceBeforeRefresh:
+    maybe_advance_commit_ts();
 
   \* For RC, do per-statement refresh after statement completes.
   \* This is the NEW mechanism proposed for check/cascade reads.
@@ -348,9 +335,7 @@ begin
   \* Possibly advance provisional_commit_event again before commit.
   \* (models timestamp cache conflicts from other statements/transactions)
   MaybeAdvanceBeforeCommit:
-    if commit_ts_skew then
-      alloc_event_after(txns[self].provisional_commit_event, {txns[self].provisional_commit_event});
-    end if;
+    maybe_advance_commit_ts();
 
   \* For SSI, must refresh all reads to provisional_commit_event before commit.
   CommitRefresh:
@@ -369,10 +354,8 @@ begin
 
   \* Commit the transaction.
   Commit:
-    \* Set final commit timestamp to current provisional_commit_event.
-    txns[self].final_commit_event := txns[self].provisional_commit_event;
-
-    \* Mark as committed.
+    \* Set final commit timestamp and mark as committed.
+    txns[self].final_commit_event := txns[self].provisional_commit_event ||
     txns[self].status := "committed";
 
     \* Resolve intent at final commit timestamp.
@@ -383,7 +366,7 @@ begin
         intent_txn |-> NoIntent  \* intent resolved
       ];
 
-    goto Done;
+    goto End;
 
   Abort:
     txns[self].status := "aborted";
@@ -395,12 +378,365 @@ begin
       skip;
     end if;
 
-  Done:
+  End:
     skip;
 
 end process;
 
 end algorithm; *)
 \* BEGIN TRANSLATION (this will be filled in by TLC when PlusCal is translated)
+VARIABLES eventID, ordering, txns, keys, tscache, reads, pc
+
+(* define statement *)
+TXNS == {TXN1, TXN2}
+KEYS == {K1, K2}
+
+
+InsertAt(seq, elem, pos) ==
+  SubSeq(seq, 1, pos-1) \o <<elem>> \o SubSeq(seq, pos, Len(seq))
+
+
+
+
+EventBefore(e1, e2) ==
+  IF e1 = NoEvent THEN
+    e2 /= NoEvent
+  ELSE IF e2 = NoEvent THEN
+    FALSE
+  ELSE
+    LET pos1 == CHOOSE i \in 1..Len(ordering) : ordering[i] = e1
+        pos2 == CHOOSE i \in 1..Len(ordering) : ordering[i] = e2
+    IN pos1 < pos2
+
+
+EventBeforeOrEqual(e1, e2) ==
+  e1 = e2 \/ EventBefore(e1, e2)
+
+
+HasIntent(key, txn) ==
+  keys[key].intent_txn = txn
+
+
+HasAnyIntent(key) ==
+  keys[key].intent_txn /= NoIntent
+
+
+CommittedEvent(key) ==
+  IF HasAnyIntent(key) THEN NoEvent ELSE keys[key].event
+
+
+IsCommitted(txn) ==
+  txns[txn].status = "committed"
+
+
+IsAborted(txn) ==
+  txns[txn].status = "aborted"
+
+
+IsPending(txn) ==
+  txns[txn].status = "pending"
+
+
+
+
+
+NoStaleReads ==
+  \A txn \in TXNS:
+    IsCommitted(txn) =>
+      \A i \in DOMAIN reads[txn]:
+        LET
+          read_record == reads[txn][i]
+          key == read_record[1]
+          read_val == read_record[2]
+          read_event == read_record[3]
+          final_commit_event == txns[txn].final_commit_event
+        IN
+
+
+
+
+          (keys[key].value /= read_val) =>
+            (EventBeforeOrEqual(CommittedEvent(key), read_event) \/
+             EventBefore(final_commit_event, CommittedEvent(key)))
+
+
+TypeInvariant ==
+  /\ eventID \in Nat
+  /\ Len(ordering) < eventID
+  /\ \A i \in 1..Len(ordering) : ordering[i] /= NoEvent
+  /\ \A t \in TXNS:
+    /\ txns[t].status \in {"pending", "committed", "aborted"}
+    /\ txns[t].iso_level \in {SSI, RC}
+    /\ txns[t].read_event \in (1..(eventID-1)) \cup {NoEvent}
+    /\ txns[t].provisional_commit_event \in (1..(eventID-1)) \cup {NoEvent}
+    /\ txns[t].final_commit_event \in (1..(eventID-1)) \cup {NoEvent}
+  /\ \A k \in KEYS:
+    /\ keys[k].value \in 0..10
+    /\ keys[k].event \in (1..(eventID-1)) \cup {NoEvent}
+    /\ keys[k].intent_txn \in {NoIntent, TXN1, TXN2}
+    /\ tscache[k] \in (1..(eventID-1)) \cup {NoEvent}
+
+
+AllTransactionsFinalize ==
+  <>[](\A t \in TXNS: txns[t].status \in {"committed", "aborted"})
+
+
+ValidPositions(must_be_after) ==
+  {p \in 1..(Len(ordering)+1) :
+    \A e \in must_be_after :
+      e = NoEvent \/ \E i \in 1..(p-1) : ordering[i] = e}
+
+VARIABLES read_key, write_key, stmt_read_event, read_value, read_done, 
+          write_done
+
+vars == << eventID, ordering, txns, keys, tscache, reads, pc, read_key, 
+           write_key, stmt_read_event, read_value, read_done, write_done >>
+
+ProcSet == (TXNS)
+
+Init == (* Global variables *)
+        /\ eventID = 1
+        /\ ordering = <<>>
+        /\ txns =        [t \in {TXN1, TXN2} |-> [
+                    status                |-> "pending",
+                    iso_level             |-> SSI,
+                    read_event               |-> NoEvent,
+                    provisional_commit_event |-> NoEvent,
+                    final_commit_event       |-> NoEvent
+                  ]]
+        /\ keys =        [k \in {K1, K2} |-> [
+                    value      |-> 0,
+                    event      |-> NoEvent,
+                    intent_txn |-> NoIntent
+                  ]]
+        /\ tscache = [k \in {K1, K2} |-> NoEvent]
+        /\ reads = [t \in {TXN1, TXN2} |-> <<>>]
+        (* Process txn *)
+        /\ read_key = [self \in TXNS |-> IF self = TXN1 THEN K2 ELSE K1]
+        /\ write_key = [self \in TXNS |-> IF self = TXN1 THEN K1 ELSE K2]
+        /\ stmt_read_event = [self \in TXNS |-> NoEvent]
+        /\ read_value = [self \in TXNS |-> 0]
+        /\ read_done = [self \in TXNS |-> FALSE]
+        /\ write_done = [self \in TXNS |-> FALSE]
+        /\ pc = [self \in ProcSet |-> "ChooseIsoLevel"]
+
+ChooseIsoLevel(self) == /\ pc[self] = "ChooseIsoLevel"
+                        /\ \/ /\ txns' = [txns EXCEPT ![self].iso_level = SSI]
+                           \/ /\ txns' = [txns EXCEPT ![self].iso_level = RC]
+                        /\ pc' = [pc EXCEPT ![self] = "BeginTxnOrStmt"]
+                        /\ UNCHANGED << eventID, ordering, keys, tscache, 
+                                        reads, read_key, write_key, 
+                                        stmt_read_event, read_value, read_done, 
+                                        write_done >>
+
+BeginTxnOrStmt(self) == /\ pc[self] = "BeginTxnOrStmt"
+                        /\ IF txns[self].iso_level = SSI
+                              THEN /\ \E pos \in ValidPositions(({})):
+                                        /\ eventID' = eventID + 1
+                                        /\ ordering' = InsertAt(ordering, eventID, pos)
+                                        /\ txns' = [txns EXCEPT ![self].read_event = eventID]
+                                   /\ UNCHANGED stmt_read_event
+                              ELSE /\ \E pos \in ValidPositions(({})):
+                                        /\ eventID' = eventID + 1
+                                        /\ ordering' = InsertAt(ordering, eventID, pos)
+                                        /\ stmt_read_event' = [stmt_read_event EXCEPT ![self] = eventID]
+                                   /\ txns' = [txns EXCEPT ![self].read_event = stmt_read_event'[self]]
+                        /\ pc' = [pc EXCEPT ![self] = "AllocWriteEvent"]
+                        /\ UNCHANGED << keys, tscache, reads, read_key, 
+                                        write_key, read_value, read_done, 
+                                        write_done >>
+
+AllocWriteEvent(self) == /\ pc[self] = "AllocWriteEvent"
+                         /\ \E pos \in ValidPositions(({txns[self].read_event})):
+                              /\ eventID' = eventID + 1
+                              /\ ordering' = InsertAt(ordering, eventID, pos)
+                              /\ txns' = [txns EXCEPT ![self].provisional_commit_event = eventID]
+                         /\ pc' = [pc EXCEPT ![self] = "ExecuteStatement"]
+                         /\ UNCHANGED << keys, tscache, reads, read_key, 
+                                         write_key, stmt_read_event, 
+                                         read_value, read_done, write_done >>
+
+ExecuteStatement(self) == /\ pc[self] = "ExecuteStatement"
+                          /\ IF ~(read_done[self] /\ write_done[self])
+                                THEN /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceTS"]
+                                ELSE /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceBeforeRefresh"]
+                          /\ UNCHANGED << eventID, ordering, txns, keys, 
+                                          tscache, reads, read_key, write_key, 
+                                          stmt_read_event, read_value, 
+                                          read_done, write_done >>
+
+MaybeAdvanceTS(self) == /\ pc[self] = "MaybeAdvanceTS"
+                        /\ \/ /\ \E pos \in ValidPositions(({txns[self].provisional_commit_event})):
+                                   /\ eventID' = eventID + 1
+                                   /\ ordering' = InsertAt(ordering, eventID, pos)
+                                   /\ txns' = [txns EXCEPT ![self].provisional_commit_event = eventID]
+                           \/ /\ TRUE
+                              /\ UNCHANGED <<eventID, ordering, txns>>
+                        /\ pc' = [pc EXCEPT ![self] = "ReadOrWrite"]
+                        /\ UNCHANGED << keys, tscache, reads, read_key, 
+                                        write_key, stmt_read_event, read_value, 
+                                        read_done, write_done >>
+
+ReadOrWrite(self) == /\ pc[self] = "ReadOrWrite"
+                     /\ \/ /\ ~read_done[self]
+                           /\ IF HasAnyIntent(read_key[self])
+                                 THEN /\ \/ /\ ~HasAnyIntent(read_key[self])
+                                            /\ keys' = keys
+                                         \/ /\ txns[keys[read_key[self]].intent_txn].status \in {"committed", "aborted"}
+                                            /\ IF txns[keys[read_key[self]].intent_txn].status = "committed"
+                                                  THEN /\ keys' = [keys EXCEPT ![read_key[self]] =                   [
+                                                                                                     value      |-> keys[read_key[self]].intent_txn,
+                                                                                                     event      |-> txns[keys[read_key[self]].intent_txn].final_commit_event,
+                                                                                                     intent_txn |-> NoIntent
+                                                                                                   ]]
+                                                  ELSE /\ keys' = [keys EXCEPT ![read_key[self]] =                   [
+                                                                                                     value      |-> 0,
+                                                                                                     event      |-> NoEvent,
+                                                                                                     intent_txn |-> NoIntent
+                                                                                                   ]]
+                                 ELSE /\ TRUE
+                                      /\ keys' = keys
+                           /\ read_value' = [read_value EXCEPT ![self] = keys'[read_key[self]].value]
+                           /\ IF txns[self].iso_level = SSI
+                                 THEN /\ reads' = [reads EXCEPT ![self] = Append(reads[self], <<read_key[self], read_value'[self], txns[self].read_event>>)]
+                                 ELSE /\ reads' = [reads EXCEPT ![self] = Append(reads[self], <<read_key[self], read_value'[self], stmt_read_event[self]>>)]
+                           /\ read_done' = [read_done EXCEPT ![self] = TRUE]
+                           /\ UNCHANGED <<eventID, ordering, txns, write_done>>
+                        \/ /\ ~write_done[self]
+                           /\ IF EventBeforeOrEqual(txns[self].provisional_commit_event, tscache[write_key[self]])
+                                 THEN /\ \E pos \in ValidPositions(({tscache[write_key[self]]})):
+                                           /\ eventID' = eventID + 1
+                                           /\ ordering' = InsertAt(ordering, eventID, pos)
+                                           /\ txns' = [txns EXCEPT ![self].provisional_commit_event = eventID]
+                                 ELSE /\ TRUE
+                                      /\ UNCHANGED << eventID, ordering, txns >>
+                           /\ keys' = [keys EXCEPT ![write_key[self]] =                    [
+                                                                          value      |-> self,
+                                                                          event      |-> txns'[self].provisional_commit_event,
+                                                                          intent_txn |-> self
+                                                                        ]]
+                           /\ write_done' = [write_done EXCEPT ![self] = TRUE]
+                           /\ UNCHANGED <<reads, read_value, read_done>>
+                     /\ pc' = [pc EXCEPT ![self] = "ExecuteStatement"]
+                     /\ UNCHANGED << tscache, read_key, write_key, 
+                                     stmt_read_event >>
+
+MaybeAdvanceBeforeRefresh(self) == /\ pc[self] = "MaybeAdvanceBeforeRefresh"
+                                   /\ \/ /\ \E pos \in ValidPositions(({txns[self].provisional_commit_event})):
+                                              /\ eventID' = eventID + 1
+                                              /\ ordering' = InsertAt(ordering, eventID, pos)
+                                              /\ txns' = [txns EXCEPT ![self].provisional_commit_event = eventID]
+                                      \/ /\ TRUE
+                                         /\ UNCHANGED <<eventID, ordering, txns>>
+                                   /\ pc' = [pc EXCEPT ![self] = "StatementRefresh"]
+                                   /\ UNCHANGED << keys, tscache, reads, 
+                                                   read_key, write_key, 
+                                                   stmt_read_event, read_value, 
+                                                   read_done, write_done >>
+
+StatementRefresh(self) == /\ pc[self] = "StatementRefresh"
+                          /\ IF txns[self].iso_level = RC
+                                THEN /\ IF HasAnyIntent(read_key[self])
+                                           THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
+                                                /\ UNCHANGED tscache
+                                           ELSE /\ IF EventBefore(stmt_read_event[self], CommittedEvent(read_key[self])) /\
+                                                      EventBeforeOrEqual(CommittedEvent(read_key[self]), txns[self].provisional_commit_event)
+                                                      THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
+                                                           /\ UNCHANGED tscache
+                                                      ELSE /\ tscache' = [tscache EXCEPT ![read_key[self]] = txns[self].provisional_commit_event]
+                                                           /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceBeforeCommit"]
+                                ELSE /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceBeforeCommit"]
+                                     /\ UNCHANGED tscache
+                          /\ UNCHANGED << eventID, ordering, txns, keys, reads, 
+                                          read_key, write_key, stmt_read_event, 
+                                          read_value, read_done, write_done >>
+
+MaybeAdvanceBeforeCommit(self) == /\ pc[self] = "MaybeAdvanceBeforeCommit"
+                                  /\ \/ /\ \E pos \in ValidPositions(({txns[self].provisional_commit_event})):
+                                             /\ eventID' = eventID + 1
+                                             /\ ordering' = InsertAt(ordering, eventID, pos)
+                                             /\ txns' = [txns EXCEPT ![self].provisional_commit_event = eventID]
+                                     \/ /\ TRUE
+                                        /\ UNCHANGED <<eventID, ordering, txns>>
+                                  /\ pc' = [pc EXCEPT ![self] = "CommitRefresh"]
+                                  /\ UNCHANGED << keys, tscache, reads, 
+                                                  read_key, write_key, 
+                                                  stmt_read_event, read_value, 
+                                                  read_done, write_done >>
+
+CommitRefresh(self) == /\ pc[self] = "CommitRefresh"
+                       /\ IF txns[self].iso_level = SSI
+                             THEN /\ IF HasAnyIntent(read_key[self])
+                                        THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
+                                             /\ UNCHANGED tscache
+                                        ELSE /\ IF EventBefore(txns[self].read_event, CommittedEvent(read_key[self])) /\
+                                                   EventBeforeOrEqual(CommittedEvent(read_key[self]), txns[self].provisional_commit_event)
+                                                   THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
+                                                        /\ UNCHANGED tscache
+                                                   ELSE /\ tscache' = [tscache EXCEPT ![read_key[self]] = txns[self].provisional_commit_event]
+                                                        /\ pc' = [pc EXCEPT ![self] = "Commit"]
+                             ELSE /\ pc' = [pc EXCEPT ![self] = "Commit"]
+                                  /\ UNCHANGED tscache
+                       /\ UNCHANGED << eventID, ordering, txns, keys, reads, 
+                                       read_key, write_key, stmt_read_event, 
+                                       read_value, read_done, write_done >>
+
+Commit(self) == /\ pc[self] = "Commit"
+                /\ txns' = [txns EXCEPT ![self].final_commit_event = txns[self].provisional_commit_event,
+                                        ![self].status = "committed"]
+                /\ pc' = [pc EXCEPT ![self] = "ResolveIntent"]
+                /\ UNCHANGED << eventID, ordering, keys, tscache, reads, 
+                                read_key, write_key, stmt_read_event, 
+                                read_value, read_done, write_done >>
+
+ResolveIntent(self) == /\ pc[self] = "ResolveIntent"
+                       /\ keys' = [keys EXCEPT ![write_key[self]] =                    [
+                                                                      value      |-> self,
+                                                                      event      |-> txns[self].final_commit_event,
+                                                                      intent_txn |-> NoIntent
+                                                                    ]]
+                       /\ pc' = [pc EXCEPT ![self] = "End"]
+                       /\ UNCHANGED << eventID, ordering, txns, tscache, reads, 
+                                       read_key, write_key, stmt_read_event, 
+                                       read_value, read_done, write_done >>
+
+Abort(self) == /\ pc[self] = "Abort"
+               /\ txns' = [txns EXCEPT ![self].status = "aborted"]
+               /\ IF HasIntent(write_key[self], self)
+                     THEN /\ TRUE
+                     ELSE /\ TRUE
+               /\ pc' = [pc EXCEPT ![self] = "End"]
+               /\ UNCHANGED << eventID, ordering, keys, tscache, reads, 
+                               read_key, write_key, stmt_read_event, 
+                               read_value, read_done, write_done >>
+
+End(self) == /\ pc[self] = "End"
+             /\ TRUE
+             /\ pc' = [pc EXCEPT ![self] = "Done"]
+             /\ UNCHANGED << eventID, ordering, txns, keys, tscache, reads, 
+                             read_key, write_key, stmt_read_event, read_value, 
+                             read_done, write_done >>
+
+txn(self) == ChooseIsoLevel(self) \/ BeginTxnOrStmt(self)
+                \/ AllocWriteEvent(self) \/ ExecuteStatement(self)
+                \/ MaybeAdvanceTS(self) \/ ReadOrWrite(self)
+                \/ MaybeAdvanceBeforeRefresh(self)
+                \/ StatementRefresh(self) \/ MaybeAdvanceBeforeCommit(self)
+                \/ CommitRefresh(self) \/ Commit(self)
+                \/ ResolveIntent(self) \/ Abort(self) \/ End(self)
+
+(* Allow infinite stuttering to prevent deadlock on termination. *)
+Terminating == /\ \A self \in ProcSet: pc[self] = "Done"
+               /\ UNCHANGED vars
+
+Next == (\E self \in TXNS: txn(self))
+           \/ Terminating
+
+Spec == /\ Init /\ [][Next]_vars
+        /\ \A self \in TXNS : WF_vars(txn(self))
+
+Termination == <>(\A self \in ProcSet: pc[self] = "Done")
+
+\* END TRANSLATION
 
 ====================================================================
