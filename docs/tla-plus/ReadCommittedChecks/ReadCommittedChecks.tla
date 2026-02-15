@@ -206,14 +206,14 @@ macro maybe_advance_write_ts() begin
 end macro;
 
 \* Each transaction process executes one statement that does a read and a write.
+\* Note: Since we model only one statement per transaction, we don't need a separate
+\* stmt_read_ts variable. For RC transactions, txns[self].read_ts serves as the
+\* statement-level read timestamp. For SSI, it's the transaction-level read timestamp.
 fair process txn \in TXNS
 variables
   \* Which key this txn reads and writes.
   read_key = IF self = TXN1 THEN K2 ELSE K1;
   write_key = IF self = TXN1 THEN K1 ELSE K2;
-
-  \* Statement-level read timestamp (for RC; for SSI this is txn-level).
-  stmt_read_ts = ZeroTimestamp;
 
   \* Value read during statement.
   read_value = 0;
@@ -230,16 +230,10 @@ begin
       txns[self].iso_level := RC;
     end either;
 
-  \* Begin transaction/statement - allocate read event.
+  \* Begin transaction/statement - allocate read timestamp.
   BeginTxnOrStmt:
-    if txns[self].iso_level = SSI then
-      \* SSI: allocate transaction-level read timestamp.
-      alloc_ts_after(txns[self].read_ts, {});
-    else
-      \* RC: allocate statement-level read timestamp.
-      alloc_ts_after(stmt_read_ts, {});
-      txns[self].read_ts := stmt_read_ts;
-    end if;
+    \* For both SSI and RC, allocate read_ts (SSI: txn-level; RC: stmt-level).
+    alloc_ts_after(txns[self].read_ts, {});
 
   \* Allocate provisional commit event.
   AllocWriteEvent:
@@ -282,13 +276,8 @@ begin
         end if;
         \* Now read the (possibly just resolved) value.
         read_value := keys[read_key].value;
-        if txns[self].iso_level = SSI then
-          \* SSI reads at transaction read timestamp.
-          reads[self] := Append(reads[self], <<read_key, read_value, txns[self].read_ts>>);
-        else
-          \* RC reads at statement read timestamp.
-          reads[self] := Append(reads[self], <<read_key, read_value, stmt_read_ts>>);
-        end if;
+        \* Record read (SSI: txn read_ts; RC: stmt read_ts, both in txns[self].read_ts).
+        reads[self] := Append(reads[self], <<read_key, read_value, txns[self].read_ts>>);
         read_done := TRUE;
       or
         when ~write_done;
@@ -315,12 +304,12 @@ begin
   \* This is the NEW mechanism proposed for check/cascade reads.
   StatementRefresh:
     if txns[self].iso_level = RC then
-      \* Refresh check/cascade reads from stmt_read_ts to current write_ts.
-      \* Check if any value was written in (stmt_read_ts, write_ts].
+      \* Refresh check/cascade reads from read_ts to current write_ts.
+      \* Check if any value was written in (read_ts, write_ts].
       if HasAnyIntent(read_key) then
         \* Fail on encountering intent.
         goto Abort;
-      elsif TimestampBefore(stmt_read_ts, CommittedTimestamp(read_key)) /\
+      elsif TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key)) /\
             TimestampBeforeOrEqual(CommittedTimestamp(read_key), txns[self].write_ts) then
         \* Fail on encountering newer committed value.
         goto Abort;
@@ -475,13 +464,9 @@ TypeInvariant ==
 
 AllTransactionsFinalize ==
   <>[](\A t \in TXNS: txns[t].status \in {"committed", "aborted"})
-
-
-TransactionsStayCommitted ==
+CommittedTransactionsStayCommitted ==
   \A t \in TXNS: [](IsCommitted(t) => []IsCommitted(t))
-
-
-TransactionsStayAborted ==
+AbortedTransactionsStayAborted ==
   \A t \in TXNS: [](IsAborted(t) => []IsAborted(t))
 
 
@@ -490,11 +475,10 @@ ValidPositions(must_be_after) ==
     \A e \in must_be_after :
       e = ZeroTimestamp \/ \E i \in 1..(p-1) : ordering[i] = e}
 
-VARIABLES read_key, write_key, stmt_read_ts, read_value, read_done, 
-          write_done
+VARIABLES read_key, write_key, read_value, read_done, write_done
 
 vars == << nextTS, ordering, txns, keys, tscache, reads, pc, read_key, 
-           write_key, stmt_read_ts, read_value, read_done, write_done >>
+           write_key, read_value, read_done, write_done >>
 
 ProcSet == (TXNS)
 
@@ -517,7 +501,6 @@ Init == (* Global variables *)
         (* Process txn *)
         /\ read_key = [self \in TXNS |-> IF self = TXN1 THEN K2 ELSE K1]
         /\ write_key = [self \in TXNS |-> IF self = TXN1 THEN K1 ELSE K2]
-        /\ stmt_read_ts = [self \in TXNS |-> ZeroTimestamp]
         /\ read_value = [self \in TXNS |-> 0]
         /\ read_done = [self \in TXNS |-> FALSE]
         /\ write_done = [self \in TXNS |-> FALSE]
@@ -528,21 +511,14 @@ ChooseIsoLevel(self) == /\ pc[self] = "ChooseIsoLevel"
                            \/ /\ txns' = [txns EXCEPT ![self].iso_level = RC]
                         /\ pc' = [pc EXCEPT ![self] = "BeginTxnOrStmt"]
                         /\ UNCHANGED << nextTS, ordering, keys, tscache, reads, 
-                                        read_key, write_key, stmt_read_ts, 
-                                        read_value, read_done, write_done >>
+                                        read_key, write_key, read_value, 
+                                        read_done, write_done >>
 
 BeginTxnOrStmt(self) == /\ pc[self] = "BeginTxnOrStmt"
-                        /\ IF txns[self].iso_level = SSI
-                              THEN /\ \E pos \in ValidPositions(({})):
-                                        /\ nextTS' = nextTS + 1
-                                        /\ ordering' = InsertAt(ordering, nextTS, pos)
-                                        /\ txns' = [txns EXCEPT ![self].read_ts = nextTS]
-                                   /\ UNCHANGED stmt_read_ts
-                              ELSE /\ \E pos \in ValidPositions(({})):
-                                        /\ nextTS' = nextTS + 1
-                                        /\ ordering' = InsertAt(ordering, nextTS, pos)
-                                        /\ stmt_read_ts' = [stmt_read_ts EXCEPT ![self] = nextTS]
-                                   /\ txns' = [txns EXCEPT ![self].read_ts = stmt_read_ts'[self]]
+                        /\ \E pos \in ValidPositions(({})):
+                             /\ nextTS' = nextTS + 1
+                             /\ ordering' = InsertAt(ordering, nextTS, pos)
+                             /\ txns' = [txns EXCEPT ![self].read_ts = nextTS]
                         /\ pc' = [pc EXCEPT ![self] = "AllocWriteEvent"]
                         /\ UNCHANGED << keys, tscache, reads, read_key, 
                                         write_key, read_value, read_done, 
@@ -555,8 +531,8 @@ AllocWriteEvent(self) == /\ pc[self] = "AllocWriteEvent"
                               /\ txns' = [txns EXCEPT ![self].write_ts = nextTS]
                          /\ pc' = [pc EXCEPT ![self] = "ExecuteStatement"]
                          /\ UNCHANGED << keys, tscache, reads, read_key, 
-                                         write_key, stmt_read_ts, read_value, 
-                                         read_done, write_done >>
+                                         write_key, read_value, read_done, 
+                                         write_done >>
 
 ExecuteStatement(self) == /\ pc[self] = "ExecuteStatement"
                           /\ IF ~(read_done[self] /\ write_done[self])
@@ -564,8 +540,7 @@ ExecuteStatement(self) == /\ pc[self] = "ExecuteStatement"
                                 ELSE /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceBeforeRefresh"]
                           /\ UNCHANGED << nextTS, ordering, txns, keys, 
                                           tscache, reads, read_key, write_key, 
-                                          stmt_read_ts, read_value, read_done, 
-                                          write_done >>
+                                          read_value, read_done, write_done >>
 
 MaybeAdvanceTS(self) == /\ pc[self] = "MaybeAdvanceTS"
                         /\ \/ /\ \E pos \in ValidPositions(({txns[self].write_ts})):
@@ -576,8 +551,8 @@ MaybeAdvanceTS(self) == /\ pc[self] = "MaybeAdvanceTS"
                               /\ UNCHANGED <<nextTS, ordering, txns>>
                         /\ pc' = [pc EXCEPT ![self] = "ReadOrWrite"]
                         /\ UNCHANGED << keys, tscache, reads, read_key, 
-                                        write_key, stmt_read_ts, read_value, 
-                                        read_done, write_done >>
+                                        write_key, read_value, read_done, 
+                                        write_done >>
 
 ReadOrWrite(self) == /\ pc[self] = "ReadOrWrite"
                      /\ \/ /\ ~read_done[self]
@@ -599,9 +574,7 @@ ReadOrWrite(self) == /\ pc[self] = "ReadOrWrite"
                                  ELSE /\ TRUE
                                       /\ keys' = keys
                            /\ read_value' = [read_value EXCEPT ![self] = keys'[read_key[self]].value]
-                           /\ IF txns[self].iso_level = SSI
-                                 THEN /\ reads' = [reads EXCEPT ![self] = Append(reads[self], <<read_key[self], read_value'[self], txns[self].read_ts>>)]
-                                 ELSE /\ reads' = [reads EXCEPT ![self] = Append(reads[self], <<read_key[self], read_value'[self], stmt_read_ts[self]>>)]
+                           /\ reads' = [reads EXCEPT ![self] = Append(reads[self], <<read_key[self], read_value'[self], txns[self].read_ts>>)]
                            /\ read_done' = [read_done EXCEPT ![self] = TRUE]
                            /\ UNCHANGED <<nextTS, ordering, txns, write_done>>
                         \/ /\ ~write_done[self]
@@ -620,8 +593,7 @@ ReadOrWrite(self) == /\ pc[self] = "ReadOrWrite"
                            /\ write_done' = [write_done EXCEPT ![self] = TRUE]
                            /\ UNCHANGED <<reads, read_value, read_done>>
                      /\ pc' = [pc EXCEPT ![self] = "ExecuteStatement"]
-                     /\ UNCHANGED << tscache, read_key, write_key, 
-                                     stmt_read_ts >>
+                     /\ UNCHANGED << tscache, read_key, write_key >>
 
 MaybeAdvanceBeforeRefresh(self) == /\ pc[self] = "MaybeAdvanceBeforeRefresh"
                                    /\ \/ /\ \E pos \in ValidPositions(({txns[self].write_ts})):
@@ -633,15 +605,15 @@ MaybeAdvanceBeforeRefresh(self) == /\ pc[self] = "MaybeAdvanceBeforeRefresh"
                                    /\ pc' = [pc EXCEPT ![self] = "StatementRefresh"]
                                    /\ UNCHANGED << keys, tscache, reads, 
                                                    read_key, write_key, 
-                                                   stmt_read_ts, read_value, 
-                                                   read_done, write_done >>
+                                                   read_value, read_done, 
+                                                   write_done >>
 
 StatementRefresh(self) == /\ pc[self] = "StatementRefresh"
                           /\ IF txns[self].iso_level = RC
                                 THEN /\ IF HasAnyIntent(read_key[self])
                                            THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
                                                 /\ UNCHANGED tscache
-                                           ELSE /\ IF TimestampBefore(stmt_read_ts[self], CommittedTimestamp(read_key[self])) /\
+                                           ELSE /\ IF TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key[self])) /\
                                                       TimestampBeforeOrEqual(CommittedTimestamp(read_key[self]), txns[self].write_ts)
                                                       THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
                                                            /\ UNCHANGED tscache
@@ -650,8 +622,8 @@ StatementRefresh(self) == /\ pc[self] = "StatementRefresh"
                                 ELSE /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceBeforeCommit"]
                                      /\ UNCHANGED tscache
                           /\ UNCHANGED << nextTS, ordering, txns, keys, reads, 
-                                          read_key, write_key, stmt_read_ts, 
-                                          read_value, read_done, write_done >>
+                                          read_key, write_key, read_value, 
+                                          read_done, write_done >>
 
 MaybeAdvanceBeforeCommit(self) == /\ pc[self] = "MaybeAdvanceBeforeCommit"
                                   /\ \/ /\ \E pos \in ValidPositions(({txns[self].write_ts})):
@@ -663,8 +635,8 @@ MaybeAdvanceBeforeCommit(self) == /\ pc[self] = "MaybeAdvanceBeforeCommit"
                                   /\ pc' = [pc EXCEPT ![self] = "CommitRefresh"]
                                   /\ UNCHANGED << keys, tscache, reads, 
                                                   read_key, write_key, 
-                                                  stmt_read_ts, read_value, 
-                                                  read_done, write_done >>
+                                                  read_value, read_done, 
+                                                  write_done >>
 
 CommitRefresh(self) == /\ pc[self] = "CommitRefresh"
                        /\ IF txns[self].iso_level = SSI
@@ -680,15 +652,15 @@ CommitRefresh(self) == /\ pc[self] = "CommitRefresh"
                              ELSE /\ pc' = [pc EXCEPT ![self] = "Commit"]
                                   /\ UNCHANGED tscache
                        /\ UNCHANGED << nextTS, ordering, txns, keys, reads, 
-                                       read_key, write_key, stmt_read_ts, 
-                                       read_value, read_done, write_done >>
+                                       read_key, write_key, read_value, 
+                                       read_done, write_done >>
 
 Commit(self) == /\ pc[self] = "Commit"
                 /\ txns' = [txns EXCEPT ![self].status = "committed"]
                 /\ pc' = [pc EXCEPT ![self] = "ResolveIntent"]
                 /\ UNCHANGED << nextTS, ordering, keys, tscache, reads, 
-                                read_key, write_key, stmt_read_ts, read_value, 
-                                read_done, write_done >>
+                                read_key, write_key, read_value, read_done, 
+                                write_done >>
 
 ResolveIntent(self) == /\ pc[self] = "ResolveIntent"
                        /\ keys' = [keys EXCEPT ![write_key[self]] =                    [
@@ -698,8 +670,8 @@ ResolveIntent(self) == /\ pc[self] = "ResolveIntent"
                                                                     ]]
                        /\ pc' = [pc EXCEPT ![self] = "End"]
                        /\ UNCHANGED << nextTS, ordering, txns, tscache, reads, 
-                                       read_key, write_key, stmt_read_ts, 
-                                       read_value, read_done, write_done >>
+                                       read_key, write_key, read_value, 
+                                       read_done, write_done >>
 
 Abort(self) == /\ pc[self] = "Abort"
                /\ txns' = [txns EXCEPT ![self].status = "aborted"]
@@ -708,15 +680,15 @@ Abort(self) == /\ pc[self] = "Abort"
                      ELSE /\ TRUE
                /\ pc' = [pc EXCEPT ![self] = "End"]
                /\ UNCHANGED << nextTS, ordering, keys, tscache, reads, 
-                               read_key, write_key, stmt_read_ts, read_value, 
-                               read_done, write_done >>
+                               read_key, write_key, read_value, read_done, 
+                               write_done >>
 
 End(self) == /\ pc[self] = "End"
              /\ TRUE
              /\ pc' = [pc EXCEPT ![self] = "Done"]
              /\ UNCHANGED << nextTS, ordering, txns, keys, tscache, reads, 
-                             read_key, write_key, stmt_read_ts, read_value, 
-                             read_done, write_done >>
+                             read_key, write_key, read_value, read_done, 
+                             write_done >>
 
 txn(self) == ChooseIsoLevel(self) \/ BeginTxnOrStmt(self)
                 \/ AllocWriteEvent(self) \/ ExecuteStatement(self)
