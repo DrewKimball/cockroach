@@ -175,6 +175,10 @@ define
   \* Temporal properties.
   AllTransactionsFinalize ==
     <>[](\A t \in TXNS: txns[t].status \in {"committed", "aborted"})
+  CommittedTransactionsStayCommitted ==
+    \A t \in TXNS: [](IsCommitted(t) => []IsCommitted(t))
+  AbortedTransactionsStayAborted ==
+    \A t \in TXNS: [](IsAborted(t) => []IsAborted(t))
 
   \* Compute valid insertion positions for an event that must come after must_be_after.
   ValidPositions(must_be_after) ==
@@ -246,11 +250,7 @@ begin
     while ~(read_done /\ write_done) do
       \* Before each operation, possibly advance write_ts.
       MaybeAdvanceTS:
-        either
-          alloc_ts_after(txns[self].write_ts, {txns[self].write_ts});
-        or
-          skip;
-        end either;
+        maybe_advance_write_ts();
       ReadOrWrite:
       either
         when ~read_done;
@@ -475,6 +475,14 @@ TypeInvariant ==
 
 AllTransactionsFinalize ==
   <>[](\A t \in TXNS: txns[t].status \in {"committed", "aborted"})
+
+
+TransactionsStayCommitted ==
+  \A t \in TXNS: [](IsCommitted(t) => []IsCommitted(t))
+
+
+TransactionsStayAborted ==
+  \A t \in TXNS: [](IsAborted(t) => []IsAborted(t))
 
 
 ValidPositions(must_be_after) ==
