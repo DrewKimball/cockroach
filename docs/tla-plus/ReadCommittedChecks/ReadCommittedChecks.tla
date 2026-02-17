@@ -224,11 +224,20 @@ variables
 begin
   \* Choose isolation level for this transaction.
   ChooseIsoLevel:
-    either
-      txns[self].iso_level := SSI;
-    or
-      txns[self].iso_level := RC;
-    end either;
+    \* TODO(drewk): There's an issue with the SSI-RC interaction - since the
+    \* SSI txn doesn't fail the refresh on newer committed values, an
+    \* interleaving like this is possible:
+    \*  1. TXN2 allocated read_ts=3 (inserted early in the ordering)
+    \*  2. TXN2 read k1 at ts=3 (no intent, value=0)
+    \*  3. TXN2 performed StatementRefresh - at that moment, k1 had no intent and no newer committed value, so refresh passed
+    \*  4. Then TXN1 wrote an intent to k1 at ts=2 (which comes AFTER ts=3 in the ordering)
+    \*  5. TXN1 committed at ts=7, making k1=1 visible
+    \*  6. TXN2 committed at ts=8 with its stale read
+    \* either
+    \*   txns[self].iso_level := SSI;
+    \* or
+    txns[self].iso_level := RC;
+    \* end either;
 
   \* Begin transaction/statement - allocate read and write timestamps.
   AssignReadTimestamp:
@@ -528,8 +537,7 @@ Init == (* Global variables *)
         /\ pc = [self \in ProcSet |-> "ChooseIsoLevel"]
 
 ChooseIsoLevel(self) == /\ pc[self] = "ChooseIsoLevel"
-                        /\ \/ /\ txns' = [txns EXCEPT ![self].iso_level = SSI]
-                           \/ /\ txns' = [txns EXCEPT ![self].iso_level = RC]
+                        /\ txns' = [txns EXCEPT ![self].iso_level = RC]
                         /\ pc' = [pc EXCEPT ![self] = "AssignReadTimestamp"]
                         /\ UNCHANGED << nextTS, ordering, keys, tscache, reads, 
                                         read_key, write_key, read_value, 
