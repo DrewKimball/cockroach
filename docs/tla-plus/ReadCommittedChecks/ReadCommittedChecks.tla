@@ -230,22 +230,22 @@ begin
       txns[self].iso_level := RC;
     end either;
 
-  \* Begin transaction/statement - allocate read timestamp.
-  BeginTxnOrStmt:
+  \* Begin transaction/statement - allocate read and write timestamps.
+  AssignReadTimestamp:
     \* For both SSI and RC, allocate read_ts (SSI: txn-level; RC: stmt-level).
     alloc_ts_after(txns[self].read_ts, {});
 
-  \* Allocate provisional commit event.
-  AllocWriteEvent:
-    alloc_ts_after(txns[self].write_ts, {txns[self].read_ts});
+  AssignWriteTimestamp:
+    \* Allocate write timestamp equal to read_ts.
+    txns[self].write_ts := txns[self].read_ts;
+
+  \* Possibly induce skew between the read and write timestamps.
+  MaybeAdvanceBeforeReadWrite:
+    maybe_advance_write_ts();
 
   \* Execute read and write operations in either order.
   ExecuteStatement:
     while ~(read_done /\ write_done) do
-      \* Before each operation, possibly advance write_ts.
-      MaybeAdvanceTS:
-        maybe_advance_write_ts();
-      ReadOrWrite:
       either
         when ~read_done;
         \* Perform read with intent handling (blocking or pushing).
@@ -305,16 +305,18 @@ begin
   StatementRefresh:
     if txns[self].iso_level = RC then
       \* Refresh check/cascade reads from read_ts to current write_ts.
-      \* Check if any value was written in (read_ts, write_ts].
+      \* Notably, we fail if any intent or committed value exists that is newer
+      \* than the read_ts, even if it's newer than the current write_ts.
+      \* The timestamp cache is still only bumped up to write_ts.
       if HasAnyIntent(read_key) then
         \* Fail on encountering intent.
         goto Abort;
-      elsif TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key)) /\
-            TimestampBeforeOrEqual(CommittedTimestamp(read_key), txns[self].write_ts) then
-        \* Fail on encountering newer committed value.
+      elsif TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key)) then
+        \* Fail on encountering newer committed value. This includes values
+        \* newer than the current write_ts.
         goto Abort;
       else
-        \* Refresh succeeded - bump timestamp cache.
+        \* Refresh succeeded - bump timestamp cache up to write_ts.
         tscache[read_key] := txns[self].write_ts;
       end if;
     end if;
@@ -509,91 +511,89 @@ Init == (* Global variables *)
 ChooseIsoLevel(self) == /\ pc[self] = "ChooseIsoLevel"
                         /\ \/ /\ txns' = [txns EXCEPT ![self].iso_level = SSI]
                            \/ /\ txns' = [txns EXCEPT ![self].iso_level = RC]
-                        /\ pc' = [pc EXCEPT ![self] = "BeginTxnOrStmt"]
+                        /\ pc' = [pc EXCEPT ![self] = "AssignReadTimestamp"]
                         /\ UNCHANGED << nextTS, ordering, keys, tscache, reads, 
                                         read_key, write_key, read_value, 
                                         read_done, write_done >>
 
-BeginTxnOrStmt(self) == /\ pc[self] = "BeginTxnOrStmt"
-                        /\ \E pos \in ValidPositions(({})):
-                             /\ nextTS' = nextTS + 1
-                             /\ ordering' = InsertAt(ordering, nextTS, pos)
-                             /\ txns' = [txns EXCEPT ![self].read_ts = nextTS]
-                        /\ pc' = [pc EXCEPT ![self] = "AllocWriteEvent"]
-                        /\ UNCHANGED << keys, tscache, reads, read_key, 
-                                        write_key, read_value, read_done, 
-                                        write_done >>
+AssignReadTimestamp(self) == /\ pc[self] = "AssignReadTimestamp"
+                             /\ \E pos \in ValidPositions(({})):
+                                  /\ nextTS' = nextTS + 1
+                                  /\ ordering' = InsertAt(ordering, nextTS, pos)
+                                  /\ txns' = [txns EXCEPT ![self].read_ts = nextTS]
+                             /\ pc' = [pc EXCEPT ![self] = "AssignWriteTimestamp"]
+                             /\ UNCHANGED << keys, tscache, reads, read_key, 
+                                             write_key, read_value, read_done, 
+                                             write_done >>
 
-AllocWriteEvent(self) == /\ pc[self] = "AllocWriteEvent"
-                         /\ \E pos \in ValidPositions(({txns[self].read_ts})):
-                              /\ nextTS' = nextTS + 1
-                              /\ ordering' = InsertAt(ordering, nextTS, pos)
-                              /\ txns' = [txns EXCEPT ![self].write_ts = nextTS]
-                         /\ pc' = [pc EXCEPT ![self] = "ExecuteStatement"]
-                         /\ UNCHANGED << keys, tscache, reads, read_key, 
-                                         write_key, read_value, read_done, 
-                                         write_done >>
+AssignWriteTimestamp(self) == /\ pc[self] = "AssignWriteTimestamp"
+                              /\ txns' = [txns EXCEPT ![self].write_ts = txns[self].read_ts]
+                              /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceBeforeReadWrite"]
+                              /\ UNCHANGED << nextTS, ordering, keys, tscache, 
+                                              reads, read_key, write_key, 
+                                              read_value, read_done, 
+                                              write_done >>
+
+MaybeAdvanceBeforeReadWrite(self) == /\ pc[self] = "MaybeAdvanceBeforeReadWrite"
+                                     /\ \/ /\ \E pos \in ValidPositions(({txns[self].write_ts})):
+                                                /\ nextTS' = nextTS + 1
+                                                /\ ordering' = InsertAt(ordering, nextTS, pos)
+                                                /\ txns' = [txns EXCEPT ![self].write_ts = nextTS]
+                                        \/ /\ TRUE
+                                           /\ UNCHANGED <<nextTS, ordering, txns>>
+                                     /\ pc' = [pc EXCEPT ![self] = "ExecuteStatement"]
+                                     /\ UNCHANGED << keys, tscache, reads, 
+                                                     read_key, write_key, 
+                                                     read_value, read_done, 
+                                                     write_done >>
 
 ExecuteStatement(self) == /\ pc[self] = "ExecuteStatement"
                           /\ IF ~(read_done[self] /\ write_done[self])
-                                THEN /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceTS"]
+                                THEN /\ \/ /\ ~read_done[self]
+                                           /\ IF HasAnyIntent(read_key[self])
+                                                 THEN /\ \/ /\ ~HasAnyIntent(read_key[self])
+                                                            /\ keys' = keys
+                                                         \/ /\ txns[keys[read_key[self]].intent_txn].status \in {"committed", "aborted"}
+                                                            /\ IF txns[keys[read_key[self]].intent_txn].status = "committed"
+                                                                  THEN /\ keys' = [keys EXCEPT ![read_key[self]] =                   [
+                                                                                                                     value      |-> keys[read_key[self]].intent_txn,
+                                                                                                                     ts         |-> txns[keys[read_key[self]].intent_txn].write_ts,
+                                                                                                                     intent_txn |-> NoIntent
+                                                                                                                   ]]
+                                                                  ELSE /\ keys' = [keys EXCEPT ![read_key[self]] =                   [
+                                                                                                                     value      |-> 0,
+                                                                                                                     ts         |-> ZeroTimestamp,
+                                                                                                                     intent_txn |-> NoIntent
+                                                                                                                   ]]
+                                                 ELSE /\ TRUE
+                                                      /\ keys' = keys
+                                           /\ read_value' = [read_value EXCEPT ![self] = keys'[read_key[self]].value]
+                                           /\ reads' = [reads EXCEPT ![self] = Append(reads[self], <<read_key[self], read_value'[self], txns[self].read_ts>>)]
+                                           /\ read_done' = [read_done EXCEPT ![self] = TRUE]
+                                           /\ UNCHANGED <<nextTS, ordering, txns, write_done>>
+                                        \/ /\ ~write_done[self]
+                                           /\ IF TimestampBeforeOrEqual(txns[self].write_ts, tscache[write_key[self]])
+                                                 THEN /\ \E pos \in ValidPositions(({tscache[write_key[self]]})):
+                                                           /\ nextTS' = nextTS + 1
+                                                           /\ ordering' = InsertAt(ordering, nextTS, pos)
+                                                           /\ txns' = [txns EXCEPT ![self].write_ts = nextTS]
+                                                 ELSE /\ TRUE
+                                                      /\ UNCHANGED << nextTS, 
+                                                                      ordering, 
+                                                                      txns >>
+                                           /\ keys' = [keys EXCEPT ![write_key[self]] =                    [
+                                                                                          value      |-> self,
+                                                                                          ts         |-> txns'[self].write_ts,
+                                                                                          intent_txn |-> self
+                                                                                        ]]
+                                           /\ write_done' = [write_done EXCEPT ![self] = TRUE]
+                                           /\ UNCHANGED <<reads, read_value, read_done>>
+                                     /\ pc' = [pc EXCEPT ![self] = "ExecuteStatement"]
                                 ELSE /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceBeforeRefresh"]
-                          /\ UNCHANGED << nextTS, ordering, txns, keys, 
-                                          tscache, reads, read_key, write_key, 
-                                          read_value, read_done, write_done >>
-
-MaybeAdvanceTS(self) == /\ pc[self] = "MaybeAdvanceTS"
-                        /\ \/ /\ \E pos \in ValidPositions(({txns[self].write_ts})):
-                                   /\ nextTS' = nextTS + 1
-                                   /\ ordering' = InsertAt(ordering, nextTS, pos)
-                                   /\ txns' = [txns EXCEPT ![self].write_ts = nextTS]
-                           \/ /\ TRUE
-                              /\ UNCHANGED <<nextTS, ordering, txns>>
-                        /\ pc' = [pc EXCEPT ![self] = "ReadOrWrite"]
-                        /\ UNCHANGED << keys, tscache, reads, read_key, 
-                                        write_key, read_value, read_done, 
-                                        write_done >>
-
-ReadOrWrite(self) == /\ pc[self] = "ReadOrWrite"
-                     /\ \/ /\ ~read_done[self]
-                           /\ IF HasAnyIntent(read_key[self])
-                                 THEN /\ \/ /\ ~HasAnyIntent(read_key[self])
-                                            /\ keys' = keys
-                                         \/ /\ txns[keys[read_key[self]].intent_txn].status \in {"committed", "aborted"}
-                                            /\ IF txns[keys[read_key[self]].intent_txn].status = "committed"
-                                                  THEN /\ keys' = [keys EXCEPT ![read_key[self]] =                   [
-                                                                                                     value      |-> keys[read_key[self]].intent_txn,
-                                                                                                     ts         |-> txns[keys[read_key[self]].intent_txn].write_ts,
-                                                                                                     intent_txn |-> NoIntent
-                                                                                                   ]]
-                                                  ELSE /\ keys' = [keys EXCEPT ![read_key[self]] =                   [
-                                                                                                     value      |-> 0,
-                                                                                                     ts         |-> ZeroTimestamp,
-                                                                                                     intent_txn |-> NoIntent
-                                                                                                   ]]
-                                 ELSE /\ TRUE
-                                      /\ keys' = keys
-                           /\ read_value' = [read_value EXCEPT ![self] = keys'[read_key[self]].value]
-                           /\ reads' = [reads EXCEPT ![self] = Append(reads[self], <<read_key[self], read_value'[self], txns[self].read_ts>>)]
-                           /\ read_done' = [read_done EXCEPT ![self] = TRUE]
-                           /\ UNCHANGED <<nextTS, ordering, txns, write_done>>
-                        \/ /\ ~write_done[self]
-                           /\ IF TimestampBeforeOrEqual(txns[self].write_ts, tscache[write_key[self]])
-                                 THEN /\ \E pos \in ValidPositions(({tscache[write_key[self]]})):
-                                           /\ nextTS' = nextTS + 1
-                                           /\ ordering' = InsertAt(ordering, nextTS, pos)
-                                           /\ txns' = [txns EXCEPT ![self].write_ts = nextTS]
-                                 ELSE /\ TRUE
-                                      /\ UNCHANGED << nextTS, ordering, txns >>
-                           /\ keys' = [keys EXCEPT ![write_key[self]] =                    [
-                                                                          value      |-> self,
-                                                                          ts         |-> txns'[self].write_ts,
-                                                                          intent_txn |-> self
-                                                                        ]]
-                           /\ write_done' = [write_done EXCEPT ![self] = TRUE]
-                           /\ UNCHANGED <<reads, read_value, read_done>>
-                     /\ pc' = [pc EXCEPT ![self] = "ExecuteStatement"]
-                     /\ UNCHANGED << tscache, read_key, write_key >>
+                                     /\ UNCHANGED << nextTS, ordering, txns, 
+                                                     keys, reads, read_value, 
+                                                     read_done, write_done >>
+                          /\ UNCHANGED << tscache, read_key, write_key >>
 
 MaybeAdvanceBeforeRefresh(self) == /\ pc[self] = "MaybeAdvanceBeforeRefresh"
                                    /\ \/ /\ \E pos \in ValidPositions(({txns[self].write_ts})):
@@ -613,8 +613,7 @@ StatementRefresh(self) == /\ pc[self] = "StatementRefresh"
                                 THEN /\ IF HasAnyIntent(read_key[self])
                                            THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
                                                 /\ UNCHANGED tscache
-                                           ELSE /\ IF TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key[self])) /\
-                                                      TimestampBeforeOrEqual(CommittedTimestamp(read_key[self]), txns[self].write_ts)
+                                           ELSE /\ IF TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key[self]))
                                                       THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
                                                            /\ UNCHANGED tscache
                                                       ELSE /\ tscache' = [tscache EXCEPT ![read_key[self]] = txns[self].write_ts]
@@ -690,9 +689,10 @@ End(self) == /\ pc[self] = "End"
                              read_key, write_key, read_value, read_done, 
                              write_done >>
 
-txn(self) == ChooseIsoLevel(self) \/ BeginTxnOrStmt(self)
-                \/ AllocWriteEvent(self) \/ ExecuteStatement(self)
-                \/ MaybeAdvanceTS(self) \/ ReadOrWrite(self)
+txn(self) == ChooseIsoLevel(self) \/ AssignReadTimestamp(self)
+                \/ AssignWriteTimestamp(self)
+                \/ MaybeAdvanceBeforeReadWrite(self)
+                \/ ExecuteStatement(self)
                 \/ MaybeAdvanceBeforeRefresh(self)
                 \/ StatementRefresh(self) \/ MaybeAdvanceBeforeCommit(self)
                 \/ CommitRefresh(self) \/ Commit(self)
