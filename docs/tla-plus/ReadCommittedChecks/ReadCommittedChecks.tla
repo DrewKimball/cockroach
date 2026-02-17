@@ -167,7 +167,7 @@ define
       /\ txns[t].read_ts \in (1..(nextTS-1)) \cup {ZeroTimestamp}
       /\ txns[t].write_ts \in (1..(nextTS-1)) \cup {ZeroTimestamp}
     /\ \A k \in KEYS:
-      /\ keys[k].value \in 0..10
+      /\ keys[k].value \in {0, 1}
       /\ keys[k].ts \in (1..(nextTS-1)) \cup {ZeroTimestamp}
       /\ keys[k].intent_txn \in {NoIntent, TXN1, TXN2}
       /\ tscache[k] \in (1..(nextTS-1)) \cup {ZeroTimestamp}
@@ -250,6 +250,15 @@ begin
         when ~read_done;
         \* Perform read with intent handling (blocking or pushing).
         if HasAnyIntent(read_key) then
+          \* Detect deadlock: if we've already written and the intent owner is pending
+          \* and is trying to read our write, we have a circular dependency.
+          if write_done /\
+             txns[keys[read_key].intent_txn].status = "pending" /\
+             HasAnyIntent(write_key) /\
+             keys[write_key].intent_txn = self then
+            \* Deadlock detected - abort to break the cycle.
+            goto Abort;
+          end if;
           either
             \* Option 1: wait for intent to be resolved.
             await ~HasAnyIntent(read_key);
@@ -260,7 +269,7 @@ begin
             if txns[keys[read_key].intent_txn].status = "committed" then
               \* Resolve as committed value.
               keys[read_key] := [
-                value      |-> keys[read_key].intent_txn,
+                value      |-> 1,
                 ts         |-> txns[keys[read_key].intent_txn].write_ts,
                 intent_txn |-> NoIntent
               ];
@@ -288,7 +297,7 @@ begin
         end if;
         \* Write intent at (possibly bumped) write_ts.
         keys[write_key] := [
-          value      |-> self,
+          value      |-> 1,
           ts         |-> txns[self].write_ts,
           intent_txn |-> self
         ];
@@ -349,7 +358,7 @@ begin
     \* Resolve intent at commit timestamp.
     ResolveIntent:
       keys[write_key] := [
-        value      |-> self,
+        value      |-> 1,
         ts         |-> txns[self].write_ts,
         intent_txn |-> NoIntent  \* intent resolved
       ];
@@ -361,9 +370,12 @@ begin
 
     \* Clean up intent if we wrote one.
     if HasIntent(write_key, self) then
-      \* In reality, would clean up properly, but for model just mark aborted.
-      \* Don't touch the key state for simplicity.
-      skip;
+      \* Remove the intent by resetting to initial state.
+      keys[write_key] := [
+        value      |-> 0,
+        ts         |-> ZeroTimestamp,
+        intent_txn |-> NoIntent
+      ];
     end if;
 
   End:
@@ -458,7 +470,7 @@ TypeInvariant ==
     /\ txns[t].read_ts \in (1..(nextTS-1)) \cup {ZeroTimestamp}
     /\ txns[t].write_ts \in (1..(nextTS-1)) \cup {ZeroTimestamp}
   /\ \A k \in KEYS:
-    /\ keys[k].value \in 0..10
+    /\ keys[k].value \in {0, 1}
     /\ keys[k].ts \in (1..(nextTS-1)) \cup {ZeroTimestamp}
     /\ keys[k].intent_txn \in {NoIntent, TXN1, TXN2}
     /\ tscache[k] \in (1..(nextTS-1)) \cup {ZeroTimestamp}
@@ -556,7 +568,7 @@ ExecuteStatement(self) == /\ pc[self] = "ExecuteStatement"
                                                          \/ /\ txns[keys[read_key[self]].intent_txn].status \in {"committed", "aborted"}
                                                             /\ IF txns[keys[read_key[self]].intent_txn].status = "committed"
                                                                   THEN /\ keys' = [keys EXCEPT ![read_key[self]] =                   [
-                                                                                                                     value      |-> keys[read_key[self]].intent_txn,
+                                                                                                                     value      |-> 1,
                                                                                                                      ts         |-> txns[keys[read_key[self]].intent_txn].write_ts,
                                                                                                                      intent_txn |-> NoIntent
                                                                                                                    ]]
@@ -582,7 +594,7 @@ ExecuteStatement(self) == /\ pc[self] = "ExecuteStatement"
                                                                       ordering, 
                                                                       txns >>
                                            /\ keys' = [keys EXCEPT ![write_key[self]] =                    [
-                                                                                          value      |-> self,
+                                                                                          value      |-> 1,
                                                                                           ts         |-> txns'[self].write_ts,
                                                                                           intent_txn |-> self
                                                                                         ]]
@@ -663,7 +675,7 @@ Commit(self) == /\ pc[self] = "Commit"
 
 ResolveIntent(self) == /\ pc[self] = "ResolveIntent"
                        /\ keys' = [keys EXCEPT ![write_key[self]] =                    [
-                                                                      value      |-> self,
+                                                                      value      |-> 1,
                                                                       ts         |-> txns[self].write_ts,
                                                                       intent_txn |-> NoIntent
                                                                     ]]
