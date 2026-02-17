@@ -259,32 +259,39 @@ begin
             \* Deadlock detected - abort to break the cycle.
             goto Abort;
           end if;
-          either
-            \* Option 1: wait for intent to be resolved.
-            await ~HasAnyIntent(read_key);
-          or
-            \* Option 2: try to push - succeeds if txn is finalized.
-            await txns[keys[read_key].intent_txn].status \in {"committed", "aborted"};
-            \* Successfully pushed - resolve the intent immediately.
-            if txns[keys[read_key].intent_txn].status = "committed" then
-              \* Resolve as committed value.
-              keys[read_key] := [
-                value      |-> 1,
-                ts         |-> txns[keys[read_key].intent_txn].write_ts,
-                intent_txn |-> NoIntent
-              ];
+          HandleIntent:
+            \* Re-check if intent still exists (could have been resolved).
+            if ~HasAnyIntent(read_key) then
+              skip;  \* Intent was resolved, proceed to read.
             else
-              \* Pushee aborted - remove intent (set to initial value).
-              keys[read_key] := [
-                value      |-> 0,
-                ts         |-> ZeroTimestamp,
-                intent_txn |-> NoIntent
-              ];
+              either
+                \* Option 1: wait for intent to be resolved.
+                await ~HasAnyIntent(read_key);
+              or
+                \* Option 2: try to push - succeeds if txn is finalized.
+                await txns[keys[read_key].intent_txn].status \in {"committed", "aborted"};
+                \* Successfully pushed - resolve the intent immediately.
+                if txns[keys[read_key].intent_txn].status = "committed" then
+                  \* Resolve as committed value.
+                  keys[read_key] := [
+                    value      |-> 1,
+                    ts         |-> txns[keys[read_key].intent_txn].write_ts,
+                    intent_txn |-> NoIntent
+                  ];
+                else
+                  \* Pushee aborted - remove intent (set to initial value).
+                  keys[read_key] := [
+                    value      |-> 0,
+                    ts         |-> ZeroTimestamp,
+                    intent_txn |-> NoIntent
+                  ];
+                end if;
+              end either;
             end if;
-          end either;
         end if;
-        \* Now read the (possibly just resolved) value.
-        read_value := keys[read_key].value;
+        PerformRead:
+          \* Now read the (possibly just resolved) value.
+          read_value := keys[read_key].value;
         \* Record read (SSI: txn read_ts; RC: stmt read_ts, both in txns[self].read_ts).
         reads[self] := Append(reads[self], <<read_key, read_value, txns[self].read_ts>>);
         read_done := TRUE;
@@ -563,26 +570,14 @@ ExecuteStatement(self) == /\ pc[self] = "ExecuteStatement"
                           /\ IF ~(read_done[self] /\ write_done[self])
                                 THEN /\ \/ /\ ~read_done[self]
                                            /\ IF HasAnyIntent(read_key[self])
-                                                 THEN /\ \/ /\ ~HasAnyIntent(read_key[self])
-                                                            /\ keys' = keys
-                                                         \/ /\ txns[keys[read_key[self]].intent_txn].status \in {"committed", "aborted"}
-                                                            /\ IF txns[keys[read_key[self]].intent_txn].status = "committed"
-                                                                  THEN /\ keys' = [keys EXCEPT ![read_key[self]] =                   [
-                                                                                                                     value      |-> 1,
-                                                                                                                     ts         |-> txns[keys[read_key[self]].intent_txn].write_ts,
-                                                                                                                     intent_txn |-> NoIntent
-                                                                                                                   ]]
-                                                                  ELSE /\ keys' = [keys EXCEPT ![read_key[self]] =                   [
-                                                                                                                     value      |-> 0,
-                                                                                                                     ts         |-> ZeroTimestamp,
-                                                                                                                     intent_txn |-> NoIntent
-                                                                                                                   ]]
-                                                 ELSE /\ TRUE
-                                                      /\ keys' = keys
-                                           /\ read_value' = [read_value EXCEPT ![self] = keys'[read_key[self]].value]
-                                           /\ reads' = [reads EXCEPT ![self] = Append(reads[self], <<read_key[self], read_value'[self], txns[self].read_ts>>)]
-                                           /\ read_done' = [read_done EXCEPT ![self] = TRUE]
-                                           /\ UNCHANGED <<nextTS, ordering, txns, write_done>>
+                                                 THEN /\ IF write_done[self] /\
+                                                            txns[keys[read_key[self]].intent_txn].status = "pending" /\
+                                                            HasAnyIntent(write_key[self]) /\
+                                                            keys[write_key[self]].intent_txn = self
+                                                            THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
+                                                            ELSE /\ pc' = [pc EXCEPT ![self] = "HandleIntent"]
+                                                 ELSE /\ pc' = [pc EXCEPT ![self] = "PerformRead"]
+                                           /\ UNCHANGED <<nextTS, ordering, txns, keys, write_done>>
                                         \/ /\ ~write_done[self]
                                            /\ IF TimestampBeforeOrEqual(txns[self].write_ts, tscache[write_key[self]])
                                                  THEN /\ \E pos \in ValidPositions(({tscache[write_key[self]]})):
@@ -599,13 +594,43 @@ ExecuteStatement(self) == /\ pc[self] = "ExecuteStatement"
                                                                                           intent_txn |-> self
                                                                                         ]]
                                            /\ write_done' = [write_done EXCEPT ![self] = TRUE]
-                                           /\ UNCHANGED <<reads, read_value, read_done>>
-                                     /\ pc' = [pc EXCEPT ![self] = "ExecuteStatement"]
+                                           /\ pc' = [pc EXCEPT ![self] = "ExecuteStatement"]
                                 ELSE /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceBeforeRefresh"]
                                      /\ UNCHANGED << nextTS, ordering, txns, 
-                                                     keys, reads, read_value, 
-                                                     read_done, write_done >>
-                          /\ UNCHANGED << tscache, read_key, write_key >>
+                                                     keys, write_done >>
+                          /\ UNCHANGED << tscache, reads, read_key, write_key, 
+                                          read_value, read_done >>
+
+HandleIntent(self) == /\ pc[self] = "HandleIntent"
+                      /\ IF ~HasAnyIntent(read_key[self])
+                            THEN /\ TRUE
+                                 /\ keys' = keys
+                            ELSE /\ \/ /\ ~HasAnyIntent(read_key[self])
+                                       /\ keys' = keys
+                                    \/ /\ txns[keys[read_key[self]].intent_txn].status \in {"committed", "aborted"}
+                                       /\ IF txns[keys[read_key[self]].intent_txn].status = "committed"
+                                             THEN /\ keys' = [keys EXCEPT ![read_key[self]] =                   [
+                                                                                                value      |-> 1,
+                                                                                                ts         |-> txns[keys[read_key[self]].intent_txn].write_ts,
+                                                                                                intent_txn |-> NoIntent
+                                                                                              ]]
+                                             ELSE /\ keys' = [keys EXCEPT ![read_key[self]] =                   [
+                                                                                                value      |-> 0,
+                                                                                                ts         |-> ZeroTimestamp,
+                                                                                                intent_txn |-> NoIntent
+                                                                                              ]]
+                      /\ pc' = [pc EXCEPT ![self] = "PerformRead"]
+                      /\ UNCHANGED << nextTS, ordering, txns, tscache, reads, 
+                                      read_key, write_key, read_value, 
+                                      read_done, write_done >>
+
+PerformRead(self) == /\ pc[self] = "PerformRead"
+                     /\ read_value' = [read_value EXCEPT ![self] = keys[read_key[self]].value]
+                     /\ reads' = [reads EXCEPT ![self] = Append(reads[self], <<read_key[self], read_value'[self], txns[self].read_ts>>)]
+                     /\ read_done' = [read_done EXCEPT ![self] = TRUE]
+                     /\ pc' = [pc EXCEPT ![self] = "ExecuteStatement"]
+                     /\ UNCHANGED << nextTS, ordering, txns, keys, tscache, 
+                                     read_key, write_key, write_done >>
 
 MaybeAdvanceBeforeRefresh(self) == /\ pc[self] = "MaybeAdvanceBeforeRefresh"
                                    /\ \/ /\ \E pos \in ValidPositions(({txns[self].write_ts})):
@@ -687,12 +712,16 @@ ResolveIntent(self) == /\ pc[self] = "ResolveIntent"
 Abort(self) == /\ pc[self] = "Abort"
                /\ txns' = [txns EXCEPT ![self].status = "aborted"]
                /\ IF HasIntent(write_key[self], self)
-                     THEN /\ TRUE
+                     THEN /\ keys' = [keys EXCEPT ![write_key[self]] =                    [
+                                                                         value      |-> 0,
+                                                                         ts         |-> ZeroTimestamp,
+                                                                         intent_txn |-> NoIntent
+                                                                       ]]
                      ELSE /\ TRUE
+                          /\ keys' = keys
                /\ pc' = [pc EXCEPT ![self] = "End"]
-               /\ UNCHANGED << nextTS, ordering, keys, tscache, reads, 
-                               read_key, write_key, read_value, read_done, 
-                               write_done >>
+               /\ UNCHANGED << nextTS, ordering, tscache, reads, read_key, 
+                               write_key, read_value, read_done, write_done >>
 
 End(self) == /\ pc[self] = "End"
              /\ TRUE
@@ -704,8 +733,8 @@ End(self) == /\ pc[self] = "End"
 txn(self) == ChooseIsoLevel(self) \/ AssignReadTimestamp(self)
                 \/ AssignWriteTimestamp(self)
                 \/ MaybeAdvanceBeforeReadWrite(self)
-                \/ ExecuteStatement(self)
-                \/ MaybeAdvanceBeforeRefresh(self)
+                \/ ExecuteStatement(self) \/ HandleIntent(self)
+                \/ PerformRead(self) \/ MaybeAdvanceBeforeRefresh(self)
                 \/ StatementRefresh(self) \/ MaybeAdvanceBeforeCommit(self)
                 \/ CommitRefresh(self) \/ Commit(self)
                 \/ ResolveIntent(self) \/ Abort(self) \/ End(self)
