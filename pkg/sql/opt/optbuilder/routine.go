@@ -268,6 +268,7 @@ func (b *Builder) buildRoutine(
 			argTypes = append(argTypes, pexpr.(tree.TypedExpr).ResolvedType())
 		}
 	}
+
 	// Create a new scope for building the statements in the function body. We
 	// start with an empty scope because a statement in the function body cannot
 	// refer to anything from the outer expression. If there are function
@@ -277,70 +278,114 @@ func (b *Builder) buildRoutine(
 	// TODO(mgartner): We may need to set bodyScope.atRoot=true to prevent
 	// CTEs that mutate and are not at the top-level.
 	bodyScope := b.allocScope()
-	var params opt.ColList
+
+	// If necessary, add DEFAULT arguments.
+	args, argTypes = b.addDefaultArgs(f, args, argTypes, bodyScope, colRefs)
+
+	// Add all input parameters to the scope.
+	inParamTypes, ok := o.Types.(tree.ParamTypes)
+	if !ok {
+		panic(unimplemented.NewWithIssue(88947,
+			"variadiac user-defined functions are not yet supported"))
+	}
+	if len(inParamTypes) != len(args) {
+		panic(errors.AssertionFailedf(
+			"different number of static parameters %d and actual arguments %d", len(inParamTypes), len(args),
+		))
+	}
+
+	// Check the parameters for polymorphic types, and resolve to a concrete
+	// type if any exist.
 	var polyArgTyp *types.T
-	if o.Types.Length() > 0 {
-		// If necessary, add DEFAULT arguments.
-		args, argTypes = b.addDefaultArgs(f, args, argTypes, bodyScope, colRefs)
-
-		// Add all input parameters to the scope.
-		paramTypes, ok := o.Types.(tree.ParamTypes)
-		if !ok {
-			panic(unimplemented.NewWithIssue(88947,
-				"variadiac user-defined functions are not yet supported"))
-		}
-		if len(paramTypes) != len(args) {
-			panic(errors.AssertionFailedf(
-				"different number of static parameters %d and actual arguments %d", len(paramTypes), len(args),
-			))
-		}
-
-		// Check the parameters for polymorphic types, and resolve to a concrete
-		// type if any exist.
-		if b.evalCtx.SessionData().OptimizerUsePolymorphicParameterFix {
-			var numPolyParams int
-			_, numPolyParams, polyArgTyp = tree.ResolvePolymorphicArgTypes(
-				paramTypes, argTypes, nil /* anyElemTyp */, true, /* enforceConsistency */
-			)
-			if numPolyParams > 0 {
-				if polyArgTyp == nil {
-					// All supplied arguments were NULL, so a type could not be resolved
-					// for the polymorphic parameters.
-					panic(pgerror.New(pgcode.DatatypeMismatch,
-						"could not determine polymorphic type because input has type unknown",
-					))
-				}
-				// If the routine returns a polymorphic type, use the resolved
-				// polymorphic argument type to determine the concrete return type.
-				b.maybeResolvePolymorphicReturnType(f, polyArgTyp)
+	if b.evalCtx.SessionData().OptimizerUsePolymorphicParameterFix {
+		var numPolyParams int
+		_, numPolyParams, polyArgTyp = tree.ResolvePolymorphicArgTypes(
+			inParamTypes, argTypes, nil /* anyElemTyp */, true, /* enforceConsistency */
+		)
+		if numPolyParams > 0 {
+			if polyArgTyp == nil {
+				// All supplied arguments were NULL, so a type could not be resolved
+				// for the polymorphic parameters.
+				panic(pgerror.New(pgcode.DatatypeMismatch,
+					"could not determine polymorphic type because input has type unknown",
+				))
 			}
+			// If the routine returns a polymorphic type, use the resolved
+			// polymorphic argument type to determine the concrete return type.
+			b.maybeResolvePolymorphicReturnType(f, polyArgTyp)
 		}
+	}
 
-		// Add any needed casts from argument type to parameter type, and add a
-		// correctly typed column to the bodyScope for each parameter.
-		params = make(opt.ColList, len(paramTypes))
-		for i := range paramTypes {
-			argTyp := argTypes[i]
-			desiredTyp := maybeReplacePolymorphicType(paramTypes[i].Typ, polyArgTyp)
-			if desiredTyp.Identical(types.AnyTuple) {
+	// PL/pgSQL routines keep track of all parameters (including OUT parameters)
+	// since they can be referenced by name in the body, whereas SQL routines
+	// only keep track of IN parameters since OUT parameters cannot be
+	// referenced in the body and are only used for returning results.
+	var routineParams []routineParam
+	if o.Language == tree.RoutineLangPLpgSQL {
+		routineParams = make([]routineParam, 0, len(o.RoutineParams))
+	}
+
+	addParam := func(name tree.Name, ord int, typ *types.T) *scopeColumn {
+		argColName := funcParamColName(name, ord)
+		col := b.synthesizeColumn(bodyScope, argColName, typ, nil /* expr */, nil /* scalar */)
+		col.setParamOrd(ord)
+		return col
+	}
+
+	// Add any needed casts from argument type to parameter type, and add a
+	// correctly typed column to the bodyScope for each parameter.
+	inParamIdx := 0
+	inParams := make(opt.ColList, len(inParamTypes))
+	for inOutParamIdx, param := range o.RoutineParams {
+		var resolvedTyp *types.T
+		var paramOrd int
+		if o.Language == tree.RoutineLangSQL {
+			paramOrd = inParamIdx
+		} else {
+			// For PL/pgSQL routines, the parameter ordinal includes OUT params.
+			paramOrd = inOutParamIdx
+		}
+		if param.IsInParam() {
+			argTyp := argTypes[inParamIdx]
+			resolvedTyp = maybeReplacePolymorphicType(inParamTypes[inParamIdx].Typ, polyArgTyp)
+			if resolvedTyp.Identical(types.AnyTuple) {
 				// This is a RECORD-typed parameter. Use the actual argument type.
-				desiredTyp = argTyp
+				resolvedTyp = argTyp
 			}
-			if !argTyp.Identical(desiredTyp) {
-				if !cast.ValidCast(argTyp, desiredTyp, cast.ContextAssignment) {
+			if !argTyp.Identical(resolvedTyp) {
+				if !cast.ValidCast(argTyp, resolvedTyp, cast.ContextAssignment) {
 					// Missing assignment cast between these two types should've been
 					// caught earlier, during routine creation or overload resolution.
 					panic(errors.AssertionFailedf(
 						"argument expression has type %s, need type %s, assignment cast isn't possible",
-						argTyp.SQLStringForError(), desiredTyp.SQLStringForError(),
+						argTyp.SQLStringForError(), resolvedTyp.SQLStringForError(),
 					))
 				}
-				args[i] = b.factory.ConstructCast(args[i], desiredTyp)
+				args[inParamIdx] = b.factory.ConstructCast(args[inParamIdx], resolvedTyp)
 			}
-			argColName := funcParamColName(tree.Name(paramTypes[i].Name), i)
-			col := b.synthesizeColumn(bodyScope, argColName, desiredTyp, nil /* expr */, nil /* scalar */)
-			col.setParamOrd(i)
-			params[i] = col.id
+			col := addParam(param.Name, paramOrd, resolvedTyp)
+			inParams[inParamIdx] = col.id
+			inParamIdx++
+		} else {
+			// OUT parameter. This is ignored for SQL routines.
+			if o.Language == tree.RoutineLangSQL {
+				continue
+			}
+			typ, err := tree.ResolveType(b.ctx, param.Type, b.semaCtx.TypeResolver)
+			if err != nil {
+				panic(err)
+			}
+			resolvedTyp = maybeReplacePolymorphicType(typ, polyArgTyp)
+			addParam(param.Name, paramOrd, resolvedTyp)
+		}
+		if o.Language == tree.RoutineLangPLpgSQL {
+			// For PL/pgSQL routines, keep track of the resolved type for all
+			// parameters, including OUT parameters.
+			routineParams = append(routineParams, routineParam{
+				name:  param.Name,
+				typ:   resolvedTyp,
+				class: param.Class,
+			})
 		}
 	}
 
@@ -485,19 +530,6 @@ func (b *Builder) buildRoutine(
 		if err != nil {
 			panic(err)
 		}
-		routineParams := make([]routineParam, 0, len(o.RoutineParams))
-		for _, param := range o.RoutineParams {
-			// TODO(yuzefovich): can we avoid type resolution here?
-			typ, err := tree.ResolveType(b.ctx, param.Type, b.semaCtx.TypeResolver)
-			if err != nil {
-				panic(err)
-			}
-			routineParams = append(routineParams, routineParam{
-				name:  param.Name,
-				typ:   maybeReplacePolymorphicType(typ, polyArgTyp),
-				class: param.Class,
-			})
-		}
 		options := basePLOptions().
 			SetIsSetReturning(isSetReturning).
 			SetInsideDataSource(oldInsideDataSource).
@@ -544,7 +576,7 @@ func (b *Builder) buildRoutine(
 				BodyStmts:          bodyStmts,
 				BodyTags:           bodyTags,
 				BodyASTs:           bodyASTs,
-				Params:             params,
+				Params:             inParams,
 				ResultBufferID:     resultBufferID,
 			},
 		},

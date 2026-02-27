@@ -900,3 +900,19 @@ statement ok
 DROP PROCEDURE p;
 
 subtest end
+
+subtest regression_164540
+
+# Regression test for incorrect assignment of ordinal positions to PL/pgSQL
+# procedure parameters.
+statement ok
+CREATE OR REPLACE PROCEDURE p164540(OUT o INT, IN i INT) AS $$
+  BEGIN o := $2; END;
+$$ LANGUAGE PLpgSQL;
+
+query I
+CALL p164540(NULL, 42);
+----
+42
+
+subtest end

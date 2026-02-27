@@ -160,6 +160,7 @@ func (b *Builder) buildCreateFunction(cf *tree.CreateRoutine, inScope *scope) (o
 	// labels in the output RECORD type.
 	var outParamNames []string
 	var sawDefaultExpr, sawPolymorphicInParam, sawPolymorphicOutParam bool
+	inParamIdx := 0
 	for i := range cf.Params {
 		param := &cf.Params[i]
 		typ, err := tree.ResolveType(b.ctx, param.Type, b.semaCtx.TypeResolver)
@@ -258,13 +259,6 @@ func (b *Builder) buildCreateFunction(cf *tree.CreateRoutine, inScope *scope) (o
 			sawDefaultExpr = true
 		}
 
-		// Add all input parameters to the base scope of the body.
-		if tree.IsInParamClass(param.Class) {
-			paramColName := funcParamColName(param.Name, i)
-			col := b.synthesizeColumn(bodyScope, paramColName, typ, nil /* expr */, nil /* scalar */)
-			col.setParamOrd(i)
-		}
-
 		// Collect the user defined type dependencies.
 		typedesc.GetTypeDescriptorClosure(typ).ForEach(func(id descpb.ID) {
 			typeDeps.Add(int(id))
@@ -277,6 +271,23 @@ func (b *Builder) buildCreateFunction(cf *tree.CreateRoutine, inScope *scope) (o
 				typ:   typ,
 				class: param.Class,
 			})
+		}
+
+		// Add all input parameters to the base scope of the body.
+		addParam := func(paramOrd int) {
+			paramColName := funcParamColName(param.Name, paramOrd)
+			col := b.synthesizeColumn(bodyScope, paramColName, typ, nil /* expr */, nil /* scalar */)
+			col.setParamOrd(paramOrd)
+		}
+		if language == tree.RoutineLangSQL {
+			// SQL routines ignore OUT parameters in the routine body.
+			addParam(inParamIdx)
+		} else {
+			// PL/pgSQL routines allow referencing all parameters.
+			addParam(i)
+		}
+		if tree.IsInParamClass(param.Class) {
+			inParamIdx++
 		}
 	}
 
