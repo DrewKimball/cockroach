@@ -320,22 +320,26 @@ func (b *Builder) buildRoutine(
 	// since they can be referenced by name in the body, whereas SQL routines
 	// only keep track of IN parameters since OUT parameters cannot be
 	// referenced in the body and are only used for returning results.
+	// SQL routines track only the IN parameters.
 	var routineParams []routineParam
+	var paramCols opt.ColList
 	if o.Language == tree.RoutineLangPLpgSQL {
 		routineParams = make([]routineParam, 0, len(o.RoutineParams))
+		paramCols = make(opt.ColList, 0, len(o.RoutineParams))
+	} else {
+		paramCols = make(opt.ColList, 0, len(inParamTypes))
 	}
 
-	addParam := func(name tree.Name, ord int, typ *types.T) *scopeColumn {
+	addParam := func(name tree.Name, ord int, typ *types.T) {
 		argColName := funcParamColName(name, ord)
 		col := b.synthesizeColumn(bodyScope, argColName, typ, nil /* expr */, nil /* scalar */)
 		col.setParamOrd(ord)
-		return col
+		paramCols = append(paramCols, col.id)
 	}
 
 	// Add any needed casts from argument type to parameter type, and add a
 	// correctly typed column to the bodyScope for each parameter.
 	inParamIdx := 0
-	inParams := make(opt.ColList, len(inParamTypes))
 	for inOutParamIdx, param := range o.RoutineParams {
 		var resolvedTyp *types.T
 		var paramOrd int
@@ -363,8 +367,6 @@ func (b *Builder) buildRoutine(
 				}
 				args[inParamIdx] = b.factory.ConstructCast(args[inParamIdx], resolvedTyp)
 			}
-			col := addParam(param.Name, paramOrd, resolvedTyp)
-			inParams[inParamIdx] = col.id
 			inParamIdx++
 		} else {
 			// OUT parameter. This is ignored for SQL routines.
@@ -378,6 +380,7 @@ func (b *Builder) buildRoutine(
 			resolvedTyp = maybeReplacePolymorphicType(typ, polyArgTyp)
 			addParam(param.Name, paramOrd, resolvedTyp)
 		}
+		addParam(param.Name, paramOrd, resolvedTyp)
 		if o.Language == tree.RoutineLangPLpgSQL {
 			// For PL/pgSQL routines, keep track of the resolved type for all
 			// parameters, including OUT parameters.
@@ -576,7 +579,7 @@ func (b *Builder) buildRoutine(
 				BodyStmts:          bodyStmts,
 				BodyTags:           bodyTags,
 				BodyASTs:           bodyASTs,
-				Params:             inParams,
+				Params:             paramCols,
 				ResultBufferID:     resultBufferID,
 			},
 		},
