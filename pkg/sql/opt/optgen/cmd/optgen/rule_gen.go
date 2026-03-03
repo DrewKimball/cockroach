@@ -8,6 +8,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/optgen/lang"
@@ -82,15 +83,16 @@ type contextDecl struct {
 // _partlyExplored is true), then this logic only explores newly added Left
 // children.
 type newRuleGen struct {
-	compiled     *lang.CompiledExpr
-	md           *metadata
-	w            *matchWriter
-	uniquifier   uniquifier
-	normalize    bool
-	thisVar      string
-	factoryVar   string
-	boundStmts   map[lang.Expr]string
-	typedAliases map[string]string
+	compiled       *lang.CompiledExpr
+	md             *metadata
+	w              *matchWriter
+	uniquifier     uniquifier
+	normalize      bool
+	thisVar        string
+	factoryVar     string
+	boundStmts     map[lang.Expr]string
+	typedAliases   map[string]string
+	commuteAliases map[string]string
 
 	// innerExploreMatch is the innermost match expression in an explore rule.
 	// Match expressions in an explore rule generate nested "for" loops, and
@@ -111,6 +113,31 @@ func (g *newRuleGen) init(compiled *lang.CompiledExpr, md *metadata, w *matchWri
 // genRule generates match and replace code for one rule within the scope of
 // a particular op construction method.
 func (g *newRuleGen) genRule(rule *lang.RuleExpr) {
+	g.genRuleInternal(rule)
+
+	// It is possible to use the optgen:commute directive to specify a pair of
+	// variables to commute.
+	var commuteAliases map[string]string
+	for _, comment := range rule.Comments {
+		if matches := commuteRe.FindStringSubmatch(string(comment)); matches != nil {
+			if commuteAliases != nil {
+				panic(fmt.Errorf("duplicate commute directive '%s'", comment))
+			}
+			left, right := matches[1], matches[2]
+			commuteAliases = map[string]string{left: right, right: left}
+		}
+	}
+	if commuteAliases != nil {
+		g.commuteAliases = commuteAliases
+		g.genRuleInternal(rule)
+		g.commuteAliases = nil
+	}
+}
+
+// Match # optgen:commute $foo $bar
+var commuteRe = regexp.MustCompile(`#[ \t]*optgen:commute[ \t]+\$(\S+)[ \t]+\$(\S+)[ \t]*$`)
+
+func (g *newRuleGen) genRuleInternal(rule *lang.RuleExpr) {
 	g.uniquifier.init()
 	g.boundStmts = make(map[lang.Expr]string)
 	g.typedAliases = make(map[string]string)
@@ -130,7 +157,11 @@ func (g *newRuleGen) genRule(rule *lang.RuleExpr) {
 		g.innerExploreMatch = g.findInnerExploreMatch(rule.Match)
 	}
 
-	g.w.writeIndent("// [%s]\n", rule.Name)
+	if g.commuteAliases != nil {
+		g.w.writeIndent("// [%s] (Commuted)\n", rule.Name)
+	} else {
+		g.w.writeIndent("// [%s]\n", rule.Name)
+	}
 	marker := g.w.nestIndent("{\n")
 
 	if g.normalize {
@@ -235,10 +266,14 @@ func (g *newRuleGen) genMatch(match lang.Expr, context *contextDecl, noMatch boo
 
 	case *lang.BindExpr:
 		// Alias the context variable.
-		if string(t.Label) != context.code {
-			g.w.writeIndent("%s := %s\n", t.Label, context.code)
+		label := t.Label
+		if commuted, ok := g.commuteAliases[string(label)]; ok {
+			label = lang.StringExpr(commuted)
 		}
-		newContext := &contextDecl{code: string(t.Label), typ: context.typ}
+		if string(t.Label) != context.code {
+			g.w.writeIndent("%s := %s\n", label, context.code)
+		}
+		newContext := &contextDecl{code: string(label), typ: context.typ}
 
 		// Keep track of the untyped alias so that we can "shadow" it with
 		// a typed version later, if possible.
@@ -823,10 +858,14 @@ func (g *newRuleGen) genBoundStatements(e lang.Expr) {
 
 		switch t := e.(type) {
 		case *lang.BindExpr:
-			g.w.writeIndent("%s := ", t.Label)
+			label := t.Label
+			if commuted, ok := g.commuteAliases[string(label)]; ok {
+				label = lang.StringExpr(commuted)
+			}
+			g.w.writeIndent("%s := ", label)
 			g.genNestedExpr(t.Target)
 			g.w.newline()
-			g.boundStmts[t] = string(t.Label)
+			g.boundStmts[t] = string(label)
 
 		case *lang.FuncExpr:
 			if !t.HasDynamicName() {
@@ -872,7 +911,11 @@ func (g *newRuleGen) genBoundStatements(e lang.Expr) {
 				if i != 0 {
 					vars.WriteString(", ")
 				}
-				vars.WriteString(string(label))
+				if commuted, ok := g.commuteAliases[string(label)]; ok {
+					vars.WriteString(commuted)
+				} else {
+					vars.WriteString(string(label))
+				}
 			}
 			customFunc := t.Target.(*lang.CustomFuncExpr)
 			g.w.writeIndent("%s := ", vars.String())
