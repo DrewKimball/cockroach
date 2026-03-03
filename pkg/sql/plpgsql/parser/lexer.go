@@ -174,9 +174,9 @@ func (l *lexer) MakeExecSqlStmt() (*plpgsqltree.Execute, error) {
 
 	var sql string
 	if haveInto {
-		sql = l.getStr(startPos, intoStartPos) + l.getStr(intoEndPos, endPos)
+		sql = l.getSQLStringForParse(startPos, intoStartPos) + l.getSQLStringForParse(intoEndPos, endPos)
 	} else {
-		sql = l.getStr(startPos, endPos)
+		sql = l.getSQLStringForParse(startPos, endPos)
 	}
 	sqlStmt, err := l.parseOne(sql)
 	if err != nil {
@@ -394,7 +394,7 @@ func (l *lexer) ParseReturnExpr() (plpgsqltree.Expr, error) {
 	if err != nil || startPos == endPos {
 		return nil, err
 	}
-	exprStr := l.getStr(startPos, endPos)
+	exprStr := l.getSQLStringForParse(startPos, endPos)
 	return l.ParseExpr(exprStr)
 }
 
@@ -405,7 +405,7 @@ func (l *lexer) ParseReturnQuery() (plpgsqltree.Statement, error) {
 	if err != nil || startPos == endPos {
 		return nil, err
 	}
-	queryStr := l.getStr(startPos, endPos)
+	queryStr := l.getSQLStringForParse(startPos, endPos)
 	sqlStmt, err := l.parseOne(queryStr)
 	if err != nil {
 		return nil, err
@@ -432,7 +432,7 @@ func (l *lexer) ReadSqlExpr(
 	startPos, endPos, terminatorMet, err = l.readSQLConstruct(
 		true /* isExpr */, false /* allowEmpty */, terminator1, terminators...,
 	)
-	return l.getStr(startPos, endPos), terminatorMet, err
+	return l.getSQLStringForParse(startPos, endPos), terminatorMet, err
 }
 
 func (l *lexer) ReadSqlStatement(
@@ -442,7 +442,7 @@ func (l *lexer) ReadSqlStatement(
 	startPos, endPos, terminatorMet, err = l.readSQLConstruct(
 		false /* isExpr */, false /* allowEmpty */, terminator1, terminators...,
 	)
-	return l.getStr(startPos, endPos), terminatorMet, err
+	return l.getSQLStringForParse(startPos, endPos), terminatorMet, err
 }
 
 // findFirstOccurrence searches from the current position for occurrences of the
@@ -522,7 +522,16 @@ func (l *lexer) readSQLConstruct(
 	return startPos, endPos, terminatorMet, nil
 }
 
-func (l *lexer) getStr(startPos, endPos int) string {
+// getSQLStringForParse returns the substring corresponding to the given start
+// and end token positions.
+//
+// NB: this should be used (only) for retrieving strings that will be passed
+// through to the SQL parser. This method will preserve all characters from the
+// original string, including inline comments. Contrast this with tok.Str(),
+// which only includes the matched characters
+//
+//, which need to preserve every character.
+func (l *lexer) getSQLStringForParse(startPos, endPos int) string {
 	if endPos <= startPos {
 		return ""
 	}
@@ -665,7 +674,7 @@ func (l *lexer) readTarget(
 		if tok.id != IDENT {
 			return nil, 0, errors.Newf("\"%s\" is not a scalar variable", tok.str)
 		}
-		variable := plpgsqltree.Variable(strings.TrimSpace(l.getStr(pos, pos+1)))
+		variable := plpgsqltree.Variable(tok.Str())
 		target = append(target, variable)
 		if pos+1 == endPos || l.tokens[pos+1].id != ',' {
 			// This is the end of the target list.

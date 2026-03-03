@@ -431,3 +431,12 @@ DECLARE
 BEGIN
   UPSERT INTO t1 VALUES (1,2) INTO y;
                                     ^
+
+# Regression test for TODO(drewk)
+parse
+DECLARE
+BEGIN
+  SELECT x INTO a -- foo bar
+  FROM xy;
+END
+----
