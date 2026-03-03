@@ -664,3 +664,45 @@ $input
 (Select $input:* & (HasZeroRows $input) $filters:*)
 =>
 $input
+
+[PushFilterIntoRecursiveCTE, Normalize]
+(Select
+    $cte:(RecursiveCTE
+        $binding:*
+        $initial:*
+        $recursive:*
+        $private:*
+    )
+    $filters:[
+        ...
+        $item:* & (IsBoundBy $item (OutputCols $cte))
+        ...
+    ]
+)
+=>
+(Select
+    (RecursiveCTE
+        $binding
+        (Select
+            $initial
+            [
+                (FiltersItem
+                    (MapRecursiveCTEInitialFilter $item $private)
+                )
+            ]
+        )
+        (Select
+            $recursive
+            [
+                (FiltersItem
+                    (MapRecursiveCTERecursiveFilter
+                        $item
+                        $private
+                    )
+                )
+            ]
+        )
+        $private
+    )
+    (RemoveFiltersItem $filters $item)
+)

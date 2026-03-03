@@ -292,3 +292,17 @@ func (c *CustomFuncs) CanAddRecursiveLimit(
 func (c *CustomFuncs) GetRecursiveWithID(private *memo.RecursiveCTEPrivate) opt.WithID {
 	return private.WithID
 }
+
+func (c *CustomFuncs) MapRecursiveCTEInitialFilter(
+	filter *memo.FiltersItem, private *memo.RecursiveCTEPrivate,
+) opt.ScalarExpr {
+	colMap := makeMapFromColLists(private.OutCols, private.InitialCols)
+	return c.f.RemapCols(filter.Condition, colMap)
+}
+
+func (c *CustomFuncs) MapRecursiveCTERecursiveFilter(
+  filter *memo.FiltersItem, private *memo.RecursiveCTEPrivate,
+) opt.ScalarExpr {
+  colMap := makeMapFromColLists(private.OutCols, private.RecursiveCols)
+  return c.f.RemapCols(filter.Condition, colMap)
+}

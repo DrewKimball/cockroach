@@ -254,3 +254,25 @@
     )
     $filters
 )
+
+[RejectNullsLimit, Normalize]
+(Select
+    $limit:(Limit $input:* $limitVal:* $private:*) &
+        ^(ColsAreEmpty $rejectCols:(RejectNullCols $limit))
+    $filters:* &
+        ^(ColsAreEmpty
+            $nullRejectedCols:(IntersectionCols
+                $rejectCols
+                (GetNullRejectedCols $filters)
+            )
+        )
+)
+=>
+(Select
+    (Limit
+        (Select $input (MakeNullRejectFilters $nullRejectedCols))
+        $limitVal
+        $private
+    )
+    $filters
+)

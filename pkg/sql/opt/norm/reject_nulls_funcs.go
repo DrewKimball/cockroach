@@ -211,6 +211,27 @@ func DeriveRejectNullCols(mem *memo.Memo, in memo.RelExpr, disabledRules intsets
 
 	case opt.ScanOp:
 		relProps.Rule.RejectNullCols.UnionWith(deriveScanRejectNullCols(mem, in))
+
+	case opt.RecursiveCTEOp:
+		if disabledRules.Contains(int(opt.PushFilterIntoRecursiveCTE)) {
+			// Avoid rule cycles.
+			break
+		}
+		// Recursive CTE operators pass through the union of their initial and
+		// recursive inputs. The output column IDs are different, so we need to
+		// remap from the input RejectNullCols sets.
+		t := in.(*memo.RecursiveCTEExpr)
+		initialRejectCols := t.Initial.Relational().Rule.RejectNullCols
+		recursiveRejectCols := t.Recursive.Relational().Rule.RejectNullCols
+		relProps.Rule.RejectNullCols.UnionWith(
+			opt.TranslateColSetStrict(initialRejectCols, t.InitialCols, t.OutCols),
+		)
+		relProps.Rule.RejectNullCols.UnionWith(
+			opt.TranslateColSetStrict(recursiveRejectCols, t.RecursiveCols, t.OutCols),
+		)
+
+	case opt.LimitOp:
+		relProps.Rule.RejectNullCols.UnionWith(deriveLimitRejectNullCols(mem, in, disabledRules))
 	}
 
 	// Don't attempt to request null-rejection for non-null cols. This can happen
@@ -219,6 +240,52 @@ func DeriveRejectNullCols(mem *memo.Memo, in memo.RelExpr, disabledRules intsets
 	relProps.Rule.RejectNullCols.DifferenceWith(relProps.NotNullCols)
 
 	return relProps.Rule.RejectNullCols
+}
+
+func deriveAllOrNothingNullableCols(in memo.RelExpr) opt.ColSet {
+	switch t := in.(type) {
+	case *memo.SelectExpr, *memo.LimitExpr, *memo.OffsetExpr:
+		// These operators do not change the schema of their input, and only remove
+		// rows.
+		return deriveAllOrNothingNullableCols(t.Child(0).(memo.RelExpr))
+	case *memo.ProjectExpr, *memo.GroupByExpr, *memo.DistinctOnExpr:
+		// Remove columns that are not projected.
+		inputCols := deriveAllOrNothingNullableCols(t.Child(0).(memo.RelExpr))
+		return inputCols.Intersection(t.Relational().OutputCols)
+	case *memo.InnerJoinExpr:
+		leftCols := deriveAllOrNothingNullableCols(t.Child(0).(memo.RelExpr))
+		rightCols := deriveAllOrNothingNullableCols(t.Child(1).(memo.RelExpr))
+		return leftCols.Union(rightCols)
+	case *memo.LeftJoinExpr:
+		cols := deriveAllOrNothingNullableCols(t.Child(0).(memo.RelExpr))
+		if t.Left.Relational().Cardinality.IsZeroOrOne() {
+			cols.UnionWith(t.Right.Relational().NotNullCols)
+		}
+		return cols
+	case *memo.FullJoinExpr:
+		var cols opt.ColSet
+		if t.Left.Relational().Cardinality.IsZeroOrOne() {
+			cols.UnionWith(t.Right.Relational().NotNullCols)
+		}
+		if t.Right.Relational().Cardinality.IsZeroOrOne() {
+			cols.UnionWith(t.Left.Relational().NotNullCols)
+		}
+		return cols
+	}
+	return opt.ColSet{}
+}
+
+func deriveLimitRejectNullCols(
+	mem *memo.Memo, in memo.RelExpr, disabledRules intsets.Fast,
+) opt.ColSet {
+	input := in.Child(0).(memo.RelExpr)
+	inputRejectNullCols := DeriveRejectNullCols(mem, input, disabledRules)
+	if inputRejectNullCols.Empty() {
+		return opt.ColSet{}
+	}
+	allOrNothingNullableCols := deriveAllOrNothingNullableCols(input)
+	allOrNothingNullableCols.IntersectionWith(inputRejectNullCols)
+	return allOrNothingNullableCols
 }
 
 // deriveGroupByRejectNullCols returns the set of GroupBy columns that are
