@@ -11,6 +11,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/memo"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/props"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
+	"github.com/cockroachdb/cockroach/pkg/sql/types"
 	"github.com/cockroachdb/cockroach/pkg/util"
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/redact"
@@ -932,4 +933,117 @@ func (c *CustomFuncs) MakeNullProjections(right memo.RelExpr) memo.ProjectionsEx
 	}
 
 	return projections
+}
+
+// CanConvertPartialJoinValuesToIn checks whether a partial join with a Values
+// expression can be converted to use an IN or NOT IN expression. It assumes
+// the condition is an equality between two variables and checks that:
+//   - One variable is from the left RelExpr
+//   - The other variable is from the right ValuesExpr
+//   - The column from the ValuesExpr contains exclusively const and placeholder
+//     expressions
+func (c *CustomFuncs) CanConvertPartialJoinValuesToIn(
+	left memo.RelExpr, right *memo.ValuesExpr, cond opt.ScalarExpr,
+) bool {
+	eq, ok := cond.(*memo.EqExpr)
+	if !ok {
+		return false
+	}
+
+	leftVar, ok := eq.Left.(*memo.VariableExpr)
+	if !ok {
+		return false
+	}
+	rightVar, ok := eq.Right.(*memo.VariableExpr)
+	if !ok {
+		return false
+	}
+
+	leftCols := left.Relational().OutputCols
+	rightCols := right.Relational().OutputCols
+
+	// Determine which variable belongs to which side.
+	var valuesCol opt.ColumnID
+	if leftCols.Contains(leftVar.Col) && rightCols.Contains(rightVar.Col) {
+		valuesCol = rightVar.Col
+	} else if leftCols.Contains(rightVar.Col) && rightCols.Contains(leftVar.Col) {
+		valuesCol = leftVar.Col
+	} else {
+		return false
+	}
+
+	// Find the column index in the Values expression.
+	colIdx := -1
+	for i, col := range right.Cols {
+		if col == valuesCol {
+			colIdx = i
+			break
+		}
+	}
+	if colIdx == -1 {
+		return false
+	}
+
+	// Check that all values in this column are const or placeholder expressions.
+	for i := range right.Rows {
+		tuple := right.Rows[i].(*memo.TupleExpr)
+		elem := tuple.Elems[colIdx]
+		if !opt.IsConstValueOp(elem) && elem.Op() != opt.PlaceholderOp {
+			return false
+		}
+	}
+
+	return true
+}
+
+// ConvertPartialJoinValuesToIn converts an equality condition in a partial join
+// with a Values expression into an IN or NOT IN expression. It extracts the
+// values from the Values expression column and constructs the appropriate IN
+// expression based on the join type (IN for SemiJoin, NOT IN for AntiJoin).
+func (c *CustomFuncs) ConvertPartialJoinValuesToIn(
+	joinOp opt.Operator, right *memo.ValuesExpr, cond opt.ScalarExpr,
+) opt.ScalarExpr {
+	eq := cond.(*memo.EqExpr)
+	leftVar := eq.Left.(*memo.VariableExpr)
+	rightVar := eq.Right.(*memo.VariableExpr)
+
+	rightCols := right.Relational().OutputCols
+
+	// Determine which variable is from the Values expression and which is the
+	// input variable.
+	var inputVar, valuesVar *memo.VariableExpr
+	if rightCols.Contains(rightVar.Col) {
+		inputVar = leftVar
+		valuesVar = rightVar
+	} else {
+		inputVar = rightVar
+		valuesVar = leftVar
+	}
+
+	// Find the column index in the Values expression.
+	colIdx := -1
+	for i, col := range right.Cols {
+		if col == valuesVar.Col {
+			colIdx = i
+			break
+		}
+	}
+
+	// Extract all values from the column.
+	elems := make(memo.ScalarListExpr, len(right.Rows))
+	elemTypes := make([]*types.T, len(right.Rows))
+	for i := range right.Rows {
+		tuple := right.Rows[i].(*memo.TupleExpr)
+		elems[i] = tuple.Elems[colIdx]
+		elemTypes[i] = elems[i].DataType()
+	}
+
+	// Construct the tuple of values.
+	tupleExpr := c.f.ConstructTuple(elems, types.MakeTuple(elemTypes))
+
+	// Construct IN or NOT IN based on join type.
+	if joinOp == opt.SemiJoinOp {
+		return c.f.ConstructIn(c.f.ConstructVariable(inputVar.Col), tupleExpr)
+	}
+	return c.f.ConstructNotIn(c.f.ConstructVariable(inputVar.Col), tupleExpr)
 }

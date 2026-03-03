@@ -920,3 +920,27 @@ $left
     ((OpName) $left $right $on $private)
     $leakproofPermeable
 )
+
+[ConvertPartialJoinValuesToIn, Normalize]
+(SemiJoin | AntiJoin
+    $left:*
+    $right:(Values * *)
+    $on:[
+        ...
+        $item:(FiltersItem $cond:(Eq (Variable) (Variable))) &
+            (CanConvertPartialJoinValuesToIn $left $right $cond)
+        ...
+    ]
+    $joinPrivate:*
+)
+=>
+((OpName)
+    $left
+    $right
+    (ReplaceFiltersItem
+        $on
+        $item
+        (ConvertPartialJoinValuesToIn (OpName) $right $cond)
+    )
+    $joinPrivate
+)
