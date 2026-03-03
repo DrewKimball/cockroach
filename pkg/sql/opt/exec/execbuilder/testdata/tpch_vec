@@ -20930,7 +20930,7 @@ EXPLAIN (VEC) SELECT sum(l_extendedprice* (1 - l_discount)) AS revenue FROM line
     └ *colexecproj.projMultFloat64Float64Op
       └ *colexecprojconst.projMinusFloat64ConstFloat64Op
         └ *colexec.UnorderedDistinct
-          └ *colexec.SerialUnorderedSynchronizer
+          └ *colexec.OrderedSynchronizer
             ├ *rowexec.joinReader
             │ └ *rowexec.joinReader
             │   └ *colexec.selectInOpBytes
@@ -20938,8 +20938,8 @@ EXPLAIN (VEC) SELECT sum(l_extendedprice* (1 - l_discount)) AS revenue FROM line
             │       └ *colexecsel.selLEInt64Int64ConstOp
             │         └ *colexecsel.selGEInt64Int64ConstOp
             │           └ *colfetcher.ColBatchScan
-            └ *colexec.UnorderedDistinct
-              └ *colexec.SerialUnorderedSynchronizer
+            └ *colexecbase.orderedDistinct
+              └ *colexec.OrderedSynchronizer
                 ├ *rowexec.joinReader
                 │ └ *rowexec.joinReader
                 │   └ *colexec.selectInOpBytes

@@ -1,3 +1,6 @@
+import file=tpcc_schema
+----
+
 exec-ddl
 CREATE TABLE abc (
   a CHAR PRIMARY KEY,
@@ -1892,19 +1895,23 @@ memo (optimized, ~16KB, required=[presentation: array_agg:7])
 memo
 SELECT sum(k) FROM (SELECT * FROM kuvw WHERE u=v) GROUP BY u,w
 ----
+<<<<<<< Updated upstream
 memo (optimized, ~16KB, required=[presentation: sum:7])
+=======
+memo (optimized, ~18KB, required=[presentation: sum:7])
+>>>>>>> Stashed changes
  ├── G1: (project G2 G3 sum)
  │    └── [presentation: sum:7]
  │         ├── best: (project G2 G3 sum)
- │         └── cost: 1097.69
- ├── G2: (group-by G4 G5 cols=(2,4)) (group-by G4 G5 cols=(2,4),ordering=+(2|3),+4) (group-by G4 G5 cols=(2,4),ordering=+4,+(2|3)) (group-by G4 G5 cols=(2,4),ordering=+4)
+ │         └── cost: 1097.79
+ ├── G2: (group-by G4 G5 cols=(2,4)) (project G6 G3 u w sum) (project G7 G3 u w sum) (group-by G4 G5 cols=(2,4),ordering=+4)
  │    └── []
- │         ├── best: (group-by G4="[ordering: +(2|3),+4]" G5 cols=(2,4),ordering=+(2|3),+4)
- │         └── cost: 1097.57
+ │         ├── best: (group-by G4 G5 cols=(2,4))
+ │         └── cost: 1097.67
  ├── G3: (projections)
- ├── G4: (select G6 G7) (select G8 G7) (select G9 G7)
+ ├── G4: (select G8 G9) (select G10 G9) (select G11 G9)
  │    ├── [ordering: +(2|3),+4]
- │    │    ├── best: (select G8="[ordering: +2,+3,+4]" G7)
+ │    │    ├── best: (select G10="[ordering: +2,+3,+4]" G9)
  │    │    └── cost: 1097.15
  │    ├── [ordering: +4,+(2|3)]
  │    │    ├── best: (sort G4)
@@ -1913,10 +1920,18 @@ memo (optimized, ~16KB, required=[presentation: sum:7])
  │    │    ├── best: (sort G4)
  │    │    └── cost: 1098.40
  │    └── []
- │         ├── best: (select G8 G7)
+ │         ├── best: (select G10 G9)
  │         └── cost: 1097.15
- ├── G5: (aggregations G10)
- ├── G6: (scan kuvw,cols=(1-4)) (scan kuvw@uvw,cols=(1-4)) (scan kuvw@wvu,cols=(1-4)) (scan kuvw@vw,cols=(1-4)) (scan kuvw@w,cols=(1-4))
+ ├── G5: (aggregations G12)
+ ├── G6: (group-by G4 G5 cols=(2-4),ordering=+(2|3),+4)
+ │    └── []
+ │         ├── best: (group-by G4="[ordering: +(2|3),+4]" G5 cols=(2-4),ordering=+(2|3),+4)
+ │         └── cost: 1097.77
+ ├── G7: (group-by G4 G5 cols=(2-4),ordering=+4,+(2|3))
+ │    └── []
+ │         ├── best: (group-by G4="[ordering: +4,+(2|3)]" G5 cols=(2-4),ordering=+4,+(2|3))
+ │         └── cost: 1099.06
+ ├── G8: (scan kuvw,cols=(1-4)) (scan kuvw@uvw,cols=(1-4)) (scan kuvw@wvu,cols=(1-4)) (scan kuvw@vw,cols=(1-4)) (scan kuvw@w,cols=(1-4))
  │    ├── [ordering: +2,+3,+4]
  │    │    ├── best: (scan kuvw@uvw,cols=(1-4))
  │    │    └── cost: 1108.82
@@ -1929,38 +1944,38 @@ memo (optimized, ~16KB, required=[presentation: sum:7])
  │    └── []
  │         ├── best: (scan kuvw,cols=(1-4))
  │         └── cost: 1108.82
- ├── G7: (filters G11)
- ├── G8: (scan kuvw@uvw,cols=(1-4),constrained)
+ ├── G9: (filters G13)
+ ├── G10: (scan kuvw@uvw,cols=(1-4),constrained)
  │    ├── [ordering: +2,+3,+4]
  │    │    ├── best: (scan kuvw@uvw,cols=(1-4),constrained)
  │    │    └── cost: 1087.22
  │    ├── [ordering: +4,+2]
- │    │    ├── best: (sort G8)
+ │    │    ├── best: (sort G10)
  │    │    └── cost: 1354.66
  │    ├── [ordering: +4]
- │    │    ├── best: (sort G8)
+ │    │    ├── best: (sort G10)
  │    │    └── cost: 1343.82
  │    └── []
  │         ├── best: (scan kuvw@uvw,cols=(1-4),constrained)
  │         └── cost: 1087.22
- ├── G9: (scan kuvw@vw,cols=(1-4),constrained)
+ ├── G11: (scan kuvw@vw,cols=(1-4),constrained)
  │    ├── [ordering: +3,+4]
  │    │    ├── best: (scan kuvw@vw,cols=(1-4),constrained)
  │    │    └── cost: 1087.22
  │    ├── [ordering: +4,+2]
- │    │    ├── best: (sort G9)
+ │    │    ├── best: (sort G11)
  │    │    └── cost: 1354.66
  │    ├── [ordering: +4]
- │    │    ├── best: (sort G9)
+ │    │    ├── best: (sort G11)
  │    │    └── cost: 1343.82
  │    └── []
  │         ├── best: (scan kuvw@vw,cols=(1-4),constrained)
  │         └── cost: 1087.22
- ├── G10: (sum G12)
- ├── G11: (eq G13 G14)
- ├── G12: (variable k)
- ├── G13: (variable u)
- └── G14: (variable v)
+ ├── G12: (sum G14)
+ ├── G13: (eq G15 G16)
+ ├── G14: (variable k)
+ ├── G15: (variable u)
+ └── G16: (variable v)
 
 # Ensure that we don't incorrectly use orderings that don't match the direction.
 memo
@@ -2142,8 +2157,13 @@ memo (optimized, ~6KB, required=[presentation: u:2,v:3,w:4] [ordering: +2])
 memo
 SELECT DISTINCT ON (u) u, v, w FROM kuvw ORDER BY u, v, w
 ----
+<<<<<<< Updated upstream
 memo (optimized, ~7KB, required=[presentation: u:2,v:3,w:4] [ordering: +2])
  ├── G1: (distinct-on G2 G3 cols=(2),ordering=+3,+4 opt(2)) (distinct-on G2 G3 cols=(2),ordering=+2,+3,+4) (distinct-on G2 G3 cols=(2),ordering=+3,+4)
+=======
+memo (optimized, ~6KB, required=[presentation: u:2,v:3,w:4] [ordering: +2])
+ ├── G1: (distinct-on G2 G3 cols=(2),ordering=+3,+4 opt(2)) (distinct-on G2 G3 cols=(2),ordering=+2,+3,+4)
+>>>>>>> Stashed changes
  │    ├── [presentation: u:2,v:3,w:4] [ordering: +2]
  │    │    ├── best: (distinct-on G2="[ordering: +2,+3,+4]" G3 cols=(2),ordering=+3,+4 opt(2))
  │    │    └── cost: 1129.75
@@ -2156,9 +2176,6 @@ memo (optimized, ~7KB, required=[presentation: u:2,v:3,w:4] [ordering: +2])
  │    │    └── cost: 1098.72
  │    ├── [ordering: +3,+4 opt(2)]
  │    │    ├── best: (scan kuvw@uvw,cols=(2-4))
- │    │    └── cost: 1098.72
- │    ├── [ordering: +3,+4]
- │    │    ├── best: (scan kuvw@vw,cols=(2-4))
  │    │    └── cost: 1098.72
  │    └── []
  │         ├── best: (scan kuvw,cols=(2-4))
@@ -2489,6 +2506,80 @@ memo (optimized, ~30KB, required=[])
  ├── G28: (variable "?column?")
  ├── G29: (is G24 G30)
  └── G30: (null)
+
+# Regression test for #120897.
+# This is the validation query when importing into the tpcc order table in a
+# multiregion setup. Hash aggregation is used when there are no stats and no
+# index hint, but forcing the index should lead to a streaming group-by.
+#
+# Primary index validation query.
+opt
+SELECT o_w_id, o_d_id, o_id FROM "order"@[1]
+WHERE ((o_w_id IS NOT NULL) AND (o_d_id IS NOT NULL)) AND (o_id IS NOT NULL)
+GROUP BY o_w_id, o_d_id, o_id HAVING count(*) > 1;
+----
+project
+ ├── columns: o_w_id:3!null o_d_id:2!null o_id:1!null
+ ├── key: (1-3)
+ └── select
+      ├── columns: o_id:1!null o_d_id:2!null o_w_id:3!null count_rows:11!null
+      ├── key: (1-3)
+      ├── fd: (1-3)-->(11)
+      ├── group-by (streaming)
+      │    ├── columns: o_id:1!null o_d_id:2!null o_w_id:3!null count_rows:11!null
+      │    ├── grouping columns: o_id:1!null o_d_id:2!null o_w_id:3!null
+      │    ├── internal-ordering: +3,+2,-1
+      │    ├── key: (1-3)
+      │    ├── fd: (1-3)-->(11)
+      │    ├── scan order
+      │    │    ├── columns: o_id:1!null o_d_id:2!null o_w_id:3!null
+      │    │    ├── flags: force-index=order_pkey
+      │    │    ├── key: (1-3)
+      │    │    └── ordering: +3,+2,-1
+      │    └── aggregations
+      │         └── count-rows [as=count_rows:11]
+      └── filters
+           └── count_rows:11 > 1 [outer=(11), constraints=(/11: [/2 - ]; tight)]
+
+# Secondary index validation query.
+opt
+SELECT o_w_id, o_d_id, o_c_id, o_id FROM "order"@[2]
+WHERE (((o_w_id IS NOT NULL) AND (o_d_id IS NOT NULL)) AND (o_c_id IS NOT NULL)) AND (o_id IS NOT NULL)
+GROUP BY o_w_id, o_d_id, o_c_id, o_id HAVING count(*) > 1;
+----
+project
+ ├── columns: o_w_id:3!null o_d_id:2!null o_c_id:4!null o_id:1!null
+ ├── key: (1-3)
+ ├── fd: (1-3)-->(4)
+ └── select
+      ├── columns: o_id:1!null o_d_id:2!null o_w_id:3!null o_c_id:4!null count_rows:11!null
+      ├── key: (1-3)
+      ├── fd: (1-3)-->(4,11)
+      ├── group-by (streaming)
+      │    ├── columns: o_id:1!null o_d_id:2!null o_w_id:3!null o_c_id:4!null count_rows:11!null
+      │    ├── grouping columns: o_id:1!null o_d_id:2!null o_w_id:3!null o_c_id:4!null
+      │    ├── internal-ordering: +3,+2,+4,-1
+      │    ├── key: (1-3)
+      │    ├── fd: (1-3)-->(4,11)
+      │    ├── select
+      │    │    ├── columns: o_id:1!null o_d_id:2!null o_w_id:3!null o_c_id:4!null
+      │    │    ├── key: (1-3)
+      │    │    ├── fd: (1-3)-->(4)
+      │    │    ├── ordering: +3,+2,+4,-1
+      │    │    ├── scan order@order_idx
+      │    │    │    ├── columns: o_id:1!null o_d_id:2!null o_w_id:3!null o_c_id:4
+      │    │    │    ├── flags: force-index=order_idx
+      │    │    │    ├── key: (1-3)
+      │    │    │    ├── fd: (1-3)-->(4)
+      │    │    │    └── ordering: +3,+2,+4,-1
+      │    │    └── filters
+      │    │         └── o_c_id:4 IS NOT NULL [outer=(4), constraints=(/4: (/NULL - ]; tight)]
+      │    └── aggregations
+      │         ├── count-rows [as=count_rows:11]
+      │         └── const-agg [as=o_c_id:4, outer=(4)]
+      │              └── o_c_id:4
+      └── filters
+           └── count_rows:11 > 1 [outer=(11), constraints=(/11: [/2 - ]; tight)]
 
 # ------------------------------------------------------------------------
 # SplitGroupByScanIntoUnionScans + SplitGroupByFilteredScanIntoUnionScans

@@ -356,6 +356,29 @@ func (f *Factory) DynamicConstruct(op opt.Operator, args ...interface{}) opt.Exp
 	}
 	panic(errors.AssertionFailedf("cannot dynamically construct operator %s", errors.Safe(op)))
 }
+func (f *Factory) DynamicAddToGroup(grp memo.RelExpr, op opt.Operator, args ...interface{}) memo.RelExpr {
+	opt.MaybeInjectOptimizerTestingPanic(f.ctx, f.evalCtx)
+	switch op {
+	case opt.SelectOp:
+		return f.mem.AddSelectToGroup(&memo.SelectExpr{
+			Input:   args[0].(memo.RelExpr),
+			Filters: *args[1].(*memo.FiltersExpr),
+		}, grp)
+	case opt.InnerJoinOp:
+		return f.mem.AddInnerJoinToGroup(&memo.InnerJoinExpr{
+			Left:  args[0].(memo.RelExpr),
+			Right: args[1].(memo.RelExpr),
+			On:    *args[2].(*memo.FiltersExpr),
+		}, grp)
+	case opt.InnerJoinApplyOp:
+		return f.mem.AddInnerJoinApplyToGroup(&memo.InnerJoinApplyExpr{
+			Left:  args[0].(memo.RelExpr),
+			Right: args[1].(memo.RelExpr),
+			On:    *args[2].(*memo.FiltersExpr),
+		}, grp)
+	}
+	panic(errors.AssertionFailedf("cannot dynamically add operator %s to group", errors.Safe(op)))
+}
 ----
 ----
 
@@ -664,6 +687,12 @@ func (f *Factory) DynamicConstruct(op opt.Operator, args ...interface{}) opt.Exp
 	}
 	panic(errors.AssertionFailedf("cannot dynamically construct operator %s", errors.Safe(op)))
 }
+func (f *Factory) DynamicAddToGroup(grp memo.RelExpr, op opt.Operator, args ...interface{}) memo.RelExpr {
+	opt.MaybeInjectOptimizerTestingPanic(f.ctx, f.evalCtx)
+	switch op {
+	}
+	panic(errors.AssertionFailedf("cannot dynamically add operator %s to group", errors.Safe(op)))
+}
 ----
 ----
 
@@ -789,6 +818,17 @@ func (f *Factory) DynamicConstruct(op opt.Operator, args ...interface{}) opt.Exp
 		)
 	}
 	panic(errors.AssertionFailedf("cannot dynamically construct operator %s", errors.Safe(op)))
+}
+func (f *Factory) DynamicAddToGroup(grp memo.RelExpr, op opt.Operator, args ...interface{}) memo.RelExpr {
+	opt.MaybeInjectOptimizerTestingPanic(f.ctx, f.evalCtx)
+	switch op {
+	case opt.WithOp:
+		return f.mem.AddWithToGroup(&memo.WithExpr{
+			Binding: args[0].(memo.RelExpr),
+			Main:    args[1].(memo.RelExpr),
+		}, grp)
+	}
+	panic(errors.AssertionFailedf("cannot dynamically add operator %s to group", errors.Safe(op)))
 }
 ----
 ----
@@ -1081,6 +1121,22 @@ func (f *Factory) DynamicConstruct(op opt.Operator, args ...interface{}) opt.Exp
 	}
 	panic(errors.AssertionFailedf("cannot dynamically construct operator %s", errors.Safe(op)))
 }
+func (f *Factory) DynamicAddToGroup(grp memo.RelExpr, op opt.Operator, args ...interface{}) memo.RelExpr {
+	opt.MaybeInjectOptimizerTestingPanic(f.ctx, f.evalCtx)
+	switch op {
+	case opt.ProjectOp:
+		return f.mem.AddProjectToGroup(&memo.ProjectExpr{
+			Input:       args[0].(memo.RelExpr),
+			Projections: *args[1].(*memo.ProjectionsExpr),
+			Passthrough: *args[2].(*opt.ColSet),
+		}, grp)
+	case opt.ValuesOp:
+		return f.mem.AddValuesToGroup(&memo.ValuesExpr{
+			Rows: *args[0].(*memo.ScalarListExpr),
+		}, grp)
+	}
+	panic(errors.AssertionFailedf("cannot dynamically add operator %s to group", errors.Safe(op)))
+}
 ----
 ----
 
@@ -1265,6 +1321,12 @@ func (f *Factory) DynamicConstruct(op opt.Operator, args ...interface{}) opt.Exp
 		)
 	}
 	panic(errors.AssertionFailedf("cannot dynamically construct operator %s", errors.Safe(op)))
+}
+func (f *Factory) DynamicAddToGroup(grp memo.RelExpr, op opt.Operator, args ...interface{}) memo.RelExpr {
+	opt.MaybeInjectOptimizerTestingPanic(f.ctx, f.evalCtx)
+	switch op {
+	}
+	panic(errors.AssertionFailedf("cannot dynamically add operator %s to group", errors.Safe(op)))
 }
 ----
 ----
@@ -1573,6 +1635,17 @@ func (f *Factory) DynamicConstruct(op opt.Operator, args ...interface{}) opt.Exp
 		)
 	}
 	panic(errors.AssertionFailedf("cannot dynamically construct operator %s", errors.Safe(op)))
+}
+func (f *Factory) DynamicAddToGroup(grp memo.RelExpr, op opt.Operator, args ...interface{}) memo.RelExpr {
+	opt.MaybeInjectOptimizerTestingPanic(f.ctx, f.evalCtx)
+	switch op {
+	case opt.UnionOp:
+		return f.mem.AddUnionToGroup(&memo.UnionExpr{
+			Left:  args[0].(memo.RelExpr),
+			Right: args[1].(memo.RelExpr),
+		}, grp)
+	}
+	panic(errors.AssertionFailedf("cannot dynamically add operator %s to group", errors.Safe(op)))
 }
 ----
 ----

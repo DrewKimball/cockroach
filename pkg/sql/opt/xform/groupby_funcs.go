@@ -208,10 +208,20 @@ func (c *CustomFuncs) GroupingColsClosureOverlappingOrdering(
 		return opt.ColSet{}, props.OrderingChoice{}, false
 	}
 	groupingCols = groupingCols.Union(orderingColsInClosure)
-	newOrdering, fullPrefix, found := getPrefixFromOrdering(ordering.ToOrdering(), private.Ordering, input,
-		func(id opt.ColumnID) bool { return groupingCols.Contains(id) })
+	newOrdering, fullPrefix, found := getPrefixFromOrdering(
+		ordering.ToOrdering(), private.Ordering, input, groupingColumnsClosure,
+	)
 	if !found || !fullPrefix {
 		return opt.ColSet{}, props.OrderingChoice{}, false
+	}
+	// Remove grouping columns that both were not part of the original grouping
+	// columns and are not part of the ordering. This step is not necessary, but
+	// may avoid unnecessary work during execution.
+	ordCols := newOrdering.ColSet()
+	for col, ok := groupingCols.Next(0); ok; col, ok = groupingCols.Next(col + 1) {
+		if !private.GroupingCols.Contains(col) && !ordCols.Contains(col) {
+			groupingCols.Remove(col)
+		}
 	}
 	return groupingCols, newOrdering, true
 }
@@ -265,40 +275,29 @@ func (c *CustomFuncs) GenerateStreamingGroupByLimitOrderingHint(
 			return
 		}
 	}
-	// Output columns are the union of grouping columns with columns from the
-	// aggregate projection list. Verify this is built correctly.
-	outputCols := groupingCols.Copy()
-	for i := range newAggs {
-		outputCols.Add(newAggs[i].Col)
-	}
-	if !aggregation.Relational().OutputCols.Equals(outputCols) {
-		// If the output columns in the new aggregation don't match those in the
-		// original aggregation, give up on this optimization.
-		return
-	}
 
-	var newAggregation memo.RelExpr
+	var newExpr memo.RelExpr
 	constructAggregation := func() {
-		newAggregation =
-			c.e.f.DynamicConstruct(
-				aggregation.Op(),
-				input,
-				&newAggs,
-				&newPrivate,
-			).(memo.RelExpr)
+		newExpr = c.e.f.DynamicConstruct(aggregation.Op(), input, &newAggs, &newPrivate).(memo.RelExpr)
+
+		// Output columns are the union of grouping columns with columns from the
+		// aggregate projection list.
+		if !groupingCols.SubsetOf(grp.Relational().OutputCols) {
+			// Some grouping columns may have been added to allow a streaming
+			// group-by. Project these away before adding to the group.
+			newExpr = c.e.f.ConstructProject(newExpr, nil, grp.Relational().OutputCols)
+		}
 	}
-	var disabledRules intsets.Fast
 	// The ReduceGroupingCols rule must be disabled to prevent the ordering
 	// columns from being removed from the grouping columns during operation
 	// construction. This rule already reduced the grouping columns on the initial
 	// construction. We are just adding back in any ordering columns which overlap
 	// with grouping columns in order to generate a better plan.
-	disabledRules.Add(int(opt.ReduceGroupingCols))
-
+	disabledRules := intsets.MakeFast(int(opt.ReduceGroupingCols))
 	c.e.f.DisableOptimizationRulesTemporarily(disabledRules, constructAggregation)
 	newLimitExpr :=
 		&memo.LimitExpr{
-			Input:    newAggregation,
+			Input:    newExpr,
 			Limit:    limitExpr.Limit,
 			Ordering: limitExpr.Ordering,
 		}
@@ -318,57 +317,33 @@ func (c *CustomFuncs) GenerateStreamingGroupBy(
 	private *memo.GroupingPrivate,
 ) {
 	orders := ordering.DeriveInterestingOrderings(c.e.mem, input)
-	intraOrd := private.Ordering
 	for _, ord := range orders {
-		newOrd, fullPrefix, found := getPrefixFromOrdering(ord.ToOrdering(), intraOrd, input,
-			func(id opt.ColumnID) bool { return private.GroupingCols.Contains(id) })
-		if !found || !fullPrefix {
+		newGroupingCols, newOrd, ok := c.GroupingColsClosureOverlappingOrdering(input, private, ord)
+		if !ok {
 			continue
 		}
 
 		newPrivate := *private
 		newPrivate.Ordering = newOrd
-
-		switch op {
-		case opt.GroupByOp:
-			newExpr := memo.GroupByExpr{
-				Input:           input,
-				Aggregations:    aggs,
-				GroupingPrivate: newPrivate,
+		newPrivate.GroupingCols = newGroupingCols
+		if newGroupingCols.SubsetOf(grp.Relational().OutputCols) {
+			c.e.f.DynamicAddToGroup(grp, op, input, &aggs, &newPrivate)
+		} else {
+			// Some grouping columns may have been added to allow a streaming
+			// group-by. Project these away before adding to the group.
+			var newExpr memo.RelExpr
+			constructAggregation := func() {
+				newExpr = c.e.f.DynamicConstruct(op, input, &aggs, &newPrivate).(memo.RelExpr)
 			}
-			c.e.mem.AddGroupByToGroup(&newExpr, grp)
-
-		case opt.DistinctOnOp:
-			newExpr := memo.DistinctOnExpr{
-				Input:           input,
-				Aggregations:    aggs,
-				GroupingPrivate: newPrivate,
-			}
-			c.e.mem.AddDistinctOnToGroup(&newExpr, grp)
-
-		case opt.EnsureDistinctOnOp:
-			newExpr := memo.EnsureDistinctOnExpr{
-				Input:           input,
-				Aggregations:    aggs,
-				GroupingPrivate: newPrivate,
-			}
-			c.e.mem.AddEnsureDistinctOnToGroup(&newExpr, grp)
-
-		case opt.UpsertDistinctOnOp:
-			newExpr := memo.UpsertDistinctOnExpr{
-				Input:           input,
-				Aggregations:    aggs,
-				GroupingPrivate: newPrivate,
-			}
-			c.e.mem.AddUpsertDistinctOnToGroup(&newExpr, grp)
-
-		case opt.EnsureUpsertDistinctOnOp:
-			newExpr := memo.EnsureUpsertDistinctOnExpr{
-				Input:           input,
-				Aggregations:    aggs,
-				GroupingPrivate: newPrivate,
-			}
-			c.e.mem.AddEnsureUpsertDistinctOnToGroup(&newExpr, grp)
+			// The ReduceGroupingCols rule must be disabled to prevent the ordering
+			// columns from being removed from the grouping columns during operation
+			// construction. This rule already reduced the grouping columns on the initial
+			// construction. We are just adding back in any ordering columns which overlap
+			// with grouping columns in order to generate a better plan.
+			disabledRules := intsets.MakeFast(int(opt.ReduceGroupingCols))
+			c.e.f.DisableOptimizationRulesTemporarily(disabledRules, constructAggregation)
+			project := &memo.ProjectExpr{Input: newExpr, Passthrough: grp.Relational().OutputCols}
+			c.e.mem.AddProjectToGroup(project, grp)
 		}
 	}
 }

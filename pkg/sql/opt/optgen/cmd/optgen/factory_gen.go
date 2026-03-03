@@ -43,6 +43,7 @@ func (g *factoryGen) generate(compiled *lang.CompiledExpr, w io.Writer) {
 	g.genReplace()
 	g.genCopyAndReplaceDefault()
 	g.genDynamicConstruct()
+	g.genDynamicAddToGroup()
 }
 
 // genConstructFuncs generates the factory Construct functions for each
@@ -516,5 +517,35 @@ func (g *factoryGen) genDynamicConstruct() {
 
 	g.w.writeIndent("}\n")
 	g.w.writeIndent("panic(errors.AssertionFailedf(\"cannot dynamically construct operator %%s\", errors.Safe(op)))\n")
+	g.w.unnest("}\n")
+}
+
+// genDynamicAddToGroup ...
+func (g *factoryGen) genDynamicAddToGroup() {
+	g.w.nestIndent("func (f *Factory) DynamicAddToGroup(grp memo.RelExpr, op opt.Operator, args ...interface{}) memo.RelExpr {\n")
+	g.w.writeIndent("opt.MaybeInjectOptimizerTestingPanic(f.ctx, f.evalCtx)\n")
+	g.w.writeIndent("switch op {\n")
+
+	defines := g.compiled.Defines.
+		WithoutTag("Enforcer").
+		WithoutTag("List").
+		WithoutTag("ListItem").
+		WithoutTag("Private").
+		WithoutTag("Scalar")
+
+	for _, define := range defines {
+		g.w.writeIndent("case opt.%sOp:\n", define.Name)
+		g.w.nestIndent("return f.mem.Add%[1]sToGroup(&memo.%[1]sExpr{\n", define.Name)
+		for i, field := range g.md.childAndPrivateFields(define) {
+			// Use castFromDynamicParam, since a dynamic parameter of type interface{}
+			// is being passed as a parameter to Construct.
+			g.w.writeIndent("%s: %s", g.md.fieldName(field), fieldStorePrefix(g.md.typeOf(field)))
+			g.w.writeIndent("%s,\n", castFromDynamicParam(fmt.Sprintf("args[%d]", i), g.md.typeOf(field)))
+		}
+		g.w.unnest("}, grp)\n")
+	}
+
+	g.w.writeIndent("}\n")
+	g.w.writeIndent("panic(errors.AssertionFailedf(\"cannot dynamically add operator %%s to group\", errors.Safe(op)))\n")
 	g.w.unnest("}\n")
 }

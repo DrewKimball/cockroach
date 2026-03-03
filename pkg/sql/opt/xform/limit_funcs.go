@@ -358,20 +358,17 @@ func (c *CustomFuncs) GenerateLimitedTopKScans(
 // of Ordering o that satisfies part of the required OrderingChoice intraOrd,
 // a bool indicating whether the entire Ordering o was satisfied, and a bool
 // indicating whether a prefix of any kind was found.
-// isOptional is a function that allows the caller to impose additional
-// constraints on columns that are considered optional, and should return true
-// if the column is optional.
+//
+// optionalCols allows the caller to indicate additional columns that are
+// considered optional. This is used for the GenerateStreamingGroupBy rules.
 func getPrefixFromOrdering(
-	o opt.Ordering,
-	intraOrd props.OrderingChoice,
-	input memo.RelExpr,
-	isOptional func(id opt.ColumnID) bool,
+	o opt.Ordering, intraOrd props.OrderingChoice, input memo.RelExpr, optionalCols opt.ColSet,
 ) (newOrd props.OrderingChoice, isFullPrefix bool, found bool) {
 	// We are looking for a prefix of o that satisfies part of the required ordering
 	oIdx, intraIdx := 0, 0
 	for ; oIdx < len(o); oIdx++ {
 		oCol := o[oIdx].ID()
-		if intraOrd.Optional.Contains(oCol) || isOptional(oCol) {
+		if intraOrd.Optional.Contains(oCol) || optionalCols.Contains(oCol) {
 			// Optional column.
 			continue
 		}
@@ -412,9 +409,9 @@ func (c *CustomFuncs) GeneratePartialOrderTopK(
 	orders := ordering.DeriveInterestingOrderings(c.e.mem, input)
 	intraOrd := private.Ordering
 	for _, ord := range orders {
-		newOrd, fullPrefix, found := getPrefixFromOrdering(ord.ToOrdering(), intraOrd, input, func(id opt.ColumnID) bool {
-			return false
-		})
+		newOrd, fullPrefix, found := getPrefixFromOrdering(
+			ord.ToOrdering(), intraOrd, input, opt.ColSet{},
+		)
 		// We don't need to generate a new expression if no prefix was found or the
 		// prefix encompasses the entire ordering, since that would be a full, not
 		// partial, order.

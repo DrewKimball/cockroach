@@ -1554,6 +1554,19 @@ define Barrier {
     LeakproofPermeable bool
 }
 
+[Relational]
+define Call {
+    # Proc is the procedure being invoked. It is a UDFCallExpr.
+    Proc ScalarExpr
+    _ CallPrivate
+}
+
+[Private]
+define CallPrivate {
+    # Columns stores the column IDs for the statement result columns.
+    Columns ColList
+}
+
 # FakeRel is a mock relational operator used for testing and as a dummy binding
 # relation for building cascades; its logical properties are pre-determined and
 # stored in the private. It can be used as the child of an operator for which we

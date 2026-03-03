@@ -2048,7 +2048,8 @@ scalar-group-by
  │    │    ├── fd: ()-->(14), (19)-->(22,24,25), (2)==(19), (19)==(2)
  │    │    └── distinct-on
  │    │         ├── columns: l_orderkey:1!null l_partkey:2!null l_linenumber:4!null l_quantity:5!null l_extendedprice:6!null l_discount:7!null l_shipinstruct:14!null l_shipmode:15!null p_partkey:19!null p_brand:22!null p_size:24!null p_container:25!null
- │    │         ├── grouping columns: l_orderkey:1!null l_linenumber:4!null p_partkey:19!null
+ │    │         ├── grouping columns: l_orderkey:1!null l_partkey:2!null l_linenumber:4!null p_partkey:19!null
+ │    │         ├── internal-ordering: +(2|19),+1,+4
  │    │         ├── key: (1,4,19)
  │    │         ├── fd: (1,4,19)-->(2,5-7,14,15,22,24,25), (2)==(19), (19)==(2)
  │    │         ├── union-all
@@ -2056,25 +2057,30 @@ scalar-group-by
  │    │         │    ├── left columns: l_orderkey:32 l_partkey:33 l_linenumber:35 l_quantity:36 l_extendedprice:37 l_discount:38 l_shipinstruct:45 l_shipmode:46 p_partkey:50 p_brand:53 p_size:55 p_container:56
  │    │         │    ├── right columns: l_orderkey:61 l_partkey:62 l_linenumber:64 l_quantity:65 l_extendedprice:66 l_discount:67 l_shipinstruct:74 l_shipmode:75 p_partkey:79 p_brand:82 p_size:84 p_container:85
  │    │         │    ├── fd: (2)==(19), (19)==(2)
+ │    │         │    ├── ordering: +(2|19),+1,+4 [actual: +2,+1,+4]
  │    │         │    ├── inner-join (lookup lineitem)
  │    │         │    │    ├── columns: l_orderkey:32!null l_partkey:33!null l_linenumber:35!null l_quantity:36!null l_extendedprice:37!null l_discount:38!null l_shipinstruct:45!null l_shipmode:46!null p_partkey:50!null p_brand:53!null p_size:55!null p_container:56!null
  │    │         │    │    ├── key columns: [32 35] = [32 35]
  │    │         │    │    ├── lookup columns are key
  │    │         │    │    ├── key: (32,35)
  │    │         │    │    ├── fd: ()-->(45,53), (32,35)-->(33,36-38,46), (50)-->(55,56), (33)==(50), (50)==(33)
+ │    │         │    │    ├── ordering: +(33|50),+32,+35 opt(45,53) [actual: +50,+32,+35]
  │    │         │    │    ├── inner-join (lookup lineitem@l_pk)
  │    │         │    │    │    ├── columns: l_orderkey:32!null l_partkey:33!null l_linenumber:35!null p_partkey:50!null p_brand:53!null p_size:55!null p_container:56!null
  │    │         │    │    │    ├── key columns: [50] = [33]
  │    │         │    │    │    ├── key: (32,35)
  │    │         │    │    │    ├── fd: ()-->(53), (50)-->(55,56), (32,35)-->(33), (33)==(50), (50)==(33)
+ │    │         │    │    │    ├── ordering: +(33|50),+32,+35 opt(53) [actual: +50,+32,+35]
  │    │         │    │    │    ├── select
  │    │         │    │    │    │    ├── columns: p_partkey:50!null p_brand:53!null p_size:55!null p_container:56!null
  │    │         │    │    │    │    ├── key: (50)
  │    │         │    │    │    │    ├── fd: ()-->(53), (50)-->(55,56)
+ │    │         │    │    │    │    ├── ordering: +50 opt(53) [actual: +50]
  │    │         │    │    │    │    ├── scan part
  │    │         │    │    │    │    │    ├── columns: p_partkey:50!null p_brand:53!null p_size:55!null p_container:56!null
  │    │         │    │    │    │    │    ├── key: (50)
- │    │         │    │    │    │    │    └── fd: (50)-->(53,55,56)
+ │    │         │    │    │    │    │    ├── fd: (50)-->(53,55,56)
+ │    │         │    │    │    │    │    └── ordering: +50
  │    │         │    │    │    │    └── filters
  │    │         │    │    │    │         ├── (p_size:55 >= 1) AND (p_size:55 <= 5) [outer=(55), constraints=(/55: [/1 - /5]; tight)]
  │    │         │    │    │    │         ├── p_brand:53 = 'Brand#12' [outer=(53), constraints=(/53: [/'Brand#12' - /'Brand#12']; tight), fd=()-->(53)]
@@ -2088,35 +2094,46 @@ scalar-group-by
  │    │         │         ├── columns: l_orderkey:61!null l_partkey:62!null l_linenumber:64!null l_quantity:65!null l_extendedprice:66!null l_discount:67!null l_shipinstruct:74!null l_shipmode:75!null p_partkey:79!null p_brand:82!null p_size:84!null p_container:85!null
  │    │         │         ├── key: (61,64)
  │    │         │         ├── fd: ()-->(74), (61,64)-->(62,65-67,75), (79)-->(82,84,85), (62)==(79), (79)==(62)
+ │    │         │         ├── ordering: +(62|79),+61,+64 opt(74) [actual: +62,+61,+64]
  │    │         │         └── distinct-on
  │    │         │              ├── columns: l_orderkey:61!null l_partkey:62!null l_linenumber:64!null l_quantity:65!null l_extendedprice:66!null l_discount:67!null l_shipinstruct:74!null l_shipmode:75!null p_partkey:79!null p_brand:82!null p_size:84!null p_container:85!null
  │    │         │              ├── grouping columns: l_orderkey:61!null l_linenumber:64!null p_partkey:79!null
  │    │         │              ├── key: (61,64,79)
+<<<<<<< Updated upstream
  │    │         │              ├── fd: (61,64,79)-->(62,65-67,74,75,82,84,85), (62)==(79), (79)==(62)
+=======
+ │    │         │              ├── fd: (62)==(79), (79)==(62), (61,64,79)-->(62,65-67,74,75,82,84,85)
+ │    │         │              ├── ordering: +(62|79),+61,+64 opt(74) [actual: +62,+61,+64]
+>>>>>>> Stashed changes
  │    │         │              ├── union-all
  │    │         │              │    ├── columns: l_orderkey:61!null l_partkey:62!null l_linenumber:64!null l_quantity:65!null l_extendedprice:66!null l_discount:67!null l_shipinstruct:74!null l_shipmode:75!null p_partkey:79!null p_brand:82!null p_size:84!null p_container:85!null
  │    │         │              │    ├── left columns: l_orderkey:90 l_partkey:91 l_linenumber:93 l_quantity:94 l_extendedprice:95 l_discount:96 l_shipinstruct:103 l_shipmode:104 p_partkey:108 p_brand:111 p_size:113 p_container:114
  │    │         │              │    ├── right columns: l_orderkey:119 l_partkey:120 l_linenumber:122 l_quantity:123 l_extendedprice:124 l_discount:125 l_shipinstruct:132 l_shipmode:133 p_partkey:137 p_brand:140 p_size:142 p_container:143
  │    │         │              │    ├── fd: (62)==(79), (79)==(62)
+ │    │         │              │    ├── ordering: +(62|79),+61,+64 opt(74) [actual: +62,+61,+64]
  │    │         │              │    ├── inner-join (lookup lineitem)
  │    │         │              │    │    ├── columns: l_orderkey:90!null l_partkey:91!null l_linenumber:93!null l_quantity:94!null l_extendedprice:95!null l_discount:96!null l_shipinstruct:103!null l_shipmode:104!null p_partkey:108!null p_brand:111!null p_size:113!null p_container:114!null
  │    │         │              │    │    ├── key columns: [90 93] = [90 93]
  │    │         │              │    │    ├── lookup columns are key
  │    │         │              │    │    ├── key: (90,93)
  │    │         │              │    │    ├── fd: ()-->(103,111), (90,93)-->(91,94-96,104), (108)-->(113,114), (91)==(108), (108)==(91)
+ │    │         │              │    │    ├── ordering: +(91|108),+90,+93 opt(103,111) [actual: +108,+90,+93]
  │    │         │              │    │    ├── inner-join (lookup lineitem@l_pk)
  │    │         │              │    │    │    ├── columns: l_orderkey:90!null l_partkey:91!null l_linenumber:93!null p_partkey:108!null p_brand:111!null p_size:113!null p_container:114!null
  │    │         │              │    │    │    ├── key columns: [108] = [91]
  │    │         │              │    │    │    ├── key: (90,93)
  │    │         │              │    │    │    ├── fd: ()-->(111), (108)-->(113,114), (90,93)-->(91), (91)==(108), (108)==(91)
+ │    │         │              │    │    │    ├── ordering: +(91|108),+90,+93 opt(111) [actual: +108,+90,+93]
  │    │         │              │    │    │    ├── select
  │    │         │              │    │    │    │    ├── columns: p_partkey:108!null p_brand:111!null p_size:113!null p_container:114!null
  │    │         │              │    │    │    │    ├── key: (108)
  │    │         │              │    │    │    │    ├── fd: ()-->(111), (108)-->(113,114)
+ │    │         │              │    │    │    │    ├── ordering: +108 opt(111) [actual: +108]
  │    │         │              │    │    │    │    ├── scan part
  │    │         │              │    │    │    │    │    ├── columns: p_partkey:108!null p_brand:111!null p_size:113!null p_container:114!null
  │    │         │              │    │    │    │    │    ├── key: (108)
- │    │         │              │    │    │    │    │    └── fd: (108)-->(111,113,114)
+ │    │         │              │    │    │    │    │    ├── fd: (108)-->(111,113,114)
+ │    │         │              │    │    │    │    │    └── ordering: +108
  │    │         │              │    │    │    │    └── filters
  │    │         │              │    │    │    │         ├── (p_size:113 >= 1) AND (p_size:113 <= 15) [outer=(113), constraints=(/113: [/1 - /15]; tight)]
  │    │         │              │    │    │    │         ├── p_brand:111 = 'Brand#34' [outer=(111), constraints=(/111: [/'Brand#34' - /'Brand#34']; tight), fd=()-->(111)]
@@ -2132,19 +2149,23 @@ scalar-group-by
  │    │         │              │         ├── lookup columns are key
  │    │         │              │         ├── key: (119,122)
  │    │         │              │         ├── fd: ()-->(132,140), (119,122)-->(120,123-125,133), (137)-->(142,143), (120)==(137), (137)==(120)
+ │    │         │              │         ├── ordering: +(120|137),+119,+122 opt(132,140) [actual: +137,+119,+122]
  │    │         │              │         ├── inner-join (lookup lineitem@l_pk)
  │    │         │              │         │    ├── columns: l_orderkey:119!null l_partkey:120!null l_linenumber:122!null p_partkey:137!null p_brand:140!null p_size:142!null p_container:143!null
  │    │         │              │         │    ├── key columns: [137] = [120]
  │    │         │              │         │    ├── key: (119,122)
  │    │         │              │         │    ├── fd: ()-->(140), (137)-->(142,143), (119,122)-->(120), (120)==(137), (137)==(120)
+ │    │         │              │         │    ├── ordering: +(120|137),+119,+122 opt(140) [actual: +137,+119,+122]
  │    │         │              │         │    ├── select
  │    │         │              │         │    │    ├── columns: p_partkey:137!null p_brand:140!null p_size:142!null p_container:143!null
  │    │         │              │         │    │    ├── key: (137)
  │    │         │              │         │    │    ├── fd: ()-->(140), (137)-->(142,143)
+ │    │         │              │         │    │    ├── ordering: +137 opt(140) [actual: +137]
  │    │         │              │         │    │    ├── scan part
  │    │         │              │         │    │    │    ├── columns: p_partkey:137!null p_brand:140!null p_size:142!null p_container:143!null
  │    │         │              │         │    │    │    ├── key: (137)
- │    │         │              │         │    │    │    └── fd: (137)-->(140,142,143)
+ │    │         │              │         │    │    │    ├── fd: (137)-->(140,142,143)
+ │    │         │              │         │    │    │    └── ordering: +137
  │    │         │              │         │    │    └── filters
  │    │         │              │         │    │         ├── (p_size:142 >= 1) AND (p_size:142 <= 10) [outer=(142), constraints=(/142: [/1 - /10]; tight)]
  │    │         │              │         │    │         ├── p_brand:140 = 'Brand#23' [outer=(140), constraints=(/140: [/'Brand#23' - /'Brand#23']; tight), fd=()-->(140)]

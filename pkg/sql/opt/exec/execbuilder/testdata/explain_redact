@@ -2928,7 +2928,7 @@ memo (optimized, ~35KB, required=[presentation: info:16] [distribution: test])
  │    └── []
  │         ├── best: (project G3 G4 f)
  │         └── cost: 18919.23
- ├── G3: (group-by G5 G6 cols=(2)) (group-by G5 G6 cols=(2),ordering=+2)
+ ├── G3: (group-by G5 G6 cols=(2)) (group-by G5 G6 cols=(2),ordering=+2) (group-by G5 G6 cols=(1,2),ordering=+1,+2)
  │    ├── [distribution: test]
  │    │    ├── best: (group-by G5="[distribution: test]" G6 cols=(2))
  │    │    └── cost: 18899.21
@@ -2940,6 +2940,12 @@ memo (optimized, ~35KB, required=[presentation: info:16] [distribution: test])
  │    ├── [distribution: test]
  │    │    ├── best: (left-join-apply G8="[distribution: test]" G9="[distribution: test]" G10)
  │    │    └── cost: 5555.70
+ │    ├── [ordering: +1,+2]
+ │    │    ├── best: (sort G5)
+ │    │    └── cost: 168339.92
+ │    ├── [ordering: +1,+2] [distribution: test]
+ │    │    ├── best: (distribute G5="[ordering: +1,+2]")
+ │    │    └── cost: 168539.94
  │    ├── [ordering: +2]
  │    │    ├── best: (sort G5)
  │    │    └── cost: 161891.05

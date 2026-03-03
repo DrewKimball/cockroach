@@ -404,11 +404,12 @@ func duplicateRowQuery(
 		limit = " LIMIT 1"
 	}
 	query := fmt.Sprintf(
-		`SELECT %[1]s FROM [%[2]d AS tbl] WHERE %[3]s GROUP BY %[1]s HAVING count(*) > 1 %[4]s`,
+		`SELECT %[1]s FROM [%[2]d AS tbl]@[%[3]d] WHERE %[4]s GROUP BY %[1]s HAVING count(*) > 1 %[5]s`,
 		strings.Join(srcCols, ", "),     // 1
 		srcTbl.GetID(),                  // 2
-		strings.Join(srcWhere, " AND "), // 3
-		limit,                           // 4
+		indexIDForValidation,            // 3
+		strings.Join(srcWhere, " AND "), // 4
+		limit,                           // 5
 	)
 	if indexIDForValidation != 0 {
 		query = fmt.Sprintf(
