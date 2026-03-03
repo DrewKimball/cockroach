@@ -634,44 +634,53 @@ func (c *CustomFuncs) AppendAggCols2(
 	return outAggs
 }
 
-// EnsureCanaryCol checks whether an aggregation which cannot ignore nulls exists.
-// If one does, it then checks if there are any non-null columns in the input.
-// If there is not one, it synthesizes a new True constant column that is
+// EnsureCanaryForAggs checks whether an aggregation which cannot ignore nulls
+// exists. If one does, it then checks if there are any non-null columns in the
+// input. If there is not one, it synthesizes a new True constant column that is
 // not-null. This becomes a kind of "canary" column that other expressions can
-// inspect, since any null value in this column indicates that the row was
-// added by an outer join as part of null extending.
+// inspect, since any null value in this column indicates that the row was added
+// by an outer join as part of null extending.
 //
-// EnsureCanaryCol returns the input expression, possibly wrapped in a new
-// Project if a new column was synthesized.
+// EnsureCanaryForAggs returns the input expression, possibly wrapped in a
+// new Project if a new column was synthesized.
 //
 // See the TryDecorrelateScalarGroupBy rule comment for more details.
-func (c *CustomFuncs) EnsureCanaryCol(in memo.RelExpr, aggs memo.AggregationsExpr) opt.ColumnID {
+func (c *CustomFuncs) EnsureCanaryForAggs(
+	in memo.RelExpr, aggs memo.AggregationsExpr,
+) (withCanary memo.RelExpr, canaryCol opt.ColumnID) {
 	for i := range aggs {
 		if !opt.AggregateIgnoresNulls(aggs[i].Agg.Op()) {
-			// Look for an existing not null column that is not projected by a
-			// passthrough aggregate like ConstAgg.
 			id, ok := in.Relational().NotNullCols.Next(0)
 			if ok && !aggs.OutputCols().Contains(id) {
-				return id
+				// Look for an existing not null column that is not projected by a
+				// passthrough aggregate like ConstAgg.
+				return in, id
 			}
 
 			// Synthesize a new column ID.
-			return c.f.Metadata().AddColumn("canary", types.Bool)
+			canaryCol = c.f.Metadata().AddColumn("canary", types.Bool)
+			withCanary = c.ProjectExtraCol(in, c.f.ConstructTrue(), canaryCol)
+			return withCanary, canaryCol
 		}
 	}
-	return 0
+	// No canary column necessary.
+	return in, 0
 }
 
-// EnsureCanary makes sure that if canaryCol is set, it is projected by the
-// input expression.
-//
-// See the TryDecorrelateScalarGroupBy rule comment for more details.
-func (c *CustomFuncs) EnsureCanary(in memo.RelExpr, canaryCol opt.ColumnID) memo.RelExpr {
-	if canaryCol == 0 || c.OutputCols(in).Contains(canaryCol) {
-		return in
+// EnsureCanary checks if the expression has a not-null column to distinguish
+// between rows added by an outer join and those that were not. If a not-null
+// column exists, it returns the input expression and the column ID. Otherwise,
+// it adds a new not-null column and returns the modified expression and the new
+// column ID.
+func (c *CustomFuncs) EnsureCanary(
+	in memo.RelExpr,
+) (withCanary memo.RelExpr, canaryCol opt.ColumnID) {
+	id, ok := in.Relational().NotNullCols.Next(0)
+	if ok {
+		return in, id
 	}
-	result := c.ProjectExtraCol(in, c.f.ConstructTrue(), canaryCol)
-	return result
+	canaryCol = c.f.Metadata().AddColumn("canary", types.Bool)
+	return c.ProjectExtraCol(in, c.f.ConstructTrue(), canaryCol), canaryCol
 }
 
 // CanaryColSet returns a singleton set containing the canary column if set,
@@ -845,6 +854,59 @@ func (c *CustomFuncs) EnsureAggsCanIgnoreNulls(
 		return aggs
 	}
 	return newAggs
+}
+
+// EnsureWindowsIgnoreNulls constructs a WindowExpr with the given arguments,
+// using the given canary column to ensure that the window functions ignore
+// NULLs (e.g. adding or removing NULL values does not affect the result).
+func (c *CustomFuncs) EnsureWindowsIgnoreNulls(
+	input memo.RelExpr, windows memo.WindowsExpr, private *memo.WindowPrivate, canaryCol opt.ColumnID,
+) memo.RelExpr {
+	// Any window functions that do not already ignore NULLs must be modified to
+	// project a different column. Then, the new column will be wrapped in a CASE
+	// expression that checks the canary column to determine if the value should be
+	// NULL. The CASE expression maps back to the original column ID.
+	var newWindows memo.WindowsExpr
+	var projections memo.ProjectionsExpr
+	passThroughCols := input.Relational().OutputCols.Copy()
+	for i := range windows {
+		fn := windows[i].Function
+		itemPrivate := windows[i].Private().(*memo.WindowsItemPrivate)
+		if opt.IsAggregateOp(fn) && opt.AggregateIgnoresNulls(fn.Op()) {
+			passThroughCols.Add(itemPrivate.Col)
+			continue
+		}
+		if newWindows == nil {
+			newWindows = make(memo.WindowsExpr, len(windows))
+			copy(newWindows, windows[:i])
+		}
+		newPrivate := *itemPrivate
+		newPrivate.Col = c.f.Metadata().AddColumn("window", fn.DataType())
+		newWindows[i] = c.f.ConstructWindowsItem(fn, &newPrivate)
+		projections = append(projections,
+			c.f.ConstructProjectionsItem(
+				c.f.ConstructCase(
+					memo.TrueSingleton,
+					memo.ScalarListExpr{
+						c.f.ConstructWhen(
+							c.f.ConstructIs(c.f.ConstructVariable(canaryCol), memo.NullSingleton),
+							c.f.ConstructNull(fn.DataType()),
+						),
+					},
+					c.f.ConstructVariable(newPrivate.Col),
+				),
+				itemPrivate.Col,
+			),
+		)
+	}
+	if newWindows == nil {
+		newWindows = windows
+	}
+	return c.f.ConstructProject(
+		c.f.ConstructWindow(input, newWindows, private),
+		projections,
+		passThroughCols,
+	)
 }
 
 // AddColsToPartition unions the given set of columns with a window private's

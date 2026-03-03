@@ -79,23 +79,34 @@ func (c *CustomFuncs) NullRejectProjections(
 	// column is found.
 	var getFirstEligibleCol func(opt.Expr) opt.ColumnID
 	getFirstEligibleCol = func(expr opt.Expr) opt.ColumnID {
-		if variable, ok := expr.(*memo.VariableExpr); ok {
-			if inputNullRejectCols.Contains(variable.Col) {
+		switch t := expr.(type) {
+		case *memo.VariableExpr:
+			if inputNullRejectCols.Contains(t.Col) {
 				// Null-rejection has been requested for this column, and the projection
 				// returns NULL when this column is NULL.
-				return variable.Col
+				return t.Col
 			}
-			// Null-rejection has not been requested for this column.
-			return opt.ColumnID(0)
-		}
-		if !opt.ScalarOperatorTransmitsNulls(expr.Op()) {
-			// This operator does not return NULL when one of its inputs is NULL, so
-			// we cannot null-reject through it.
-			return opt.ColumnID(0)
-		}
-		for i, cnt := 0, expr.ChildCount(); i < cnt; i++ {
-			if col := getFirstEligibleCol(expr.Child(i)); col != 0 {
-				return col
+		case *memo.CaseExpr:
+			// Match the specific pattern of CASE WHEN
+			whenExpr := t.Whens[0].(*memo.WhenExpr)
+			if t.Input.Op() == opt.TrueOp {
+				if isExpr, ok := whenExpr.Condition.(*memo.IsExpr); ok {
+					leftVar, leftIsVar := isExpr.Left.(*memo.VariableExpr)
+					_, rightIsNull := isExpr.Right.(*memo.NullExpr)
+					_, resIsNull := whenExpr.Value.(*memo.NullExpr)
+					if leftIsVar && inputNullRejectCols.Contains(leftVar.Col) && rightIsNull && resIsNull {
+						return leftVar.Col
+					}
+				}
+			}
+		default:
+			if opt.ScalarOperatorTransmitsNulls(expr.Op()) {
+				// This operator return NULLs when one of its inputs is NULL.
+				for i, cnt := 0, expr.ChildCount(); i < cnt; i++ {
+					if col := getFirstEligibleCol(expr.Child(i)); col != 0 {
+						return col
+					}
+				}
 			}
 		}
 		return opt.ColumnID(0)
@@ -317,48 +328,62 @@ func deriveProjectRejectNullCols(
 ) opt.ColSet {
 	rejectNullCols := DeriveRejectNullCols(mem, in.Child(0).(memo.RelExpr), disabledRules)
 	projections := *in.Child(1).(*memo.ProjectionsExpr)
-	var projectionsRejectCols opt.ColSet
-
-	// canRejectNulls recursively traverses the given projection expression and
-	// returns true if the projection satisfies the above conditions.
-	var canRejectNulls func(opt.Expr) bool
-	canRejectNulls = func(expr opt.Expr) bool {
-		switch t := expr.(type) {
-		case *memo.VariableExpr:
-			// Condition #2: if the column contained by this Variable is in the input
-			// RejectNullCols set, the projection output column can be null-rejected.
-			return rejectNullCols.Contains(t.Col)
-
-		case *memo.ConstExpr:
-			// Fall through to the child traversal.
-
-		default:
-			if !opt.ScalarOperatorTransmitsNulls(expr.Op()) {
-				// In order for condition #1 to be satisfied, we require an unbroken chain
-				// of null-transmitting operators from the input null-rejection column to
-				// the output of the projection.
-				return false
-			}
-			// Fall through to the child traversal.
-		}
-		for i, cnt := 0, expr.ChildCount(); i < cnt; i++ {
-			if canRejectNulls(expr.Child(i)) {
-				return true
-			}
-		}
-
-		// No child expressions were found that make the projection eligible for
-		// null-rejection.
-		return false
-	}
 
 	// Add any projections which satisfy the conditions.
+	var projectionsRejectCols opt.ColSet
 	for i := range projections {
-		if canRejectNulls(projections[i].Element) {
+		if exprTransmitsNulls(projections[i].Element, rejectNullCols) {
 			projectionsRejectCols.Add(projections[i].Col)
 		}
 	}
 	return (rejectNullCols.Union(projectionsRejectCols)).Intersection(in.Relational().OutputCols)
+}
+
+// ExprTransmitsNulls wraps the exprTransmitsNulls function for use in optgen.
+func (c *CustomFuncs) ExprTransmitsNulls(expr opt.Expr, cols opt.ColSet) bool {
+	return exprTransmitsNulls(expr, cols)
+}
+
+// exprTransmitsNulls returns true if the given expression "transmits" NULLs
+// from the given columns. In other words, it returns true if a NULL value in
+// at least one of the given columns implies that the expression will also be
+// NULL. This is used to determine whether a projection can be null-rejected.
+func exprTransmitsNulls(expr opt.Expr, cols opt.ColSet) bool {
+	switch t := expr.(type) {
+	case *memo.VariableExpr:
+		// If the column contained by this Variable is in the input column set, the
+		// expression transmits NULLs.
+		return cols.Contains(t.Col)
+
+	case *memo.CaseExpr:
+		// Handle the common case when the CASE expression directly returns NULL if
+		// the input column is NULL. This situation is produced by various optimizer
+		// rules.
+		whenExpr := t.Whens[0].(*memo.WhenExpr)
+		if t.Input.Op() == opt.TrueOp {
+			if isExpr, ok := whenExpr.Condition.(*memo.IsExpr); ok {
+				leftVar, leftIsVar := isExpr.Left.(*memo.VariableExpr)
+				_, rightIsNull := isExpr.Right.(*memo.NullExpr)
+				_, resIsNull := whenExpr.Value.(*memo.NullExpr)
+				if leftIsVar && cols.Contains(leftVar.Col) && rightIsNull && resIsNull {
+					return true
+				}
+			}
+		}
+
+	default:
+		if opt.ScalarOperatorTransmitsNulls(expr.Op()) {
+			// In order for an expression to transmit NULLs, we require an unbroken
+			// chain of null-transmitting operators from the input null-rejection
+			// column to the root of the expression.
+			for i, cnt := 0, expr.ChildCount(); i < cnt; i++ {
+				if exprTransmitsNulls(expr.Child(i), cols) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // deriveScanRejectNullCols returns the set of Scan columns which are eligible

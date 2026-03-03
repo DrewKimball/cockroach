@@ -161,6 +161,18 @@ func (c *CustomFuncs) IsFloatDatum(datum tree.Datum) bool {
 //
 // ----------------------------------------------------------------------
 
+// ContainsCol returns true if the given ColSet contains the given column.
+func (c *CustomFuncs) ContainsCol(cols opt.ColSet, col opt.ColumnID) bool {
+	return cols.Contains(col)
+}
+
+// RemoveCol removes the given column from the given set.
+func (c *CustomFuncs) RemoveCol(cols opt.ColSet, col opt.ColumnID) opt.ColSet {
+	cols.Copy()
+	cols.Remove(col)
+	return cols
+}
+
 // OutputCols returns the set of columns returned by the input expression.
 func (c *CustomFuncs) OutputCols(input memo.RelExpr) opt.ColSet {
 	return input.Relational().OutputCols
@@ -1307,6 +1319,24 @@ func (c *CustomFuncs) ProjectExtraCol(
 ) memo.RelExpr {
 	projections := memo.ProjectionsExpr{c.f.ConstructProjectionsItem(extra, extraID)}
 	return c.f.ConstructProject(in, projections, in.Relational().OutputCols)
+}
+
+// RemoveProjectionsItem returns a new list that is a copy of the given list,
+// except that it does not contain the given search item. If the list contains
+// the item multiple times, then only the first instance is removed. If the list
+// does not contain the item, then the method panics.
+func (c *CustomFuncs) RemoveProjectionsItem(
+	projections memo.ProjectionsExpr, search *memo.ProjectionsItem,
+) memo.ProjectionsExpr {
+	newProjections := make(memo.ProjectionsExpr, len(projections)-1)
+	for i := range projections {
+		if search == &projections[i] {
+			copy(newProjections, projections[:i])
+			copy(newProjections[i:], projections[i+1:])
+			return newProjections
+		}
+	}
+	panic(errors.AssertionFailedf("item to remove is not in the list: %v", search))
 }
 
 // ----------------------------------------------------------------------
