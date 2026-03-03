@@ -81,10 +81,10 @@ func (a *countRowsWindowAggregator) Close(ctx context.Context) {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *countRowsWindowAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *countRowsWindowAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be performed.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	a.allocator.PerformOperation([]*coldata.Vec{outVec}, func() {
@@ -100,4 +100,4 @@ func (a *countRowsWindowAggregator) processBatch(batch coldata.Batch, startIdx, 
 			outCol[i] = int64(cnt)
 		}
 	})
-}
+return nextStartIdx}

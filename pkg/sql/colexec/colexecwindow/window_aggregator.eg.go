@@ -205,7 +205,7 @@ func (a *windowAggregator) Close(ctx context.Context) {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *windowAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *windowAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	outVec := batch.ColVec(a.outputColIdx)
 	a.agg.SetOutput(outVec)
 	a.allocator.PerformOperation([]*coldata.Vec{outVec}, func() {
@@ -238,7 +238,7 @@ func (a *windowAggregator) processBatch(batch coldata.Batch, startIdx, endIdx in
 			a.agg.Reset()
 		}
 	})
-}
+return nextStartIdx}
 
 func (a *slidingWindowAggregator) startNewPartition() {
 	a.windowAggregatorBase.startNewPartition()
@@ -252,7 +252,7 @@ func (a *slidingWindowAggregator) Close(ctx context.Context) {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *slidingWindowAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *slidingWindowAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	outVec := batch.ColVec(a.outputColIdx)
 	a.agg.SetOutput(outVec)
 	a.allocator.PerformOperation([]*coldata.Vec{outVec}, func() {
@@ -309,7 +309,7 @@ func (a *slidingWindowAggregator) processBatch(batch coldata.Batch, startIdx, en
 			a.agg.Flush(i)
 		}
 	})
-}
+return nextStartIdx}
 
 // INVARIANT: the rows within a window frame are always processed in the same
 // order, regardless of whether the user specified an ordering. This means that

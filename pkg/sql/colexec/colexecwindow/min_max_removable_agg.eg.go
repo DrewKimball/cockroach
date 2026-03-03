@@ -185,10 +185,10 @@ type minBoolAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *minBoolAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *minBoolAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -243,6 +243,7 @@ func (a *minBoolAggregator) processBatch(batch coldata.Batch, startIdx, endIdx i
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -357,10 +358,10 @@ type minBytesAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *minBytesAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *minBytesAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -413,6 +414,7 @@ func (a *minBytesAggregator) processBatch(batch coldata.Batch, startIdx, endIdx 
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -511,10 +513,10 @@ type minDecimalAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *minDecimalAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *minDecimalAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -569,6 +571,7 @@ func (a *minDecimalAggregator) processBatch(batch coldata.Batch, startIdx, endId
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -667,10 +670,10 @@ type minInt16Aggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *minInt16Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *minInt16Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -725,6 +728,7 @@ func (a *minInt16Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx 
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -845,10 +849,10 @@ type minInt32Aggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *minInt32Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *minInt32Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -903,6 +907,7 @@ func (a *minInt32Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx 
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -1023,10 +1028,10 @@ type minInt64Aggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *minInt64Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *minInt64Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -1081,6 +1086,7 @@ func (a *minInt64Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx 
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -1201,10 +1207,10 @@ type minFloat64Aggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *minFloat64Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *minFloat64Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -1259,6 +1265,7 @@ func (a *minFloat64Aggregator) processBatch(batch coldata.Batch, startIdx, endId
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -1395,10 +1402,10 @@ type minTimestampAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *minTimestampAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *minTimestampAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -1453,6 +1460,7 @@ func (a *minTimestampAggregator) processBatch(batch coldata.Batch, startIdx, end
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -1565,10 +1573,10 @@ type minIntervalAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *minIntervalAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *minIntervalAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -1623,6 +1631,7 @@ func (a *minIntervalAggregator) processBatch(batch coldata.Batch, startIdx, endI
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -1721,10 +1730,10 @@ type minJSONAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *minJSONAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *minJSONAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -1788,6 +1797,7 @@ func (a *minJSONAggregator) processBatch(batch coldata.Batch, startIdx, endIdx i
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -1920,10 +1930,10 @@ type minDatumAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *minDatumAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *minDatumAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -1978,6 +1988,7 @@ func (a *minDatumAggregator) processBatch(batch coldata.Batch, startIdx, endIdx 
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -2163,10 +2174,10 @@ type maxBoolAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *maxBoolAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *maxBoolAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -2221,6 +2232,7 @@ func (a *maxBoolAggregator) processBatch(batch coldata.Batch, startIdx, endIdx i
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -2335,10 +2347,10 @@ type maxBytesAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *maxBytesAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *maxBytesAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -2391,6 +2403,7 @@ func (a *maxBytesAggregator) processBatch(batch coldata.Batch, startIdx, endIdx 
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -2489,10 +2502,10 @@ type maxDecimalAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *maxDecimalAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *maxDecimalAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -2547,6 +2560,7 @@ func (a *maxDecimalAggregator) processBatch(batch coldata.Batch, startIdx, endId
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -2645,10 +2659,10 @@ type maxInt16Aggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *maxInt16Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *maxInt16Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -2703,6 +2717,7 @@ func (a *maxInt16Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx 
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -2823,10 +2838,10 @@ type maxInt32Aggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *maxInt32Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *maxInt32Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -2881,6 +2896,7 @@ func (a *maxInt32Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx 
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -3001,10 +3017,10 @@ type maxInt64Aggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *maxInt64Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *maxInt64Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -3059,6 +3075,7 @@ func (a *maxInt64Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx 
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -3179,10 +3196,10 @@ type maxFloat64Aggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *maxFloat64Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *maxFloat64Aggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -3237,6 +3254,7 @@ func (a *maxFloat64Aggregator) processBatch(batch coldata.Batch, startIdx, endId
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -3373,10 +3391,10 @@ type maxTimestampAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *maxTimestampAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *maxTimestampAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -3431,6 +3449,7 @@ func (a *maxTimestampAggregator) processBatch(batch coldata.Batch, startIdx, end
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -3543,10 +3562,10 @@ type maxIntervalAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *maxIntervalAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *maxIntervalAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -3601,6 +3620,7 @@ func (a *maxIntervalAggregator) processBatch(batch coldata.Batch, startIdx, endI
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -3699,10 +3719,10 @@ type maxJSONAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *maxJSONAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *maxJSONAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -3766,6 +3786,7 @@ func (a *maxJSONAggregator) processBatch(batch coldata.Batch, startIdx, endIdx i
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given
@@ -3898,10 +3919,10 @@ type maxDatumAggregator struct {
 }
 
 // processBatch implements the bufferedWindower interface.
-func (a *maxDatumAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (a *maxDatumAggregator) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if endIdx <= startIdx {
 		// There is no processing to be done.
-		return
+		return nextStartIdx
 	}
 	outVec := batch.ColVec(a.outputColIdx)
 	outNulls := outVec.Nulls()
@@ -3956,6 +3977,7 @@ func (a *maxDatumAggregator) processBatch(batch coldata.Batch, startIdx, endIdx 
 			}
 		}
 	})
+	return nextStartIdx
 }
 
 // aggregateOverIntervals accumulates all rows represented by the given

@@ -120,7 +120,13 @@ type bufferedWindower interface {
 
 	// processBatch is called during windowProcessing when a windower needs to
 	// fill in the output column values in the given range for the given batch.
-	processBatch(batch coldata.Batch, startIdx, endIdx int)
+	//
+	// If output values are large, processBatch may return early in order to avoid
+	// exceeding the memory limit. In this case, the batch should be emitted
+	// immediately up to nextStartIdx, then processing should resume at that index.
+	// If the output column doesn't run into the memory limit, nextStartIdx is
+	// equal to endIdx.
+	processBatch(batch coldata.Batch, startIdx, endIdx int) (nextStartIdx int)
 
 	// transitionToProcessing is called before bufferedWindowOp transitions from
 	// the windowLoading or windowSeeking states to the windowProcessing state. It

@@ -145,10 +145,10 @@ type lagBoolWindow struct {
 
 var _ bufferedWindower = &lagBoolWindow{}
 
-func (w *lagBoolWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *lagBoolWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	leadLagVec := batch.ColVec(w.outputColIdx)
 	leadLagCol := leadLagVec.Bool()
@@ -198,7 +198,7 @@ func (w *lagBoolWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) 
 				val := col.Get(idx)
 				leadLagCol.Set(i, val)
 			}
-			return
+			return nextStartIdx
 		}
 		for i := startIdx; i < endIdx; i++ {
 			if offsetNulls.NullAt(i) {
@@ -224,7 +224,7 @@ func (w *lagBoolWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) 
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	if defaultNulls.MaybeHasNulls() {
 		for i := startIdx; i < endIdx; i++ {
@@ -249,7 +249,7 @@ func (w *lagBoolWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) 
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	for i := startIdx; i < endIdx; i++ {
 		requestedIdx := w.idx - int(offsetCol[i])
@@ -269,6 +269,7 @@ func (w *lagBoolWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) 
 		val := col.Get(idx)
 		leadLagCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type lagBytesWindow struct {
@@ -277,10 +278,10 @@ type lagBytesWindow struct {
 
 var _ bufferedWindower = &lagBytesWindow{}
 
-func (w *lagBytesWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *lagBytesWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	leadLagVec := batch.ColVec(w.outputColIdx)
 	leadLagCol := leadLagVec.Bytes()
@@ -324,7 +325,7 @@ func (w *lagBytesWindow) processBatch(batch coldata.Batch, startIdx, endIdx int)
 				col := vec.Bytes()
 				leadLagCol.Copy(col, i, idx)
 			}
-			return
+			return nextStartIdx
 		}
 		for i := startIdx; i < endIdx; i++ {
 			if offsetNulls.NullAt(i) {
@@ -348,7 +349,7 @@ func (w *lagBytesWindow) processBatch(batch coldata.Batch, startIdx, endIdx int)
 			col := vec.Bytes()
 			leadLagCol.Copy(col, i, idx)
 		}
-		return
+		return nextStartIdx
 	}
 	if defaultNulls.MaybeHasNulls() {
 		for i := startIdx; i < endIdx; i++ {
@@ -371,7 +372,7 @@ func (w *lagBytesWindow) processBatch(batch coldata.Batch, startIdx, endIdx int)
 			col := vec.Bytes()
 			leadLagCol.Copy(col, i, idx)
 		}
-		return
+		return nextStartIdx
 	}
 	for i := startIdx; i < endIdx; i++ {
 		requestedIdx := w.idx - int(offsetCol[i])
@@ -389,6 +390,7 @@ func (w *lagBytesWindow) processBatch(batch coldata.Batch, startIdx, endIdx int)
 		col := vec.Bytes()
 		leadLagCol.Copy(col, i, idx)
 	}
+	return nextStartIdx
 }
 
 type lagDecimalWindow struct {
@@ -397,10 +399,10 @@ type lagDecimalWindow struct {
 
 var _ bufferedWindower = &lagDecimalWindow{}
 
-func (w *lagDecimalWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *lagDecimalWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	leadLagVec := batch.ColVec(w.outputColIdx)
 	leadLagCol := leadLagVec.Decimal()
@@ -450,7 +452,7 @@ func (w *lagDecimalWindow) processBatch(batch coldata.Batch, startIdx, endIdx in
 				val := col.Get(idx)
 				leadLagCol.Set(i, val)
 			}
-			return
+			return nextStartIdx
 		}
 		for i := startIdx; i < endIdx; i++ {
 			if offsetNulls.NullAt(i) {
@@ -476,7 +478,7 @@ func (w *lagDecimalWindow) processBatch(batch coldata.Batch, startIdx, endIdx in
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	if defaultNulls.MaybeHasNulls() {
 		for i := startIdx; i < endIdx; i++ {
@@ -501,7 +503,7 @@ func (w *lagDecimalWindow) processBatch(batch coldata.Batch, startIdx, endIdx in
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	for i := startIdx; i < endIdx; i++ {
 		requestedIdx := w.idx - int(offsetCol[i])
@@ -521,6 +523,7 @@ func (w *lagDecimalWindow) processBatch(batch coldata.Batch, startIdx, endIdx in
 		val := col.Get(idx)
 		leadLagCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type lagInt16Window struct {
@@ -529,10 +532,10 @@ type lagInt16Window struct {
 
 var _ bufferedWindower = &lagInt16Window{}
 
-func (w *lagInt16Window) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *lagInt16Window) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	leadLagVec := batch.ColVec(w.outputColIdx)
 	leadLagCol := leadLagVec.Int16()
@@ -582,7 +585,7 @@ func (w *lagInt16Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 				val := col.Get(idx)
 				leadLagCol.Set(i, val)
 			}
-			return
+			return nextStartIdx
 		}
 		for i := startIdx; i < endIdx; i++ {
 			if offsetNulls.NullAt(i) {
@@ -608,7 +611,7 @@ func (w *lagInt16Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	if defaultNulls.MaybeHasNulls() {
 		for i := startIdx; i < endIdx; i++ {
@@ -633,7 +636,7 @@ func (w *lagInt16Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	for i := startIdx; i < endIdx; i++ {
 		requestedIdx := w.idx - int(offsetCol[i])
@@ -653,6 +656,7 @@ func (w *lagInt16Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 		val := col.Get(idx)
 		leadLagCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type lagInt32Window struct {
@@ -661,10 +665,10 @@ type lagInt32Window struct {
 
 var _ bufferedWindower = &lagInt32Window{}
 
-func (w *lagInt32Window) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *lagInt32Window) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	leadLagVec := batch.ColVec(w.outputColIdx)
 	leadLagCol := leadLagVec.Int32()
@@ -714,7 +718,7 @@ func (w *lagInt32Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 				val := col.Get(idx)
 				leadLagCol.Set(i, val)
 			}
-			return
+			return nextStartIdx
 		}
 		for i := startIdx; i < endIdx; i++ {
 			if offsetNulls.NullAt(i) {
@@ -740,7 +744,7 @@ func (w *lagInt32Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	if defaultNulls.MaybeHasNulls() {
 		for i := startIdx; i < endIdx; i++ {
@@ -765,7 +769,7 @@ func (w *lagInt32Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	for i := startIdx; i < endIdx; i++ {
 		requestedIdx := w.idx - int(offsetCol[i])
@@ -785,6 +789,7 @@ func (w *lagInt32Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 		val := col.Get(idx)
 		leadLagCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type lagInt64Window struct {
@@ -793,10 +798,10 @@ type lagInt64Window struct {
 
 var _ bufferedWindower = &lagInt64Window{}
 
-func (w *lagInt64Window) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *lagInt64Window) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	leadLagVec := batch.ColVec(w.outputColIdx)
 	leadLagCol := leadLagVec.Int64()
@@ -846,7 +851,7 @@ func (w *lagInt64Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 				val := col.Get(idx)
 				leadLagCol.Set(i, val)
 			}
-			return
+			return nextStartIdx
 		}
 		for i := startIdx; i < endIdx; i++ {
 			if offsetNulls.NullAt(i) {
@@ -872,7 +877,7 @@ func (w *lagInt64Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	if defaultNulls.MaybeHasNulls() {
 		for i := startIdx; i < endIdx; i++ {
@@ -897,7 +902,7 @@ func (w *lagInt64Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	for i := startIdx; i < endIdx; i++ {
 		requestedIdx := w.idx - int(offsetCol[i])
@@ -917,6 +922,7 @@ func (w *lagInt64Window) processBatch(batch coldata.Batch, startIdx, endIdx int)
 		val := col.Get(idx)
 		leadLagCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type lagFloat64Window struct {
@@ -925,10 +931,10 @@ type lagFloat64Window struct {
 
 var _ bufferedWindower = &lagFloat64Window{}
 
-func (w *lagFloat64Window) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *lagFloat64Window) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	leadLagVec := batch.ColVec(w.outputColIdx)
 	leadLagCol := leadLagVec.Float64()
@@ -978,7 +984,7 @@ func (w *lagFloat64Window) processBatch(batch coldata.Batch, startIdx, endIdx in
 				val := col.Get(idx)
 				leadLagCol.Set(i, val)
 			}
-			return
+			return nextStartIdx
 		}
 		for i := startIdx; i < endIdx; i++ {
 			if offsetNulls.NullAt(i) {
@@ -1004,7 +1010,7 @@ func (w *lagFloat64Window) processBatch(batch coldata.Batch, startIdx, endIdx in
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	if defaultNulls.MaybeHasNulls() {
 		for i := startIdx; i < endIdx; i++ {
@@ -1029,7 +1035,7 @@ func (w *lagFloat64Window) processBatch(batch coldata.Batch, startIdx, endIdx in
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	for i := startIdx; i < endIdx; i++ {
 		requestedIdx := w.idx - int(offsetCol[i])
@@ -1049,6 +1055,7 @@ func (w *lagFloat64Window) processBatch(batch coldata.Batch, startIdx, endIdx in
 		val := col.Get(idx)
 		leadLagCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type lagTimestampWindow struct {
@@ -1057,10 +1064,10 @@ type lagTimestampWindow struct {
 
 var _ bufferedWindower = &lagTimestampWindow{}
 
-func (w *lagTimestampWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *lagTimestampWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	leadLagVec := batch.ColVec(w.outputColIdx)
 	leadLagCol := leadLagVec.Timestamp()
@@ -1110,7 +1117,7 @@ func (w *lagTimestampWindow) processBatch(batch coldata.Batch, startIdx, endIdx 
 				val := col.Get(idx)
 				leadLagCol.Set(i, val)
 			}
-			return
+			return nextStartIdx
 		}
 		for i := startIdx; i < endIdx; i++ {
 			if offsetNulls.NullAt(i) {
@@ -1136,7 +1143,7 @@ func (w *lagTimestampWindow) processBatch(batch coldata.Batch, startIdx, endIdx 
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	if defaultNulls.MaybeHasNulls() {
 		for i := startIdx; i < endIdx; i++ {
@@ -1161,7 +1168,7 @@ func (w *lagTimestampWindow) processBatch(batch coldata.Batch, startIdx, endIdx 
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	for i := startIdx; i < endIdx; i++ {
 		requestedIdx := w.idx - int(offsetCol[i])
@@ -1181,6 +1188,7 @@ func (w *lagTimestampWindow) processBatch(batch coldata.Batch, startIdx, endIdx 
 		val := col.Get(idx)
 		leadLagCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type lagIntervalWindow struct {
@@ -1189,10 +1197,10 @@ type lagIntervalWindow struct {
 
 var _ bufferedWindower = &lagIntervalWindow{}
 
-func (w *lagIntervalWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *lagIntervalWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	leadLagVec := batch.ColVec(w.outputColIdx)
 	leadLagCol := leadLagVec.Interval()
@@ -1242,7 +1250,7 @@ func (w *lagIntervalWindow) processBatch(batch coldata.Batch, startIdx, endIdx i
 				val := col.Get(idx)
 				leadLagCol.Set(i, val)
 			}
-			return
+			return nextStartIdx
 		}
 		for i := startIdx; i < endIdx; i++ {
 			if offsetNulls.NullAt(i) {
@@ -1268,7 +1276,7 @@ func (w *lagIntervalWindow) processBatch(batch coldata.Batch, startIdx, endIdx i
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	if defaultNulls.MaybeHasNulls() {
 		for i := startIdx; i < endIdx; i++ {
@@ -1293,7 +1301,7 @@ func (w *lagIntervalWindow) processBatch(batch coldata.Batch, startIdx, endIdx i
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	for i := startIdx; i < endIdx; i++ {
 		requestedIdx := w.idx - int(offsetCol[i])
@@ -1313,6 +1321,7 @@ func (w *lagIntervalWindow) processBatch(batch coldata.Batch, startIdx, endIdx i
 		val := col.Get(idx)
 		leadLagCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type lagJSONWindow struct {
@@ -1321,10 +1330,10 @@ type lagJSONWindow struct {
 
 var _ bufferedWindower = &lagJSONWindow{}
 
-func (w *lagJSONWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *lagJSONWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	leadLagVec := batch.ColVec(w.outputColIdx)
 	leadLagCol := leadLagVec.JSON()
@@ -1368,7 +1377,7 @@ func (w *lagJSONWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) 
 				col := vec.JSON()
 				leadLagCol.Copy(col, i, idx)
 			}
-			return
+			return nextStartIdx
 		}
 		for i := startIdx; i < endIdx; i++ {
 			if offsetNulls.NullAt(i) {
@@ -1392,7 +1401,7 @@ func (w *lagJSONWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) 
 			col := vec.JSON()
 			leadLagCol.Copy(col, i, idx)
 		}
-		return
+		return nextStartIdx
 	}
 	if defaultNulls.MaybeHasNulls() {
 		for i := startIdx; i < endIdx; i++ {
@@ -1415,7 +1424,7 @@ func (w *lagJSONWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) 
 			col := vec.JSON()
 			leadLagCol.Copy(col, i, idx)
 		}
-		return
+		return nextStartIdx
 	}
 	for i := startIdx; i < endIdx; i++ {
 		requestedIdx := w.idx - int(offsetCol[i])
@@ -1433,6 +1442,7 @@ func (w *lagJSONWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) 
 		col := vec.JSON()
 		leadLagCol.Copy(col, i, idx)
 	}
+	return nextStartIdx
 }
 
 type lagDatumWindow struct {
@@ -1441,10 +1451,10 @@ type lagDatumWindow struct {
 
 var _ bufferedWindower = &lagDatumWindow{}
 
-func (w *lagDatumWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *lagDatumWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	leadLagVec := batch.ColVec(w.outputColIdx)
 	leadLagCol := leadLagVec.Datum()
@@ -1490,7 +1500,7 @@ func (w *lagDatumWindow) processBatch(batch coldata.Batch, startIdx, endIdx int)
 				val := col.Get(idx)
 				leadLagCol.Set(i, val)
 			}
-			return
+			return nextStartIdx
 		}
 		for i := startIdx; i < endIdx; i++ {
 			if offsetNulls.NullAt(i) {
@@ -1516,7 +1526,7 @@ func (w *lagDatumWindow) processBatch(batch coldata.Batch, startIdx, endIdx int)
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	if defaultNulls.MaybeHasNulls() {
 		for i := startIdx; i < endIdx; i++ {
@@ -1541,7 +1551,7 @@ func (w *lagDatumWindow) processBatch(batch coldata.Batch, startIdx, endIdx int)
 			val := col.Get(idx)
 			leadLagCol.Set(i, val)
 		}
-		return
+		return nextStartIdx
 	}
 	for i := startIdx; i < endIdx; i++ {
 		requestedIdx := w.idx - int(offsetCol[i])
@@ -1561,6 +1571,7 @@ func (w *lagDatumWindow) processBatch(batch coldata.Batch, startIdx, endIdx int)
 		val := col.Get(idx)
 		leadLagCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 func (b *lagBase) transitionToProcessing() {}

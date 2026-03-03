@@ -141,10 +141,10 @@ type firstValueBoolWindow struct {
 var _ bufferedWindower = &firstValueBoolWindow{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *firstValueBoolWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *firstValueBoolWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	outputVec := batch.ColVec(w.outputColIdx)
 	outputCol := outputVec.Bool()
@@ -170,6 +170,7 @@ func (w *firstValueBoolWindow) processBatch(batch coldata.Batch, startIdx, endId
 		//gcassert:bce
 		outputCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type firstValueBytesWindow struct {
@@ -179,10 +180,10 @@ type firstValueBytesWindow struct {
 var _ bufferedWindower = &firstValueBytesWindow{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *firstValueBytesWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *firstValueBytesWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	outputVec := batch.ColVec(w.outputColIdx)
 	outputCol := outputVec.Bytes()
@@ -205,6 +206,7 @@ func (w *firstValueBytesWindow) processBatch(batch coldata.Batch, startIdx, endI
 		col := vec.Bytes()
 		outputCol.Copy(col, i, idx)
 	}
+	return nextStartIdx
 }
 
 type firstValueDecimalWindow struct {
@@ -214,10 +216,10 @@ type firstValueDecimalWindow struct {
 var _ bufferedWindower = &firstValueDecimalWindow{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *firstValueDecimalWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *firstValueDecimalWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	outputVec := batch.ColVec(w.outputColIdx)
 	outputCol := outputVec.Decimal()
@@ -243,6 +245,7 @@ func (w *firstValueDecimalWindow) processBatch(batch coldata.Batch, startIdx, en
 		//gcassert:bce
 		outputCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type firstValueInt16Window struct {
@@ -252,10 +255,10 @@ type firstValueInt16Window struct {
 var _ bufferedWindower = &firstValueInt16Window{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *firstValueInt16Window) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *firstValueInt16Window) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	outputVec := batch.ColVec(w.outputColIdx)
 	outputCol := outputVec.Int16()
@@ -281,6 +284,7 @@ func (w *firstValueInt16Window) processBatch(batch coldata.Batch, startIdx, endI
 		//gcassert:bce
 		outputCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type firstValueInt32Window struct {
@@ -290,10 +294,10 @@ type firstValueInt32Window struct {
 var _ bufferedWindower = &firstValueInt32Window{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *firstValueInt32Window) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *firstValueInt32Window) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	outputVec := batch.ColVec(w.outputColIdx)
 	outputCol := outputVec.Int32()
@@ -319,6 +323,7 @@ func (w *firstValueInt32Window) processBatch(batch coldata.Batch, startIdx, endI
 		//gcassert:bce
 		outputCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type firstValueInt64Window struct {
@@ -328,10 +333,10 @@ type firstValueInt64Window struct {
 var _ bufferedWindower = &firstValueInt64Window{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *firstValueInt64Window) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *firstValueInt64Window) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	outputVec := batch.ColVec(w.outputColIdx)
 	outputCol := outputVec.Int64()
@@ -357,6 +362,7 @@ func (w *firstValueInt64Window) processBatch(batch coldata.Batch, startIdx, endI
 		//gcassert:bce
 		outputCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type firstValueFloat64Window struct {
@@ -366,10 +372,10 @@ type firstValueFloat64Window struct {
 var _ bufferedWindower = &firstValueFloat64Window{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *firstValueFloat64Window) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *firstValueFloat64Window) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	outputVec := batch.ColVec(w.outputColIdx)
 	outputCol := outputVec.Float64()
@@ -395,6 +401,7 @@ func (w *firstValueFloat64Window) processBatch(batch coldata.Batch, startIdx, en
 		//gcassert:bce
 		outputCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type firstValueTimestampWindow struct {
@@ -404,10 +411,10 @@ type firstValueTimestampWindow struct {
 var _ bufferedWindower = &firstValueTimestampWindow{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *firstValueTimestampWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *firstValueTimestampWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	outputVec := batch.ColVec(w.outputColIdx)
 	outputCol := outputVec.Timestamp()
@@ -433,6 +440,7 @@ func (w *firstValueTimestampWindow) processBatch(batch coldata.Batch, startIdx, 
 		//gcassert:bce
 		outputCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type firstValueIntervalWindow struct {
@@ -442,10 +450,10 @@ type firstValueIntervalWindow struct {
 var _ bufferedWindower = &firstValueIntervalWindow{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *firstValueIntervalWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *firstValueIntervalWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	outputVec := batch.ColVec(w.outputColIdx)
 	outputCol := outputVec.Interval()
@@ -471,6 +479,7 @@ func (w *firstValueIntervalWindow) processBatch(batch coldata.Batch, startIdx, e
 		//gcassert:bce
 		outputCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 type firstValueJSONWindow struct {
@@ -480,10 +489,10 @@ type firstValueJSONWindow struct {
 var _ bufferedWindower = &firstValueJSONWindow{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *firstValueJSONWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *firstValueJSONWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	outputVec := batch.ColVec(w.outputColIdx)
 	outputCol := outputVec.JSON()
@@ -506,6 +515,7 @@ func (w *firstValueJSONWindow) processBatch(batch coldata.Batch, startIdx, endId
 		col := vec.JSON()
 		outputCol.Copy(col, i, idx)
 	}
+	return nextStartIdx
 }
 
 type firstValueDatumWindow struct {
@@ -515,10 +525,10 @@ type firstValueDatumWindow struct {
 var _ bufferedWindower = &firstValueDatumWindow{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *firstValueDatumWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *firstValueDatumWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
-		return
+		return nextStartIdx
 	}
 	outputVec := batch.ColVec(w.outputColIdx)
 	outputCol := outputVec.Datum()
@@ -542,6 +552,7 @@ func (w *firstValueDatumWindow) processBatch(batch coldata.Batch, startIdx, endI
 		val := col.Get(idx)
 		outputCol.Set(i, val)
 	}
+	return nextStartIdx
 }
 
 // transitionToProcessing implements the bufferedWindower interface.

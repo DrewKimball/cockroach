@@ -196,7 +196,7 @@ func (w *nTileWithPartition) seekNextPartition(
 	return nextPartitionIdx
 }
 
-func (b *nTileBase) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (b *nTileBase) processBatch(batch coldata.Batch, startIdx, endIdx int) int {
 	// The ntile output value is null for any leading rows for which the input is
 	// null. We have kept track of the number of leading input nulls - use it to
 	// set the leading output nulls (if any) for this batch.
@@ -213,7 +213,7 @@ func (b *nTileBase) processBatch(batch coldata.Batch, startIdx, endIdx int) {
 		// No further processing needs to be done for this portion of the current
 		// partition. This can happen when the num_buckets value for a partition was
 		// null up to the end of a batch.
-		return
+		return nextStartIdx
 	}
 	if b.numBuckets <= 0 {
 		colexecerror.InternalError(
@@ -238,6 +238,7 @@ func (b *nTileBase) processBatch(batch coldata.Batch, startIdx, endIdx int) {
 		//gcassert:bce
 		nTileCol[i] = b.nTile
 	}
+	return nextStartIdx
 }
 
 func (b *nTileBase) transitionToProcessing() {

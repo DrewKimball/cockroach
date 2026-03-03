@@ -115,7 +115,9 @@ type _OP_NAME_TYPEWindow struct {
 var _ bufferedWindower = &_OP_NAME_TYPEWindow{}
 
 // processBatch implements the bufferedWindower interface.
-func (w *_OP_NAME_TYPEWindow) processBatch(batch coldata.Batch, startIdx, endIdx int) {
+func (w *_OP_NAME_TYPEWindow) processBatch(
+	batch coldata.Batch, startIdx, endIdx int,
+) (nextStartIdx int) {
 	if startIdx >= endIdx {
 		// No processing needs to be done for this portion of the current partition.
 		return
