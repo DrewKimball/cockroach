@@ -17,7 +17,6 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/kv"
 	"github.com/cockroachdb/cockroach/pkg/kv/kvpb"
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/concurrency/isolation"
-	"github.com/cockroachdb/cockroach/pkg/multitenant/multitenantcpu"
 	"github.com/cockroachdb/cockroach/pkg/obs/workloadid"
 	"github.com/cockroachdb/cockroach/pkg/roachpb"
 	"github.com/cockroachdb/cockroach/pkg/server/telemetry"
@@ -29,7 +28,6 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/clusterunique"
 	"github.com/cockroachdb/cockroach/pkg/sql/contention"
 	"github.com/cockroachdb/cockroach/pkg/sql/contentionpb"
-	"github.com/cockroachdb/cockroach/pkg/sql/execinfra"
 	"github.com/cockroachdb/cockroach/pkg/sql/execstats"
 	"github.com/cockroachdb/cockroach/pkg/sql/flowinfra"
 	"github.com/cockroachdb/cockroach/pkg/sql/hints"
@@ -2873,13 +2871,6 @@ func (ex *connExecutor) dispatchToExecutionEngine(
 	// https://github.com/cockroachdb/cockroach/issues/99410
 	ex.statsCollector.PhaseTimes().SetSessionPhaseTime(sessionphase.PlannerStartLogicalPlan, crtime.NowMono())
 
-	if execinfra.IncludeRUEstimateInExplainAnalyze.Get(ex.server.cfg.SV()) {
-		if server := ex.server.cfg.DistSQLSrv; server != nil {
-			// Begin measuring CPU usage for tenants. This is a no-op for non-tenants.
-			ex.cpuStatsCollector.StartCollection(ctx, server.TenantCostController)
-		}
-	}
-
 	// If we've been tasked with backfilling a schema change operation at a
 	// particular system time, it's important that we do planning for the
 	// operation at the timestamp that we're expecting to perform the backfill at,
@@ -3119,7 +3110,7 @@ func (ex *connExecutor) dispatchToExecutionEngine(
 		// Note that here we append the cleanup function without a defer since
 		// there is no more code relevant to pausable portals model below.
 		ppInfo.dispatchToExecutionEngine.cleanup.appendFunc(func(ctx context.Context) {
-			populateQueryLevelStats(ctx, &curPlanner, ex.server.cfg, ppInfo.dispatchToExecutionEngine.queryStats, &ex.cpuStatsCollector)
+			populateQueryLevelStats(ctx, &curPlanner, ex.server.cfg, ppInfo.dispatchToExecutionEngine.queryStats)
 			ppInfo.dispatchToExecutionEngine.stmtFingerprintID = ex.recordStatementSummary(
 				ctx, &curPlanner, int(ex.state.mu.autoRetryCounter), planner.autoRetryStmtCounter,
 				ppInfo.dispatchToExecutionEngine.rowsAffected, ppInfo.curRes.ErrAllowReleased(),
@@ -3127,7 +3118,7 @@ func (ex *connExecutor) dispatchToExecutionEngine(
 			)
 		})
 	} else {
-		populateQueryLevelStats(ctx, planner, ex.server.cfg, &stats, &ex.cpuStatsCollector)
+		populateQueryLevelStats(ctx, planner, ex.server.cfg, &stats)
 		ex.recordStatementSummary(
 			ctx, planner, int(ex.state.mu.autoRetryCounter), planner.autoRetryStmtCounter,
 			res.RowsAffected(), res.Err(), stats,
@@ -3151,11 +3142,7 @@ func (ex *connExecutor) dispatchToExecutionEngine(
 //   - queryLevelStatsWithErr contains query-level execution statistics are
 //     collected using the statement's trace and the plan's flow metadata.
 func populateQueryLevelStats(
-	ctx context.Context,
-	p *planner,
-	cfg *ExecutorConfig,
-	topLevelStats *topLevelQueryStats,
-	cpuStats *multitenantcpu.CPUUsageHelper,
+	ctx context.Context, p *planner, cfg *ExecutorConfig, topLevelStats *topLevelQueryStats,
 ) {
 	ih := &p.instrumentation
 	ih.topLevelStats = *topLevelStats
@@ -3182,17 +3169,7 @@ func populateQueryLevelStats(
 		}
 		log.Dev.VInfof(ctx, 1, msg, ih.fingerprint, err)
 	} else {
-		// If this query is being run by a tenant, record the RUs consumed by CPU
-		// usage and network egress to the client.
-		if execinfra.IncludeRUEstimateInExplainAnalyze.Get(cfg.SV()) && cfg.DistSQLSrv != nil {
-			if costController := cfg.DistSQLSrv.TenantCostController; costController != nil {
-				if costCfg := costController.GetRequestUnitModel(); costCfg != nil {
-					networkEgressRUEstimate := costCfg.PGWireEgressCost(topLevelStats.networkEgressEstimate)
-					ih.queryLevelStatsWithErr.Stats.RUEstimate += float64(networkEgressRUEstimate)
-					ih.queryLevelStatsWithErr.Stats.RUEstimate += cpuStats.EndCollection(ctx)
-				}
-			}
-		}
+		ih.networkEgressBytes = topLevelStats.networkEgressEstimate
 		ih.queryLevelStatsWithErr.Stats.ClientTime = topLevelStats.clientTime
 		if cfg.TestingKnobs.DeterministicExplain {
 			// We only show AdmissionWaitTime when it's non-zero, yet its value

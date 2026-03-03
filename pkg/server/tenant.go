@@ -35,7 +35,6 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/protectedts/ptreconcile"
 	"github.com/cockroachdb/cockroach/pkg/multitenant"
 	"github.com/cockroachdb/cockroach/pkg/multitenant/mtinfopb"
-	"github.com/cockroachdb/cockroach/pkg/multitenant/multitenantcpu"
 	"github.com/cockroachdb/cockroach/pkg/multitenant/tenantcapabilities"
 	"github.com/cockroachdb/cockroach/pkg/multitenant/tenantcapabilities/tenantcapabilitiesauthorizer"
 	"github.com/cockroachdb/cockroach/pkg/multitenant/tenantcostmodel"
@@ -953,7 +952,7 @@ func (s *SQLServerWrapper) PreStart(ctx context.Context) error {
 	// resource usage accounting in costController.Start below.
 	externalUsageFn := func(ctx context.Context) multitenant.ExternalUsage {
 		return multitenant.ExternalUsage{
-			CPUSecs:           multitenantcpu.GetCPUSeconds(ctx),
+			CPUSecs:           getCPUSeconds(ctx),
 			PGWireEgressBytes: s.sqlServer.pgServer.BytesOut(),
 		}
 	}
@@ -969,6 +968,17 @@ func (s *SQLServerWrapper) PreStart(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// getCPUSeconds returns the total CPU usage of the current process in seconds.
+// It is used for measuring tenant RU consumption.
+func getCPUSeconds(ctx context.Context) (cpuSecs float64) {
+	userTimeMillis, sysTimeMillis, err := status.GetProcCPUTime(ctx)
+	if err != nil {
+		log.Ops.Errorf(ctx, "unable to get cpu usage: %v", err)
+		return 0
+	}
+	return float64(userTimeMillis+sysTimeMillis) * 1e-3
 }
 
 func (s *SQLServerWrapper) serveConn(

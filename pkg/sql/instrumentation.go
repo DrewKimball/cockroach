@@ -14,6 +14,7 @@ import (
 
 	"github.com/cockroachdb/cockroach/pkg/keys"
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/concurrency/isolation"
+	"github.com/cockroachdb/cockroach/pkg/multitenant/tenantcostmodel"
 	"github.com/cockroachdb/cockroach/pkg/roachpb"
 	"github.com/cockroachdb/cockroach/pkg/server/telemetry"
 	"github.com/cockroachdb/cockroach/pkg/settings"
@@ -99,8 +100,9 @@ type instrumentationHelper struct {
 	// statement.
 	collectExecStats bool
 
-	// isTenant is set when the query is being executed on behalf of a tenant.
-	isTenant bool
+	// displayRUEstimate is set when the query's estimated RU usage should be
+	// displayed for EXPLAIN ANALYZE.
+	displayRUEstimate bool
 
 	// discardRows is set if we want to discard any results rather than sending
 	// them back to the client. Used for testing/benchmarking. Note that the
@@ -234,6 +236,12 @@ type instrumentationHelper struct {
 	// schemachangerMode indicates which schema changer mode was used to execute
 	// the query.
 	schemaChangerMode schemaChangerMode
+
+	costCfg *tenantcostmodel.RequestUnitModel
+
+	// networkEgressBytes is the number of bytes sent to the client, as estimated
+	// by EXPLAIN ANALYZE.
+	networkEgressBytes int64
 }
 
 // outputMode indicates how the statement output needs to be populated (for
@@ -443,8 +451,6 @@ func (ih *instrumentationHelper) Setup(
 	ih.codec = cfg.Codec
 	ih.origCtx = ctx
 	ih.evalCtx = p.EvalContext()
-	ih.isTenant = execinfra.IncludeRUEstimateInExplainAnalyze.Get(cfg.SV()) && cfg.DistSQLSrv != nil &&
-		cfg.DistSQLSrv.TenantCostController != nil
 	ih.topLevelStats = topLevelQueryStats{}
 	stmtFingerprintId := appstatspb.ConstructStatementFingerprintID(
 		stmt.StmtNoConstants, implicitTxn, p.SessionData().Database)
@@ -452,6 +458,10 @@ func (ih *instrumentationHelper) Setup(
 	ih.stmtDiagnosticsRecorder = stmtDiagnosticsRecorder
 	ih.withStatementTrace = cfg.TestingKnobs.WithStatementTrace
 	defer func() { ih.finalizeSetup(newCtx, cfg) }()
+	if cfg.DistSQLSrv != nil && cfg.DistSQLSrv.TenantCostController != nil {
+		ih.displayRUEstimate = execinfra.IncludeRUEstimateInExplainAnalyze.Get(cfg.SV())
+		ih.costCfg = cfg.DistSQLSrv.TenantCostController.GetRequestUnitModel()
+	}
 
 	switch ih.outputMode {
 	case explainAnalyzeDebugOutput:
@@ -918,12 +928,15 @@ func (ih *instrumentationHelper) emitExplainAnalyzePlanToOutputBuilder(
 			// TODO(drewk): lift these restrictions.
 			ob.AddSQLCPUTime(queryStats.SQLCPUTime)
 		}
-		if ih.isTenant && ih.vectorized {
+		if ih.displayRUEstimate && ih.vectorized && ih.costCfg != nil {
 			// Only output RU estimate if this is a tenant. Additionally, RUs aren't
 			// correctly propagated in all cases for plans that aren't vectorized -
 			// for example, EXPORT statements. For now, only output RU estimates for
 			// vectorized plans.
-			ob.AddRUEstimate(queryStats.RUEstimate)
+			diskRUEstimate := queryStats.RUEstimate
+			networkRUEstimate := ih.costCfg.PGWireEgressCost(ih.networkEgressBytes)
+			cpuRUEstimate := ih.costCfg.PodCPUCost(ih.queryLevelStatsWithErr.Stats.SQLCPUTime.Seconds())
+			ob.AddRUEstimate(diskRUEstimate + float64(networkRUEstimate) + float64(cpuRUEstimate))
 		}
 		if queryStats.ClientTime != 0 {
 			ob.AddClientTime(queryStats.ClientTime)

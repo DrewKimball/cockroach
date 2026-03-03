@@ -1841,7 +1841,6 @@ GO_TARGETS = [
     "//pkg/kv:kv_test",
     "//pkg/multitenant/mtinfo:mtinfo",
     "//pkg/multitenant/mtinfopb:mtinfopb",
-    "//pkg/multitenant/multitenantcpu:multitenantcpu",
     "//pkg/multitenant/multitenantio:multitenantio",
     "//pkg/multitenant/tenantcapabilities/tenantcapabilitiesauthorizer:tenantcapabilitiesauthorizer",
     "//pkg/multitenant/tenantcapabilities/tenantcapabilitiesauthorizer:tenantcapabilitiesauthorizer_test",
