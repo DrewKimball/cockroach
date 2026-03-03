@@ -726,35 +726,7 @@ type UDFDefinition struct {
 
 	// RoutineLang indicates the language of the routine (SQL or PL/pgSQL).
 	RoutineLang tree.RoutineLanguage
-
-	// Params is the list of columns representing parameters of the function. The
-	// i-th column in the list corresponds to the i-th parameter of the function.
-	// During execution of the UDF, these columns are replaced with the arguments
-	// of the function invocation.
-	Params opt.ColList
-
-	// Body contains a relational expression for each statement in the function
-	// body. It is unset during construction of a recursive UDF.
-	Body []RelExpr
-
-	// BodyProps contains the physical properties with which each body statement
-	// should be optimized if it is rebuilt. Each props corresponds to the RelExpr
-	// at the same position in Body.
-	BodyProps []*physical.Required
-
-	// BodyASTs contains the AST representation of each statement in Body. The
-	// size of this slice matches that of Body, but it may contain nil entries
-	// for non tree.RoutineLangSQL types.
-	BodyASTs []tree.Statement
-
-	// BodyStmts, if set, is the string representation of each statement in
-	// Body. It is only populated when verbose tracing is enabled.
-	BodyStmts []string
-
-	// BodyTags contains the type of each statement in Body, which is populated
-	// via `tree.Statement.StatementTag()`.
-	BodyTags []string
-
+  
 	// FirstStmtOutput allows the result of the first body statement to be
 	// redirected. Only one of the options can be set. If one is set, there will
 	// be at least two body statements - the first with redirected output, and the
@@ -777,7 +749,81 @@ type UDFDefinition struct {
 	// results to the same buffer. This is used to implement the PL/pgsql
 	// RETURN NEXT and RETURN QUERY statements.
 	ResultBufferID RoutineResultBufferID
+
+	// Body stores the information needed to get the plan for each body statement
+	// of the routine. It is either a DefaultRoutineBody or a LazyRoutineBody.
+	// See the respective comments for more information.
+	Body RoutineBody
+
+	// BodyASTs contains the AST representation of each statement in Body. The
+	// size of this slice matches that of Body, but it may contain nil entries
+	// for non tree.RoutineLangSQL types.
+	BodyASTs []tree.Statement
+
+	// BodyTags contains the type of each statement in Body, which is populated
+	// via `tree.Statement.StatementTag()`.
+	BodyTags []string
 }
+
+type RoutineBody interface {
+	RoutineBodyStmtCount() int
+}
+
+// DefaultRoutineBody stores the pre-built optimizer plan for each routine body
+// statement.
+type DefaultRoutineBody struct {
+	// Params is the list of columns representing parameters of the function. The
+	// i-th column in the list corresponds to the i-th parameter of the function.
+	// During execution of the UDF, these columns are replaced with the arguments
+	// of the function invocation.
+	Params opt.ColList
+
+	// Body contains a relational expression for each statement in the function
+	// body. It is unset during construction of a recursive UDF.
+	Body []RelExpr
+
+	// BodyProps contains the physical properties with which each body statement
+	// should be optimized if it is rebuilt. Each props corresponds to the RelExpr
+	// at the same position in Body.
+	BodyProps []*physical.Required
+}
+
+// RoutineBodyStmtCount implements the RoutineBody interface.
+func (b *DefaultRoutineBody) RoutineBodyStmtCount() int {
+	return len(b.Body)
+}
+
+// LazyRoutineBody is used to delay planning for the body statements of a
+// routine until it is invoked during execution. Currently, this is only needed
+// for routines with RECORD parameters/variables.
+type LazyRoutineBody struct {
+	// BodyStmtCount is the number of body statements in the routine. This is used
+	// to determine the number of body statements that need to be planned when the
+	// routine is invoked.
+	BodyStmtCount int
+
+	// Build produces the plan for each routine body statement.
+	Build LazyRoutineBuildFn
+}
+
+// RoutineBodyStmtCount implements the RoutineBody interface.
+func (b *LazyRoutineBody) RoutineBodyStmtCount() int {
+	return b.BodyStmtCount
+}
+
+// LazyRoutineBuildFn is used to lazily build the plan a single routine body
+// statement. It builds the unoptimized plan with arguments inlined into the
+// provided factory.
+type LazyRoutineBuildFn func(
+	ctx context.Context,
+	semaCtx *tree.SemaContext,
+	evalCtx *eval.Context,
+	catalog cat.Catalog,
+	factory interface{},
+	args tree.Datums,
+	argTypes []*types.T,
+	stmtIdx int,
+) error
 
 // ExceptionBlock contains the information needed to match and handle errors in
 // the EXCEPTION block of a routine defined with PLpgSQL.

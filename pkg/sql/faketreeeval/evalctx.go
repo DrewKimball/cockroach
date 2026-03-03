@@ -451,21 +451,21 @@ func (ep *DummyEvalPlanner) EvalSubquery(expr *tree.Subquery) (tree.Datum, error
 
 // EvalRoutineExpr is part of the eval.Planner interface.
 func (ep *DummyEvalPlanner) EvalRoutineExpr(
-	ctx context.Context, expr *tree.RoutineExpr, args tree.Datums,
+	ctx context.Context, expr *tree.RoutineExpr, args tree.Datums, argTypes []*types.T,
 ) (tree.Datum, error) {
 	return nil, errors.WithStack(errEvalPlanner)
 }
 
 // RoutineExprGenerator is part of the eval.Planner interface.
 func (ep *DummyEvalPlanner) RoutineExprGenerator(
-	ctx context.Context, expr *tree.RoutineExpr, args tree.Datums,
+	ctx context.Context, expr *tree.RoutineExpr, args tree.Datums, argTypes []*types.T,
 ) eval.ValueGenerator {
 	return nil
 }
 
 // EvalTxnControlExpr is part of the eval.Planner interface.
 func (ep *DummyEvalPlanner) EvalTxnControlExpr(
-	ctx context.Context, expr *tree.TxnControlExpr, args tree.Datums,
+	ctx context.Context, expr *tree.TxnControlExpr, args tree.Datums, argTypes []*types.T,
 ) (tree.Datum, error) {
 	return nil, errors.WithStack(errEvalPlanner)
 }

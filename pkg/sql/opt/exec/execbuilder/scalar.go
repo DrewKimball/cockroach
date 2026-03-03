@@ -866,6 +866,7 @@ func (b *Builder) buildSubquery(
 			ref tree.RoutineExecFactory,
 			_ tree.RoutineResultWriter,
 			args tree.Datums,
+			argTypes []*types.T,
 			fn tree.RoutinePlanGeneratedFunc,
 		) error {
 			// Analyze the input of the subquery to find tail calls, which will allow
@@ -1143,9 +1144,7 @@ type wrapRootExprFn func(f *norm.Factory, e memo.RelExpr) memo.RelExpr
 // This is for PL/pgSQL set-returning routines, which must allow sub-routines to
 // add to the result set at any point during execution.
 func (b *Builder) buildRoutinePlanGenerator(
-	params opt.ColList,
-	stmts []memo.RelExpr,
-	stmtProps []*physical.Required,
+	body memo.RoutineBody,
 	stmtStr []string,
 	stmtTags []string,
 	stmtASTs []tree.Statement,
@@ -1153,19 +1152,6 @@ func (b *Builder) buildRoutinePlanGenerator(
 	wrapRootExpr wrapRootExprFn,
 	resultBufferID memo.RoutineResultBufferID,
 ) tree.RoutinePlanGenerator {
-	// argOrd returns the ordinal of the argument within the arguments list that
-	// can be substituted for each reference to the given function parameter
-	// column. If the given column does not represent a function parameter,
-	// ok=false is returned.
-	argOrd := func(col opt.ColumnID) (ord int, ok bool) {
-		for i, param := range params {
-			if col == param {
-				return i, true
-			}
-		}
-		return 0, false
-	}
-
 	// We will pre-populate the withExprs of the new execbuilder.
 	var withExprs []builtWithExpr
 	if allowOuterWithRefs {
@@ -1190,6 +1176,7 @@ func (b *Builder) buildRoutinePlanGenerator(
 		ref tree.RoutineExecFactory,
 		resultWriter tree.RoutineResultWriter,
 		args tree.Datums,
+		argTypes []*types.T,
 		fn tree.RoutinePlanGeneratedFunc,
 	) (retErr error) {
 		// This is the same panic-catching logic that exists in o.Optimize()
@@ -1203,14 +1190,12 @@ func (b *Builder) buildRoutinePlanGenerator(
 		appName := b.evalCtx.SessionData().ApplicationName
 		// TODO(yuzefovich): look into computing fingerprintFormat lazily.
 		fingerprintFormat := tree.FmtHideConstants | tree.FmtFlags(tree.QueryFormattingForFingerprintsMask.Get(&b.evalCtx.Settings.SV))
-		for i := range stmts {
+		for i := range body.RoutineBodyStmtCount() {
 			latencyRecorder.Reset()
 			var builder *sqlstats.RecordedStatementStatsBuilder
 			var statsBuilderWithLatencies tree.RoutineStatsBuilder
 			sqlstats.RecordStatementPhase(latencyRecorder, sqlstats.StatementStarted)
 			sqlstats.RecordStatementPhase(latencyRecorder, sqlstats.StatementStartParsing)
-			stmt := stmts[i]
-			props := stmtProps[i]
 			var tag string
 			// Theoretically, stmts and stmtTags should have the same length,
 			// but just to avoid an out-of-bounds panic, we have this check.
@@ -1235,53 +1220,76 @@ func (b *Builder) buildRoutinePlanGenerator(
 			sqlstats.RecordStatementPhase(latencyRecorder, sqlstats.StatementStartPlanning)
 			o.Init(ctx, b.evalCtx, b.catalog)
 			f := o.Factory()
-
-			// Copy the expression into a new memo. Replace parameter references
-			// with argument datums.
-			var replaceFn norm.ReplaceFunc
-			replaceFn = func(e opt.Expr) opt.Expr {
-				switch t := e.(type) {
-				case *memo.VariableExpr:
-					if ord, ok := argOrd(t.Col); ok {
-						return f.ConstructConstVal(args[ord], t.Typ)
+			switch t := body.(type) {
+			case *memo.LazyRoutineBody:
+				if err := t.Build(ctx, b.semaCtx, b.evalCtx, b.catalog, f, args, argTypes, i); err != nil {
+					return err
+				}
+			case *memo.DefaultRoutineBody:
+				stmt := t.Body[i]
+				stmtProps := t.BodyProps[i]
+				// argOrd returns the ordinal of the argument within the arguments list that
+				// can be substituted for each reference to the given function parameter
+				// column. If the given column does not represent a function parameter,
+				// ok=false is returned.
+				argOrd := func(col opt.ColumnID) (ord int, ok bool) {
+					for paramOrd, param := range t.Params {
+						if col == param {
+							return paramOrd, true
+						}
 					}
-
-				case *memo.WithScanExpr:
-					// Allow referring to "outer" With expressions, if
-					// allowOuterWithRefs is true. The bound expressions are not
-					// part of this Memo, but they are used only for their
-					// relational properties, which should be valid.
-					//
-					// We must add all With expressions to the metadata even if they
-					// aren't referred to directly because they might be referred to
-					// transitively through other With expressions. For example, if
-					// stmt refers to With expression &1, and &1 refers to With
-					// expression &2, we must include &2 in the metadata so that its
-					// relational properties are available. See #87733.
-					//
-					// We lazily add these With expressions to the metadata here
-					// because the call to Factory.CopyAndReplace below clears With
-					// expressions in the metadata.
-					if allowOuterWithRefs {
-						b.mem.Metadata().ForEachWithBinding(func(id opt.WithID, expr opt.Expr) {
-							// Make sure to check for an existing With binding, since we may
-							// have already rewritten the bound expression and added it to the
-							// new memo if the associated WithExpr is part of the routine.
-							if !f.Metadata().HasWithBinding(id) {
-								f.Metadata().AddWithBinding(id, expr)
-							}
-						})
-					}
-					// Fall through.
+					return 0, false
 				}
 
-				return f.CopyAndReplaceDefault(e, replaceFn)
-			}
-			f.CopyAndReplace(originalMemo, stmt, props, replaceFn)
+				// Copy the expression into a new memo. Replace parameter references
+				// with argument datums.
+				var replaceFn norm.ReplaceFunc
+				replaceFn = func(e opt.Expr) opt.Expr {
+					switch t := e.(type) {
+					case *memo.VariableExpr:
+						if ord, ok := argOrd(t.Col); ok {
+							return f.ConstructConstVal(args[ord], t.Typ)
+						}
 
-			if wrapRootExpr != nil {
-				wrapped := wrapRootExpr(f, f.Memo().RootExpr())
-				f.Memo().SetRoot(wrapped, props)
+					case *memo.WithScanExpr:
+						// Allow referring to "outer" With expressions, if
+						// allowOuterWithRefs is true. The bound expressions are not
+						// part of this Memo, but they are used only for their
+						// relational properties, which should be valid.
+						//
+						// We must add all With expressions to the metadata even if they
+						// aren't referred to directly because they might be referred to
+						// transitively through other With expressions. For example, if
+						// stmt refers to With expression &1, and &1 refers to With
+						// expression &2, we must include &2 in the metadata so that its
+						// relational properties are available. See #87733.
+						//
+						// We lazily add these With expressions to the metadata here
+						// because the call to Factory.CopyAndReplace below clears With
+						// expressions in the metadata.
+						if allowOuterWithRefs {
+							b.mem.Metadata().ForEachWithBinding(func(id opt.WithID, expr opt.Expr) {
+								// Make sure to check for an existing With binding, since we may
+								// have already rewritten the bound expression and added it to the
+								// new memo if the associated WithExpr is part of the routine.
+								if !f.Metadata().HasWithBinding(id) {
+									f.Metadata().AddWithBinding(id, expr)
+								}
+							})
+						}
+						// Fall through.
+					}
+
+					return f.CopyAndReplaceDefault(e, replaceFn)
+				}
+				f.CopyAndReplace(originalMemo, stmt, stmtProps, replaceFn)
+
+				if wrapRootExpr != nil {
+					wrapped := wrapRootExpr(f, f.Memo().RootExpr())
+					f.Memo().SetRoot(wrapped, stmtProps)
+				}
+			default:
+				return errors.AssertionFailedf("unexpected body type %T", t)
 			}
 
 			// Optimize the memo.
@@ -1298,7 +1306,7 @@ func (b *Builder) buildRoutinePlanGenerator(
 			// because non-zero resultBufferID means that expressions in the body will
 			// add directly to the result set, and the result of the last body
 			// statement will be ignored.
-			isFinalPlan := i == len(stmts)-1
+			isFinalPlan := i == body.RoutineBodyStmtCount()-1
 			var tailCalls map[opt.ScalarExpr]struct{}
 			if isFinalPlan && resultBufferID == 0 {
 				tailCalls = make(map[opt.ScalarExpr]struct{})
@@ -1418,7 +1426,8 @@ func (b *Builder) buildTxnControl(
 		return nil, err
 	}
 	gen := func(
-		ctx context.Context, evalArgs tree.Datums,
+		// TODO(drewk): need to use argTypes here?
+		ctx context.Context, evalArgs tree.Datums, _ []*types.T,
 	) (con tree.StoredProcContinuation, retErr error) {
 		defer errorutil.MaybeCatchPanic(&retErr, func(caughtErr error) {
 			log.VEventf(ctx, 1, "%v", caughtErr)

@@ -850,7 +850,7 @@ func (b *Builder) buildTriggerFunction(
 		panic(err)
 	}
 	plBuilder := newPLpgSQLBuilder(
-		b, basePLOptions().WithIsTriggerFn(), resolvedDef.Name, stmt.AST.Label, nil, /* colRefs */
+		b, basePLOptions().WithIsTriggerFn(), resolvedDef.Name, stmt.AST.Label,
 		params, tableTyp, nil /* outScope */, 0, /* resultBufferID */
 	)
 	stmtScope := plBuilder.buildRootBlock(stmt.AST, triggerFuncScope, params)

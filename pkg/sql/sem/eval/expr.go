@@ -641,39 +641,41 @@ func (e *evaluator) EvalSubquery(ctx context.Context, subquery *tree.Subquery) (
 func (e *evaluator) EvalRoutineExpr(
 	ctx context.Context, routine *tree.RoutineExpr,
 ) (tree.Datum, error) {
-	args, err := e.evalRoutineArgs(ctx, routine.Args)
+	args, argTypes, err := e.evalRoutineArgs(ctx, routine.Args)
 	if err != nil {
 		return nil, err
 	}
-	return e.Planner.EvalRoutineExpr(ctx, routine, args)
+	return e.Planner.EvalRoutineExpr(ctx, routine, args, argTypes)
 }
 
 func (e *evaluator) evalRoutineArgs(
 	ctx context.Context, routineArgs tree.TypedExprs,
-) (args tree.Datums, err error) {
+) (args tree.Datums, argTypes []*types.T, err error) {
 	if len(routineArgs) > 0 {
 		// Evaluate each argument expression.
 		// TODO(mgartner): Use a scratch tree.Datums to avoid allocation on
 		// every invocation.
 		args = make(tree.Datums, len(routineArgs))
+		argTypes = make([]*types.T, len(routineArgs))
 		for i := range routineArgs {
 			args[i], err = routineArgs[i].Eval(ctx, e)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
+			argTypes[i] = routineArgs[i].ResolvedType()
 		}
 	}
-	return args, nil
+	return args, argTypes, nil
 }
 
 func (e *evaluator) EvalTxnControlExpr(
 	ctx context.Context, expr *tree.TxnControlExpr,
 ) (tree.Datum, error) {
-	args, err := e.evalRoutineArgs(ctx, expr.Args)
+	args, argTypes, err := e.evalRoutineArgs(ctx, expr.Args)
 	if err != nil {
 		return nil, err
 	}
-	return e.Planner.EvalTxnControlExpr(ctx, expr, args)
+	return e.Planner.EvalTxnControlExpr(ctx, expr, args, argTypes)
 }
 
 func (e *evaluator) EvalTuple(ctx context.Context, t *tree.Tuple) (tree.Datum, error) {

@@ -12,20 +12,25 @@ import (
 
 	"github.com/cockroachdb/cockroach/pkg/clusterversion"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt"
+	"github.com/cockroachdb/cockroach/pkg/sql/opt/cat"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/memo"
+	"github.com/cockroachdb/cockroach/pkg/sql/opt/norm"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/props"
 	"github.com/cockroachdb/cockroach/pkg/sql/opt/props/physical"
 	"github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgcode"
 	"github.com/cockroachdb/cockroach/pkg/sql/pgwire/pgerror"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/builtins/builtinsregistry"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/cast"
+	"github.com/cockroachdb/cockroach/pkg/sql/sem/eval"
 	ast "github.com/cockroachdb/cockroach/pkg/sql/sem/plpgsqltree"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree/treebin"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree/treecmp"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/volatility"
 	"github.com/cockroachdb/cockroach/pkg/sql/types"
+	"github.com/cockroachdb/cockroach/pkg/util/errorutil"
 	"github.com/cockroachdb/cockroach/pkg/util/errorutil/unimplemented"
+	"github.com/cockroachdb/cockroach/pkg/util/log"
 	"github.com/cockroachdb/errors"
 )
 
@@ -156,22 +161,8 @@ import (
 // not follow here, although they may be good routes for optimization in the
 // future.
 type plpgsqlBuilder struct {
-	ob      *Builder
-	options plOptions
-
-	// colRefs, if non-nil, tracks the set of columns referenced by scalar
-	// expressions.
-	colRefs *opt.ColSet
-
-	// returnType is the return type of the sub-routines that implement the
-	// PL/pgSQL routine. This is normally the same as the return type of the
-	// routine, but can be different in the case of a set-returning function, in
-	// which case it is types.Void.
-	returnType *types.T
-
-	// setReturnType, if set, is the return type of the set-returning function.
-	// It identifies the type of RETURN NEXT and RETURN QUERY statements.
-	setReturnType *types.T
+	*plpgsqlBuilderBase
+	ob *Builder
 
 	// continuations is a stack of sub-routines that are called to resume
 	// execution from a certain point within the PL/pgSQL routine. For example,
@@ -186,6 +177,28 @@ type plpgsqlBuilder struct {
 	// the current block. It is necessary to track the entire stack because
 	// variables from a parent block can be referenced in a child block.
 	blocks []plBlock
+
+	// recordVarTypes TODO
+	recordVarTypes map[ast.Variable]*types.T
+
+	identCounter int
+}
+
+// plpgsqlBuilderBase is the portion of plpgsqlBuilder which does not change
+// after the root block is initialized, even during planning of a lazy
+// sub-routine.
+type plpgsqlBuilderBase struct {
+	options plOptions
+
+	// returnType is the return type of the sub-routines that implement the
+	// PL/pgSQL routine. This is normally the same as the return type of the
+	// routine, but can be different in the case of a set-returning function, in
+	// which case it is types.Void.
+	returnType *types.T
+
+	// setReturnType, if set, is the return type of the set-returning function.
+	// It identifies the type of RETURN NEXT and RETURN QUERY statements.
+	setReturnType *types.T
 
 	// outParams is the set of OUT parameters for the routine.
 	outParams []ast.Variable
@@ -203,8 +216,7 @@ type plpgsqlBuilder struct {
 	// is how RETURN NEXT and RETURN QUERY are implemented.
 	resultBufferID memo.RoutineResultBufferID
 
-	routineName  string
-	identCounter int
+	routineName string
 }
 
 // plOptions is a set of options that can be used to modify the behavior of the
@@ -282,18 +294,105 @@ func (opts plOptions) SetSkipSQL(skipSQL bool) plOptions {
 	return opts
 }
 
+func (b *plpgsqlBuilder) makeLazyContinuationBuildFn(
+	stmts []ast.Statement,
+) memo.LazyRoutineBuildFn {
+	// TODO(drewk): we may not have to copy the entire continuation and block
+	// slices.
+	continuations := make([]continuation, len(b.continuations))
+	copy(continuations, b.continuations)
+	blocks := make([]plBlock, len(b.blocks))
+	copy(blocks, b.blocks)
+	return func(
+		ctx context.Context,
+		semaCtx *tree.SemaContext,
+		evalCtx *eval.Context,
+		catalog cat.Catalog,
+		factoryI interface{},
+		args tree.Datums,
+		argTypes []*types.T,
+		stmtIdx int,
+	) (err error) {
+		if stmtIdx != 0 {
+			// For now, lazy continuations only ever have one statement.
+			return errors.AssertionFailedf("expected stmtIdx to be 0")
+		}
+		factory := factoryI.(*norm.Factory)
+		defer func() {
+			if r := recover(); r != nil {
+				// This code allows us to propagate internal errors without having to
+				// add error checks everywhere throughout the code. This is only
+				// possible because the code does not update shared state and does not
+				// manipulate locks.
+				//
+				// This is the same panic-catching logic that exists in o.Optimize()
+				// below. It's required here because it's possible for factory functions
+				// to panic below, like CopyAndReplaceDefault.
+				if ok, e := errorutil.ShouldCatch(r); ok {
+					err = e
+					log.VEventf(ctx, 1, "%v", err)
+				} else {
+					// Other panic objects can't be considered "safe" and thus
+					// are propagated as crashes that terminate the session.
+					panic(r)
+				}
+			}
+		}()
+		plBuilder := plpgsqlBuilder{
+			plpgsqlBuilderBase: b.plpgsqlBuilderBase,
+			ob:                 New(ctx, semaCtx, evalCtx, catalog, factory, nil /* stmt */),
+			continuations:      continuations,
+			blocks:             blocks,
+			recordVarTypes:     make(map[ast.Variable]*types.T),
+		}
+		var varIdx int
+		for blockIdx := range plBuilder.blocks {
+			block := &plBuilder.blocks[blockIdx]
+			if block.hasRecordVar {
+				for offset, name := range block.vars {
+					if block.varTypes[name].Identical(types.AnyTuple) {
+						plBuilder.recordVarTypes[name] = argTypes[varIdx+offset]
+					}
+				}
+			}
+			// Hidden variables are never RECORD variables.
+			varIdx += len(block.vars) + len(block.hiddenVars)
+		}
+		bodyScope := plBuilder.ob.allocScope()
+		params := plBuilder.buildContinuationParams(bodyScope)
+		plBuilder.buildPLpgSQLStatements(stmts, bodyScope.push())
+		var replaceFn norm.ReplaceFunc
+		replaceFn = func(e opt.Expr) opt.Expr {
+			switch t := e.(type) {
+			case *memo.VariableExpr:
+				if ord, ok := params.Find(t.Col); ok {
+					return factory.ConstructConstVal(args[ord], t.Typ)
+				}
+			}
+			return factory.CopyAndReplaceDefault(e, replaceFn)
+		}
+		stmt, stmtProps := bodyScope.expr, bodyScope.makePhysicalProps()
+		stmt = factory.Replace(stmt, replaceFn).(memo.RelExpr)
+		factory.Memo().SetRoot(stmt, stmtProps)
+		return nil
+	}
+}
+
 // routineParam is similar to tree.RoutineParam but stores the resolved type.
 type routineParam struct {
 	name  ast.Variable
 	typ   *types.T
 	class tree.RoutineParamClass
+
+	// recordType is true if this is a RECORD type parameter, which takes on the
+	// type of whatever expression is assigned to it.
+	recordType bool
 }
 
 func newPLpgSQLBuilder(
 	ob *Builder,
 	options plOptions,
 	routineName, rootBlockLabel string,
-	colRefs *opt.ColSet,
 	routineParams []routineParam,
 	returnType *types.T,
 	outScope *scope,
@@ -301,14 +400,15 @@ func newPLpgSQLBuilder(
 ) *plpgsqlBuilder {
 	const initialBlocksCap = 2
 	b := &plpgsqlBuilder{
-		ob:             ob,
-		options:        options,
-		colRefs:        colRefs,
-		returnType:     returnType,
-		blocks:         make([]plBlock, 0, initialBlocksCap),
-		routineName:    routineName,
-		outScope:       outScope,
-		resultBufferID: resultBufferID,
+		plpgsqlBuilderBase: &plpgsqlBuilderBase{
+			options:        options,
+			returnType:     returnType,
+			outScope:       outScope,
+			resultBufferID: resultBufferID,
+			routineName:    routineName,
+		},
+		ob:     ob,
+		blocks: make([]plBlock, 0, initialBlocksCap),
 	}
 	if options.isSetReturning {
 		// The sub-routines for a set-returning PL/pgSQL function return VOID, since
@@ -329,7 +429,16 @@ func newPLpgSQLBuilder(
 		if param.name != "" {
 			// TODO(119502): unnamed parameters can only be accessed via $i
 			// notation.
-			b.addVariable(param.name, param.typ)
+			if param.recordType {
+				// Add a variable with types.AnyTuple, and also add the concrete type to
+				// the recordVarTypes map.
+				b.addVariable(param.name, types.AnyTuple)
+				if param.typ.Family() != types.UnknownFamily {
+					b.recordVarTypes[param.name] = param.typ
+				}
+			} else {
+				b.addVariable(param.name, param.typ)
+			}
 		}
 		if tree.IsOutParamClass(param.class) {
 			b.outParams = append(b.outParams, param.name)
@@ -380,6 +489,9 @@ type plBlock struct {
 	// It is a list instead of a map because hidden variables are only identified
 	// by their ordinal position.
 	hiddenVarTypes []*types.T
+
+	// hasRecordVar tracks whether this block contains a RECORD variable.
+	hasRecordVar bool
 
 	// hasExceptionHandler tracks whether this block has an exception handler.
 	hasExceptionHandler bool
@@ -644,7 +756,7 @@ func (b *plpgsqlBuilder) buildPLpgSQLStatements(stmts []ast.Statement, s *scope)
 			}
 			// RETURN is handled by projecting a single column with the expression
 			// that is being returned.
-			returnScalar := b.buildSQLExpr(expr, b.returnType, s)
+			returnScalar, _ := b.buildSQLExpr(expr, b.returnType, s)
 			b.addBarrierIfVolatile(s, returnScalar)
 			returnColName := scopeColName("").WithMetadataName(b.makeIdentifier("stmt_return"))
 			returnScope := s.push()
@@ -670,7 +782,7 @@ func (b *plpgsqlBuilder) buildPLpgSQLStatements(stmts []ast.Statement, s *scope)
 			// with output redirected to the result buffer.
 			retCon := b.makeContinuation("return_next")
 			retCon.def.FirstStmtOutput.TargetBufferID = b.resultBufferID
-			returnScalar := b.buildSQLExpr(expr, b.setReturnType, retCon.s)
+			returnScalar, _ := b.buildSQLExpr(expr, b.setReturnType, retCon.s)
 			retColName := scopeColName("").WithMetadataName(b.makeIdentifier("stmt_return_next"))
 			retNextScope := retCon.s.push()
 			b.ob.synthesizeColumn(retNextScope, retColName, b.setReturnType, nil /* expr */, returnScalar)
@@ -783,12 +895,12 @@ func (b *plpgsqlBuilder) buildPLpgSQLStatements(stmts []ast.Statement, s *scope)
 
 			// Build a scalar CASE statement that conditionally executes each branch
 			// of the IF statement as a subquery.
-			cond := b.buildSQLExpr(t.Condition, types.Bool, s)
+			cond, _ := b.buildSQLExpr(t.Condition, types.Bool, s)
 			thenScalar := b.ob.factory.ConstructSubquery(thenScope.expr, &memo.SubqueryPrivate{})
 			whens := make(memo.ScalarListExpr, 0, len(t.ElseIfList)+1)
 			whens = append(whens, b.ob.factory.ConstructWhen(cond, thenScalar))
 			for j := range t.ElseIfList {
-				elsifCond := b.buildSQLExpr(t.ElseIfList[j].Condition, types.Bool, s)
+				elsifCond, _ := b.buildSQLExpr(t.ElseIfList[j].Condition, types.Bool, s)
 				elsifScalar := b.ob.factory.ConstructSubquery(elsifScopes[j].expr, &memo.SubqueryPrivate{})
 				whens = append(whens, b.ob.factory.ConstructWhen(elsifCond, elsifScalar))
 			}
@@ -962,6 +1074,7 @@ func (b *plpgsqlBuilder) buildPLpgSQLStatements(stmts []ast.Statement, s *scope)
 				panic(setTxnNotAfterControlStmtErr)
 			}
 			b.checkDuplicateTargets(t.Target, "INTO")
+			b.checkMultipleRecordTargets(t.Target)
 			strict := t.Strict || b.ob.evalCtx.SessionData().PLpgSQLUseStrictInto
 
 			// Create a new continuation routine to handle executing a SQL statement.
@@ -1137,8 +1250,12 @@ func (b *plpgsqlBuilder) buildPLpgSQLStatements(stmts []ast.Statement, s *scope)
 				if t.Cursor.FetchType == tree.FetchAll || t.Cursor.FetchType == tree.FetchBackwardAll {
 					panic(fetchRowsErr)
 				}
+				if len(t.Target) == 1 && b.resolveVariableForAssign(t.Target[0]).Identical(types.AnyTuple) {
+					// This statement is assigning to a RECORD variable.
+				}
 			}
 			b.checkDuplicateTargets(t.Target, "FETCH")
+			b.checkMultipleRecordTargets(t.Target)
 			fetchCon := b.makeContinuation("_stmt_fetch")
 			fetchCon.def.Volatility = volatility.Volatile
 			fetchScope := b.buildFetch(fetchCon.s, t)
@@ -1245,7 +1362,7 @@ func (b *plpgsqlBuilder) buildPLpgSQLStatements(stmts []ast.Statement, s *scope)
 			colName := scopeColName("").WithMetadataName(b.makeIdentifier("stmt_call"))
 			col := b.ob.synthesizeColumn(callScope, colName, procTyp, nil /* expr */, nil /* scalar */)
 			b.ob.withinNestedPLpgSQLCall(func() {
-				col.scalar = b.ob.buildRoutine(proc, def, callCon.s, callScope, b.colRefs)
+				col.scalar = b.ob.buildRoutine(proc, def, callCon.s, callScope, nil /* colRefs */)
 			})
 			b.ob.constructProjectForScope(callCon.s, callScope)
 			if overload.Volatility == volatility.Volatile {
@@ -1273,6 +1390,14 @@ func (b *plpgsqlBuilder) buildPLpgSQLStatements(stmts []ast.Statement, s *scope)
 				}
 			}
 			b.checkDuplicateTargets(target, tree.CallStmtTag)
+			for _, targetName := range target {
+				if b.resolveVariableForAssign(targetName).Identical(types.AnyTuple) {
+					panic(unimplemented.New("CALL statement with RECORD variable",
+						"using a RECORD variable as an OUT parameter for a "+
+							"PL/pgsql CALL statement is not yet supported",
+					))
+				}
+			}
 			if len(target) == 0 {
 				// When there is no INTO target, build the nested procedure call into a
 				// body statement that is only executed for its side effects.
@@ -1388,10 +1513,11 @@ func (b *plpgsqlBuilder) handleIntForLoop(
 		branches = append(branches, checkCond)
 	}
 	addNullCheck := func(context string, varRef tree.Expr) {
-		checkCond := b.buildSQLExpr(&tree.IsNullExpr{Expr: varRef}, types.Bool, s)
+		checkCond, _ := b.buildSQLExpr(&tree.IsNullExpr{Expr: varRef}, types.Bool, s)
 		message := fmt.Sprintf("%s of FOR loop cannot be null", context)
 		addCheck(message, pgcode.NullValueNotAllowed.String(), checkCond)
 	}
+<<<<<<< Updated upstream
 	addNullCheck("lower bound" /* context */, s.findFuncArgCol(lowerOrd))
 	addNullCheck("upper bound" /* context */, s.findFuncArgCol(upperOrd))
 	addNullCheck("BY value" /* context */, s.findFuncArgCol(stepOrd))
@@ -1402,6 +1528,19 @@ func (b *plpgsqlBuilder) handleIntForLoop(
 			Left:     s.findFuncArgCol(stepOrd),
 			Right:    tree.DZero,
 		}, types.Bool, s))
+=======
+	byValCheck, _ := b.buildSQLExpr(&tree.ComparisonExpr{
+		Operator: treecmp.MakeComparisonOperator(treecmp.LE),
+		Left:     refHiddenVar(s, stepName),
+		Right:    tree.DZero,
+	}, types.Bool, s)
+	addNullCheck("lower bound" /* context */, refHiddenVar(s, lowerName))
+	addNullCheck("upper bound" /* context */, refHiddenVar(s, upperName))
+	addNullCheck("BY value" /* context */, refHiddenVar(s, stepName))
+	addCheck("BY value of FOR loop must be greater than zero", /* message */
+		pgcode.InvalidParameterValue.String(), byValCheck,
+	)
+>>>>>>> Stashed changes
 	b.addRuntimeCheck(s, branches, raiseErrArgs)
 
 	// Initialize the loop counter target variables with the lower bound.
@@ -1545,7 +1684,23 @@ func (b *plpgsqlBuilder) buildCursorNameGen(nameCon *continuation, nameVar ast.V
 func (b *plpgsqlBuilder) addPLpgSQLAssign(
 	inScope *scope, ident ast.Variable, val ast.Expr, indirection tree.Name,
 ) *scope {
+<<<<<<< Updated upstream
 	typ, ord := b.resolveVariableForAssign(ident)
+=======
+	typ := b.resolveVariableForAssign(ident)
+	isRecordVar := typ.Identical(types.AnyTuple)
+	if isRecordVar {
+		if indirection != noIndirection {
+			// Assigning to an element of a RECORD variable requires it to already
+			// have a well-defined structure.
+			if assignedTyp, ok := b.recordVarTypes[ident]; ok {
+				typ = assignedTyp
+			} else {
+				panic(newUninitializedRecordErr(ident))
+			}
+		}
+	}
+>>>>>>> Stashed changes
 	assignScope := inScope.push()
 	for i := range inScope.cols {
 		col := &inScope.cols[i]
@@ -1562,14 +1717,26 @@ func (b *plpgsqlBuilder) addPLpgSQLAssign(
 	// rules from reordering or removing its side effects.
 	colName := scopeColName(ident)
 	var scalar opt.ScalarExpr
+	resolvedType := typ
 	if indirection != noIndirection {
 		scalar = b.handleIndirectionForAssign(inScope, typ, ident, indirection, val)
 	} else {
-		scalar = b.buildSQLExpr(val, typ, inScope)
+		scalar, resolvedType = b.buildSQLExpr(val, typ, inScope)
+		if isRecordVar {
+			// Update the concrete type for a RECORD variable with the assigned type.
+			if b.recordVarTypes == nil {
+				b.recordVarTypes = make(map[ast.Variable]*types.T)
+			}
+			b.recordVarTypes[ident] = resolvedType
+		}
 	}
 	b.addBarrierIfVolatile(inScope, scalar)
+<<<<<<< Updated upstream
 	col := b.ob.synthesizeColumn(assignScope, colName, typ, nil, scalar)
 	col.setParamOrd(ord)
+=======
+	b.ob.synthesizeColumn(assignScope, colName, resolvedType, nil, scalar)
+>>>>>>> Stashed changes
 	b.ob.constructProjectForScope(inScope, assignScope)
 	b.addBarrierIfVolatile(assignScope, scalar)
 	return assignScope
@@ -1590,8 +1757,13 @@ func (b *plpgsqlBuilder) assignToHiddenVariable(inScope *scope, ord int, val ast
 		// column from the previous scope.
 		assignScope.appendColumn(col)
 	}
+<<<<<<< Updated upstream
 	colName := scopeColName("").WithMetadataName(string(name))
 	scalar := b.buildSQLExpr(val, typ, inScope)
+=======
+	colName := scopeColName("").WithMetadataName(name)
+	scalar, _ := b.buildSQLExpr(val, typ, inScope)
+>>>>>>> Stashed changes
 	b.addBarrierIfVolatile(inScope, scalar)
 	col := b.ob.synthesizeColumn(assignScope, colName, typ, nil, scalar)
 	col.setParamOrd(ord)
@@ -1644,7 +1816,7 @@ func (b *plpgsqlBuilder) handleIndirectionForAssign(
 		panic(errors.AssertionFailedf("unexpected type for variable %s", ident))
 	}
 	varCol := b.ob.factory.ConstructVariable(source.(*scopeColumn).id)
-	scalar := b.buildSQLExpr(val, typ.TupleContents()[elemIdx], inScope)
+	scalar, _ := b.buildSQLExpr(val, typ.TupleContents()[elemIdx], inScope)
 	newElems := make([]opt.ScalarExpr, len(typ.TupleContents()))
 	for i := range typ.TupleContents() {
 		if i == elemIdx {
@@ -1661,9 +1833,13 @@ func (b *plpgsqlBuilder) handleIndirectionForAssign(
 func (b *plpgsqlBuilder) buildInto(stmtScope *scope, target []ast.Variable) *scope {
 	var targetTypes []*types.T
 	var targetNames []ast.Variable
+<<<<<<< Updated upstream
 	var targetOrds []int
 	targetIsRecordVar := b.targetIsRecordVar(target)
 	if targetIsRecordVar {
+=======
+	if b.targetIsCompositeVar(target) {
+>>>>>>> Stashed changes
 		// For a single record-type variable, the SQL statement columns are assigned
 		// as elements of the variable, rather than the variable itself.
 		//
@@ -1707,9 +1883,15 @@ func (b *plpgsqlBuilder) buildInto(stmtScope *scope, target []ast.Variable) *sco
 		}
 	}
 	b.ob.constructProjectForScope(stmtScope, intoScope)
+<<<<<<< Updated upstream
 	if targetIsRecordVar {
 		// Handle a single record-type variable (see projectRecordVar for details).
 		intoScope = b.projectRecordVar(intoScope, target[0])
+=======
+	if b.targetIsCompositeVar(target) {
+		// Handle a single record-type variable (see projectCompositeVar for details).
+		intoScope = b.projectCompositeVar(intoScope, target[0])
+>>>>>>> Stashed changes
 	}
 	return intoScope
 }
@@ -1773,7 +1955,8 @@ func (b *plpgsqlBuilder) getRaiseArgs(s *scope, raise *ast.Raise) memo.ScalarLis
 		if isDup {
 			panic(pgerror.Newf(pgcode.Syntax, "RAISE option already specified: %s", name))
 		}
-		return b.buildSQLExpr(expr, types.String, s)
+		scalar, _ := b.buildSQLExpr(expr, types.String, s)
+		return scalar
 	}
 	for _, option := range raise.Options {
 		optName := strings.ToUpper(option.OptType)
@@ -1848,7 +2031,7 @@ func (b *plpgsqlBuilder) makeRaiseFormatMessage(
 				}
 				// If the argument is NULL, postgres prints "<NULL>".
 				expr := &tree.CastExpr{Expr: args[argIdx], Type: types.String}
-				arg := b.buildSQLExpr(expr, types.String, s)
+				arg, _ := b.buildSQLExpr(expr, types.String, s)
 				arg = b.ob.factory.ConstructCoalesce(memo.ScalarListExpr{arg, makeConstStr("<NULL>")})
 				addToResult(arg)
 				argIdx++
@@ -1955,18 +2138,24 @@ func (b *plpgsqlBuilder) buildExceptions(block *ast.Block) *memo.ExceptionBlock 
 		handlerCon := b.makeContinuation("exception_handler")
 		b.appendPlpgSQLStmts(&handlerCon, e.Action)
 		handlerCon.def.Volatility = volatility.Volatile
+		def := &memo.UDFDefinition{
+			RoutineDefBase: *handlerCon.def,
+			Params:         handlerCon.params,
+			Body:           handlerCon.body,
+			BodyProps:      handlerCon.bodyProps,
+		}
 		for _, cond := range e.Conditions {
 			if cond.SqlErrState != "" {
 				if !pgcode.IsValidPGCode(cond.SqlErrState) {
 					panic(pgerror.Newf(pgcode.Syntax, "invalid SQLSTATE code '%s'", cond.SqlErrState))
 				}
-				addHandler(cond.SqlErrState, handlerCon.def)
+				addHandler(cond.SqlErrState, def)
 				continue
 			}
 			// The match condition was supplied by name instead of code.
 			if strings.ToUpper(cond.SqlErrName) == "OTHERS" {
 				// The special "OTHERS" condition matches (almost) any error code.
-				addHandler("OTHERS" /* codeStr */, handlerCon.def)
+				addHandler("OTHERS" /* codeStr */, def)
 				continue
 			}
 			branchCodes, ok := pgcode.PLpgSQLConditionNameToCode[cond.SqlErrName]
@@ -1976,7 +2165,7 @@ func (b *plpgsqlBuilder) buildExceptions(block *ast.Block) *memo.ExceptionBlock 
 				))
 			}
 			for i := range branchCodes {
-				addHandler(branchCodes[i], handlerCon.def)
+				addHandler(branchCodes[i], def)
 			}
 		}
 	}
@@ -1998,7 +2187,7 @@ func (b *plpgsqlBuilder) handleEndOfFunction(inScope *scope) *scope {
 		}
 		returnScope := inScope.push()
 		colName := scopeColName("_implicit_return")
-		returnScalar := b.buildSQLExpr(returnExpr, b.returnType, inScope)
+		returnScalar, _ := b.buildSQLExpr(returnExpr, b.returnType, inScope)
 		b.ob.synthesizeColumn(returnScope, colName, b.returnType, nil /* expr */, returnScalar)
 		b.ob.constructProjectForScope(inScope, returnScope)
 		return returnScope
@@ -2133,7 +2322,7 @@ func (b *plpgsqlBuilder) buildFetch(s *scope, fetch *ast.Fetch) *scope {
 	// For a FETCH statement, we have to pass the expected result types.
 	var typs []*types.T
 	if !fetch.IsMove {
-		if b.targetIsRecordVar(fetch.Target) {
+		if b.targetIsCompositeVar(fetch.Target) {
 			// If the target is a single record-type variable, the columns of the
 			// FETCH are assigned as its *elements*, rather than directly to the
 			// variable.
@@ -2178,6 +2367,7 @@ func (b *plpgsqlBuilder) buildFetch(s *scope, fetch *ast.Fetch) *scope {
 	fetchScope := s.push()
 	b.ob.synthesizeColumn(fetchScope, fetchColName, returnType, nil /* expr */, fetchCall)
 	b.ob.constructProjectForScope(s, fetchScope)
+<<<<<<< Updated upstream
 	return fetchScope
 }
 
@@ -2197,6 +2387,27 @@ func (b *plpgsqlBuilder) targetIsRecordVar(target []ast.Variable) bool {
 // RECORD-type variable.
 func (b *plpgsqlBuilder) projectRecordVar(s *scope, name ast.Variable) *scope {
 	typ, ord := b.resolveVariableForAssign(name)
+=======
+	if !fetch.IsMove && b.targetIsCompositeVar(fetch.Target) {
+		// Handle a single record-type variable (see projectCompositeVar for details).
+		fetchScope = b.projectCompositeVar(fetchScope, fetch.Target[0])
+	}
+	return fetchScope
+}
+
+// targetIsCompositeVar returns true if the given INTO target is a single
+// composite-type variable.
+func (b *plpgsqlBuilder) targetIsCompositeVar(target []ast.Variable) bool {
+	return len(target) == 1 && b.resolveVariableForAssign(target[0]).Family() == types.TupleFamily
+}
+
+// projectCompositeVar handles the special case when a single composite-type
+// variable is the target of an INTO clause or FETCH statement. In this case,
+// the columns from the SQL statement (or FETCH) should be wrapped into a tuple,
+// which is assigned to the composite-type variable.
+func (b *plpgsqlBuilder) projectCompositeVar(s *scope, name ast.Variable) *scope {
+	typ := b.resolveVariableForAssign(name)
+>>>>>>> Stashed changes
 	recordScope := s.push()
 	elems := make(memo.ScalarListExpr, len(s.cols))
 	for j := range elems {
@@ -2209,6 +2420,7 @@ func (b *plpgsqlBuilder) projectRecordVar(s *scope, name ast.Variable) *scope {
 	return recordScope
 }
 
+<<<<<<< Updated upstream
 // makeContinuation allocates a new continuation routine with an uninitialized
 // definition. Note that the parameters of the continuation will be determined
 // by the current block; if a child block declares new variables, its
@@ -2216,6 +2428,24 @@ func (b *plpgsqlBuilder) projectRecordVar(s *scope, name ast.Variable) *scope {
 func (b *plpgsqlBuilder) makeContinuation(conName string) continuation {
 	s := b.ob.allocScope()
 	params := make(opt.ColList, 0, b.variableCount(len(b.blocks)))
+=======
+//func (b *plpgsqlBuilder) makeLazyContinuation(conName string, stmts []ast.Statement) continuation {
+//	return continuation{
+//		def: &memo.UDFDefinition{
+//			RoutineDefBase: b.makeContinuationDef(conName),
+//			RoutineBody:    memo.RoutineBody{Params: b.buildContinuationParams(s)},
+//		},
+//		typ: continuationDefault,
+//		s:   s,
+//	}
+//}
+
+// buildContinuationParams adds a column to the given scope for each variable
+// in each block. It returns the list of columns to be used as parameters for a
+// continuation routine.
+func (b *plpgsqlBuilder) buildContinuationParams(s *scope) opt.ColList {
+	params := make(opt.ColList, 0, b.variableCount()+b.hiddenVariableCount())
+>>>>>>> Stashed changes
 	addParam := func(name scopeColumnName, typ *types.T) {
 		col := b.ob.synthesizeColumn(s, name, typ, nil /* expr */, nil /* scalar */)
 		// TODO(mgartner): Lift the 100 parameter restriction for synthesized
@@ -2239,17 +2469,29 @@ func (b *plpgsqlBuilder) makeContinuation(conName string) continuation {
 			addParam(scopeColName("").WithMetadataName(name), block.hiddenVarTypes[varIdx])
 		}
 	}
+	return params
+}
+
+func (b *plpgsqlBuilder) makeContinuationDef(conName string) *memo.RoutineDefBase {
+	return &memo.RoutineDefBase{
+		Name:              b.makeIdentifier(conName),
+		Typ:               b.returnType,
+		CalledOnNullInput: true,
+		BlockState:        b.block().state,
+		RoutineType:       tree.UDFRoutine,
+		RoutineLang:       tree.RoutineLangPLpgSQL,
+	}
+}
+
+// makeContinuation allocates a new continuation routine with an uninitialized
+// definition. Note that the parameters of the continuation will be determined
+// by the current block; if a child block declares new variables, its
+// continuations will have more parameters than those of its parent.
+func (b *plpgsqlBuilder) makeContinuation(conName string) continuation {
+	s := b.ob.allocScope()
 	b.ensureScopeHasExpr(s)
 	return continuation{
-		def: &memo.UDFDefinition{
-			Params:            params,
-			Name:              b.makeIdentifier(conName),
-			Typ:               b.returnType,
-			CalledOnNullInput: true,
-			BlockState:        b.block().state,
-			RoutineType:       tree.UDFRoutine,
-			RoutineLang:       tree.RoutineLangPLpgSQL,
-		},
+		def: b.makeContinuationDef(conName),
 		typ: continuationDefault,
 		s:   s,
 	}
@@ -2286,12 +2528,17 @@ func (b *plpgsqlBuilder) appendBodyStmtFromScope(
 	if con.def.Volatility < vol {
 		con.def.Volatility = vol
 	}
+<<<<<<< Updated upstream
 	con.def.Body = append(con.def.Body, bodyExpr)
 	con.def.BodyProps = append(con.def.BodyProps, bodyScope.makePhysicalProps())
 	if stmt != nil {
 		con.def.BodyTags = append(con.def.BodyTags, stmt.StatementTag())
 		con.def.BodyASTs = append(con.def.BodyASTs, stmt)
 	}
+=======
+	con.body = append(con.body, bodyExpr)
+	con.bodyProps = append(con.bodyProps, bodyScope.makePhysicalProps())
+>>>>>>> Stashed changes
 }
 
 // appendPlpgSQLStmts builds the given PLpgSQL statements into a relational
@@ -2311,7 +2558,15 @@ func (b *plpgsqlBuilder) callContinuation(con *continuation, s *scope) *scope {
 		return b.handleEndOfFunction(s)
 	}
 	args := b.makeContinuationArgs(con, s)
-	call := b.ob.factory.ConstructUDFCall(args, &memo.UDFCallPrivate{Def: con.def})
+	private := &memo.UDFCallPrivate{
+		Def: &memo.UDFDefinition{
+			RoutineDefBase: *con.def,
+			Params:         con.params,
+			Body:           con.body,
+			BodyProps:      con.bodyProps,
+		},
+	}
+	call := b.ob.factory.ConstructUDFCall(args, private)
 	b.addBarrierIfVolatile(s, call)
 
 	returnColName := scopeColName("").WithMetadataName(con.def.Name)
@@ -2336,7 +2591,13 @@ func (b *plpgsqlBuilder) callContinuationWithTxnOp(
 	b.ob.addBarrier(s)
 	returnScope := s.push()
 	args := b.makeContinuationArgs(con, s)
-	txnPrivate := &memo.TxnControlPrivate{TxnOp: txnOp, TxnModes: txnModes, Def: con.def}
+	def := &memo.UDFDefinition{
+		RoutineDefBase: *con.def,
+		Params:         con.params,
+		Body:           con.body,
+		BodyProps:      con.bodyProps,
+	}
+	txnPrivate := &memo.TxnControlPrivate{TxnOp: txnOp, TxnModes: txnModes, Def: def}
 	if b.outScope != nil {
 		txnPrivate.Props = b.outScope.makePhysicalProps()
 		txnPrivate.OutCols = b.outScope.colList()
@@ -2354,9 +2615,9 @@ func (b *plpgsqlBuilder) callContinuationWithTxnOp(
 }
 
 func (b *plpgsqlBuilder) makeContinuationArgs(con *continuation, s *scope) memo.ScalarListExpr {
-	args := make(memo.ScalarListExpr, 0, len(con.def.Params))
+	args := make(memo.ScalarListExpr, 0, con.paramCount)
 	for i := range b.blocks {
-		if len(args) == len(con.def.Params) {
+		if len(args) == con.paramCount {
 			// A continuation has parameters for every variable that is in scope for
 			// the block in which it was created. If we reach the end of those
 			// parameters early, the continuation must be from an ancestor block. Any
@@ -2405,11 +2666,14 @@ func (b *plpgsqlBuilder) addBarrierIfVolatile(s *scope, expr opt.ScalarExpr) {
 }
 
 // buildSQLExpr type-checks and builds the given SQL expression into a
-// ScalarExpr within the given scope.
-func (b *plpgsqlBuilder) buildSQLExpr(expr ast.Expr, typ *types.T, s *scope) opt.ScalarExpr {
+// ScalarExpr within the given scope. It returns the built expression and the
+// resolved type.
+func (b *plpgsqlBuilder) buildSQLExpr(
+	expr ast.Expr, typ *types.T, s *scope,
+) (opt.ScalarExpr, *types.T) {
 	if b.options.skipSQL {
 		// For lazy SQL evaluation, replace all expressions with NULL.
-		return memo.NullSingleton
+		return memo.NullSingleton, types.Unknown
 	}
 	// Save any outer CTEs before building the expression, which may have
 	// subqueries with inner CTEs. Also set the maxParamOrd to the number of
@@ -2427,10 +2691,15 @@ func (b *plpgsqlBuilder) buildSQLExpr(expr ast.Expr, typ *types.T, s *scope) opt
 	if err != nil {
 		panic(err)
 	}
-	scalar := b.ob.buildScalar(typedExpr, s, nil, nil, b.colRefs)
-	scalar = b.coerceType(scalar, typ)
+	resolvedType := typedExpr.ResolvedType()
+	scalar := b.ob.buildScalar(typedExpr, s, nil, nil, nil /* colRefs */)
+	if !typ.Identical(types.AnyTuple) {
+		// Do not coerce the type for RECORD variables, which take on the type of th
+		scalar = b.coerceType(scalar, typ)
+		resolvedType = typ
+	}
 	if len(b.ob.ctes) == 0 {
-		return scalar
+		return scalar, resolvedType
 	}
 	// There was at least one CTE within the scalar expression. It is possible to
 	// "hoist" them above this point, but building them eagerly here means that
@@ -2442,7 +2711,7 @@ func (b *plpgsqlBuilder) buildSQLExpr(expr ast.Expr, typ *types.T, s *scope) opt
 		&memo.ValuesPrivate{Cols: opt.ColList{valuesCol}, ID: f.Metadata().NextUniqueID()},
 	)
 	withExpr := b.ob.buildWiths(valuesExpr, b.ob.ctes)
-	return f.ConstructSubquery(withExpr, &memo.SubqueryPrivate{})
+	return f.ConstructSubquery(withExpr, &memo.SubqueryPrivate{}), resolvedType
 }
 
 // buildSQLStatement type-checks and builds the given SQL statement into a
@@ -2597,6 +2866,19 @@ func (b *plpgsqlBuilder) checkDuplicateTargets(target []ast.Variable, stmtName s
 	}
 }
 
+// checkMultipleRecordTargets checks that a target list with multiple variables
+// does not contain a RECORD variable.
+func (b *plpgsqlBuilder) checkMultipleRecordTargets(target []ast.Variable) {
+	if len(target) <= 1 {
+		return
+	}
+	for _, varName := range target {
+		if b.resolveVariableForAssign(varName).Identical(types.AnyTuple) {
+			panic(pgerror.New(pgcode.Syntax, "record variable cannot be part of multiple-item INTO list"))
+		}
+	}
+}
+
 // checkBlockLabelReference checks that the given name does not reference a
 // block label, since doing so is not yet supported. This is only necessary for
 // assignment statements, since all other cases currently do not allow the
@@ -2669,11 +2951,22 @@ func (b *plpgsqlBuilder) makeReturnForOutParams() tree.Expr {
 type continuation struct {
 	// def is used to construct a call into a routine that picks up execution
 	// from a branch in the control flow.
-	def *memo.UDFDefinition
+	def *memo.RoutineDefBase
+
+	paramCount int
 
 	// s is a scope initialized with the parameters of the routine. It should be
-	// used to construct the routine body statement.
+	// used to construct the routine body statements.
 	s *scope
+
+	// params, body, and bodyProps constitute the built plans for the routine
+	// body statements. They are unset if the routine is lazy.
+	params    opt.ColList
+	body      []memo.RelExpr
+	bodyProps []*physical.Required
+
+	// lazyBodyFn is a function that builds the body of the routine lazily. It is
+	lazyBodyFn memo.LazyRoutineBuildFn
 
 	// label is the label of the block or loop that gave rise to this
 	// continuation, if any.
@@ -2759,6 +3052,9 @@ func (b *plpgsqlBuilder) addVariable(name ast.Variable, typ *types.T) {
 				"variable \"%s\" shadows a previously defined variable", name,
 			))
 		}
+	}
+	if typ.Identical(types.AnyTuple) {
+		curBlock.hasRecordVar = true
 	}
 	curBlock.vars = append(curBlock.vars, name)
 	curBlock.varTypes[name] = typ

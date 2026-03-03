@@ -111,7 +111,7 @@ func (d *callNode) getResultColumns() colinfo.ResultColumns {
 // routine, then runs the plans. The resulting value of the last statement in
 // the routine is returned.
 func (p *planner) EvalRoutineExpr(
-	ctx context.Context, expr *tree.RoutineExpr, args tree.Datums,
+	ctx context.Context, expr *tree.RoutineExpr, args tree.Datums, argTypes []*types.T,
 ) (result tree.Datum, err error) {
 	// Strict routines (CalledOnNullInput=false) should not be invoked and they
 	// should immediately return NULL if any of their arguments are NULL.
@@ -136,7 +136,7 @@ func (p *planner) EvalRoutineExpr(
 			// evaluate this routine to the parent routine, then return. It is safe to
 			// return NULL here because the parent is guaranteed not to perform any
 			// processing on the result of the child.
-			p.EvalContext().RoutineSender.SendDeferredRoutine(expr, args)
+			p.EvalContext().RoutineSender.SendDeferredRoutine(expr, args, argTypes)
 			return tree.DNull, nil
 		}
 	}
@@ -171,7 +171,7 @@ func (p *planner) EvalRoutineExpr(
 	}
 
 	var g routineGenerator
-	g.init(p, expr, args)
+	g.init(p, expr, args, argTypes)
 	defer g.Close(ctx)
 	err = g.Start(ctx, p.Txn())
 	if err != nil {
@@ -210,10 +210,10 @@ type routineDepthKey struct{}
 // RoutineExprGenerator returns an eval.ValueGenerator that produces the results
 // of a routine.
 func (p *planner) RoutineExprGenerator(
-	ctx context.Context, expr *tree.RoutineExpr, args tree.Datums,
+	ctx context.Context, expr *tree.RoutineExpr, args tree.Datums, argTypes []*types.T,
 ) eval.ValueGenerator {
 	var g routineGenerator
-	g.init(p, expr, args)
+	g.init(p, expr, args, argTypes)
 	return &g
 }
 
@@ -223,14 +223,16 @@ type routineGenerator struct {
 	p        *planner
 	expr     *tree.RoutineExpr
 	args     tree.Datums
+	argTypes []*types.T
 	rch      rowContainerHelper
 	rci      *rowContainerIterator
 	currVals tree.Datums
 	// deferredRoutine encapsulates the information needed to execute a nested
 	// routine that has deferred its execution.
 	deferredRoutine struct {
-		expr *tree.RoutineExpr
-		args tree.Datums
+		expr     *tree.RoutineExpr
+		args     tree.Datums
+		argTypes []*types.T
 	}
 }
 
@@ -238,21 +240,24 @@ var _ eval.ValueGenerator = &routineGenerator{}
 var _ eval.DeferredRoutineSender = &routineGenerator{}
 
 // init initializes a routineGenerator.
-func (g *routineGenerator) init(p *planner, expr *tree.RoutineExpr, args tree.Datums) {
+func (g *routineGenerator) init(
+	p *planner, expr *tree.RoutineExpr, args tree.Datums, argTypes []*types.T,
+) {
 	*g = routineGenerator{
-		p:    p,
-		expr: expr,
-		args: args,
+		p:        p,
+		expr:     expr,
+		args:     args,
+		argTypes: argTypes,
 	}
 }
 
 // reset closes and re-initializes a routineGenerator for reuse.
 // TODO(drewk): we should hold on to memory for the row container.
 func (g *routineGenerator) reset(
-	ctx context.Context, p *planner, expr *tree.RoutineExpr, args tree.Datums,
+	ctx context.Context, p *planner, expr *tree.RoutineExpr, args tree.Datums, argTypes []*types.T,
 ) {
 	g.Close(ctx)
-	g.init(p, expr, args)
+	g.init(p, expr, args, argTypes)
 }
 
 // ResolvedType is part of the eval.ValueGenerator interface.
@@ -286,7 +291,7 @@ func (g *routineGenerator) Start(ctx context.Context, txn *kv.Txn) (err error) {
 		// A nested routine in tail-call position deferred its execution until now.
 		// Since it's in tail-call position, evaluating it will give the result of
 		// this routine as well.
-		g.reset(ctx, g.p, g.deferredRoutine.expr, g.deferredRoutine.args)
+		g.reset(ctx, g.p, g.deferredRoutine.expr, g.deferredRoutine.args, g.deferredRoutine.argTypes)
 	}
 }
 
@@ -321,8 +326,13 @@ func (g *routineGenerator) startInternal(ctx context.Context, txn *kv.Txn) (err 
 	ef := newExecFactory(ctx, g.p)
 	rrw := NewRowResultWriter(&g.rch)
 	var cursorHelper *plpgsqlCursorHelper
+<<<<<<< Updated upstream
 	err = g.expr.ForEachPlan(ctx, ef, rrw, g.args,
 		func(plan tree.RoutinePlan, builder tree.RoutineStatsBuilder, stmtForDistSQLDiagram string, isFinalPlan bool) error {
+=======
+	err = g.expr.ForEachPlan(ctx, ef, rrw, g.args, g.argTypes,
+		func(plan tree.RoutinePlan, stmtForDistSQLDiagram string, isFinalPlan bool) error {
+>>>>>>> Stashed changes
 			stmtIdx++
 			opName := "routine-stmt-" + g.expr.Name + "-" + strconv.Itoa(stmtIdx)
 			ctx, sp := tracing.ChildSpan(ctx, opName)
@@ -497,7 +507,8 @@ func (g *routineGenerator) handleException(ctx context.Context, err error) error
 			// a child block, but propagate up to a parent block. See the BlockState
 			// comments for further details.
 			args := g.args[:blockState.VariableCount]
-			g.reset(ctx, g.p, branch, args)
+			argTypes := g.argTypes[:blockState.VariableCount]
+			g.reset(ctx, g.p, branch, args, argTypes)
 
 			// Configure stepping for volatile routines so that mutations made by the
 			// invoking statement are visible to the routine. Make sure to also step
@@ -629,9 +640,12 @@ func (g *routineGenerator) CanOptimizeTailCall(nestedRoutine *tree.RoutineExpr) 
 	return true
 }
 
-func (g *routineGenerator) SendDeferredRoutine(nestedRoutine *tree.RoutineExpr, args tree.Datums) {
+func (g *routineGenerator) SendDeferredRoutine(
+	nestedRoutine *tree.RoutineExpr, args tree.Datums, argTypes []*types.T,
+) {
 	g.deferredRoutine.expr = nestedRoutine
 	g.deferredRoutine.args = args
+	g.deferredRoutine.argTypes = argTypes
 }
 
 func (g *routineGenerator) newCursorHelper(plan *planComponents) (*plpgsqlCursorHelper, error) {
@@ -770,7 +784,7 @@ func (a *storedProcTxnStateAccessor) getTxnModes() *tree.TransactionModes {
 // EvalTxnControlExpr returns NULL, but this result is simply discarded without
 // being examined or modified when the transaction finishes.
 func (p *planner) EvalTxnControlExpr(
-	ctx context.Context, expr *tree.TxnControlExpr, args tree.Datums,
+	ctx context.Context, expr *tree.TxnControlExpr, args tree.Datums, argTypes []*types.T,
 ) (tree.Datum, error) {
 	if !p.EvalContext().TxnImplicit {
 		// Transaction control statements are not allowed in explicit transactions.
@@ -779,7 +793,7 @@ func (p *planner) EvalTxnControlExpr(
 			"PL/pgSQL COMMIT/ROLLBACK is not allowed in an explicit transaction",
 		)
 	}
-	resumeProc, err := expr.Gen(ctx, args)
+	resumeProc, err := expr.Gen(ctx, args, argTypes)
 	if err != nil {
 		return nil, err
 	}

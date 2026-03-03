@@ -242,20 +242,20 @@ type Planner interface {
 	// EvalRoutineExpr evaluates a routine with the given argument datums and
 	// returns the resulting datum.
 	EvalRoutineExpr(
-		ctx context.Context, expr *tree.RoutineExpr, args tree.Datums,
+		ctx context.Context, expr *tree.RoutineExpr, args tree.Datums, argTypes []*types.T,
 	) (tree.Datum, error)
 
 	// RoutineExprGenerator returns a ValueGenerator that produces the results
 	// of the routine.
 	RoutineExprGenerator(
-		ctx context.Context, expr *tree.RoutineExpr, args tree.Datums,
+		ctx context.Context, expr *tree.RoutineExpr, args tree.Datums, argTypes []*types.T,
 	) ValueGenerator
 
 	// EvalTxnControlExpr produces the side effects of a COMMIT or ROLLBACK
 	// statement within a PL/pgSQL stored procedure. See the sql.planner
 	// implementation for details.
 	EvalTxnControlExpr(
-		ctx context.Context, expr *tree.TxnControlExpr, args tree.Datums,
+		ctx context.Context, expr *tree.TxnControlExpr, args tree.Datums, argTypes []*types.T,
 	) (tree.Datum, error)
 
 	// GenerateTestObjects is used to generate a large number of
@@ -641,7 +641,7 @@ type DeferredRoutineSender interface {
 
 	// SendDeferredRoutine sends a local nested routine and its arguments to its
 	// parent routine.
-	SendDeferredRoutine(nestedRoutine *tree.RoutineExpr, args tree.Datums)
+	SendDeferredRoutine(nestedRoutine *tree.RoutineExpr, args tree.Datums, argTypes []*types.T)
 }
 
 // PrivilegedAccessor gives access to certain queries that would otherwise

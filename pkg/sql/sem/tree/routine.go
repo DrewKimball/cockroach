@@ -19,6 +19,11 @@ import (
 // within a routine. The given RoutinePlanGeneratedFunc is called for each plan
 // generated.
 //
+// - argTypes supplies the resolved concrete type of each argument. It is used
+// for routines with dynamic-typed parameters, which must know the concrete type
+// of the arguments to generate a plan. The evaluated arguments can lose typing
+// information, so they are not sufficient by themselves.
+//
 // A RoutinePlanGenerator must return an error if the RoutinePlanGeneratedFunc
 // returns an error.
 type RoutinePlanGenerator func(
@@ -26,6 +31,7 @@ type RoutinePlanGenerator func(
 	_ RoutineExecFactory,
 	_ RoutineResultWriter,
 	args Datums,
+	argTypes []*types.T,
 	fn RoutinePlanGeneratedFunc,
 ) error
 
@@ -342,17 +348,18 @@ type StoredProcContinuation interface{}
 
 // TxnControlPlanGenerator builds the plan for a StoredProcContinuation.
 type TxnControlPlanGenerator func(
-	ctx context.Context, args Datums,
+	ctx context.Context, args Datums, argTypes []*types.T,
 ) (StoredProcContinuation, error)
 
 // TxnControlExpr implements PL/pgSQL COMMIT and ROLLBACK statements. It directs
 // the session to end the current transaction, and provides a plan to resume
 // execution in a new transaction in the form of StoredProcContinuation.
 type TxnControlExpr struct {
-	Op    StoredProcTxnOp
-	Modes TransactionModes
-	Args  TypedExprs
-	Gen   TxnControlPlanGenerator
+	Op       StoredProcTxnOp
+	Modes    TransactionModes
+	Args     TypedExprs
+	ArgTypes []*types.T
+	Gen      TxnControlPlanGenerator
 
 	Name string
 	Typ  *types.T

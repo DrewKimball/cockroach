@@ -318,6 +318,7 @@ func (b *Builder) buildRoutine(
 
 		// Add any needed casts from argument type to parameter type, and add a
 		// correctly typed column to the bodyScope for each parameter.
+<<<<<<< Updated upstream
 		params = make(opt.ColList, len(paramTypes))
 		for i := range paramTypes {
 			argTyp := argTypes[i]
@@ -325,6 +326,21 @@ func (b *Builder) buildRoutine(
 			if desiredTyp.Identical(types.AnyTuple) {
 				// This is a RECORD-typed parameter. Use the actual argument type.
 				desiredTyp = argTyp
+=======
+		paramTyp, err := tree.ResolveType(b.ctx, param.Type, b.semaCtx.TypeResolver)
+		if err != nil {
+			panic(err)
+		}
+		isRecordType := paramTyp.Identical(types.AnyTuple)
+		if param.IsInParam() {
+			argTyp := argTypes[inParamIdx]
+			paramTyp = maybeReplacePolymorphicType(paramTyp, polyArgTyp)
+			if isRecordType {
+				// This is a RECORD-typed parameter. Use the actual argument type. Note
+				// that we check that a SQL routine doesn't have RECORD parameters
+				// during routine creation.
+				paramTyp = argTyp
+>>>>>>> Stashed changes
 			}
 			if !argTyp.Identical(desiredTyp) {
 				if !cast.ValidCast(argTyp, desiredTyp, cast.ContextAssignment) {
@@ -337,10 +353,28 @@ func (b *Builder) buildRoutine(
 				}
 				args[i] = b.factory.ConstructCast(args[i], desiredTyp)
 			}
+<<<<<<< Updated upstream
 			argColName := funcParamColName(tree.Name(paramTypes[i].Name), i)
 			col := b.synthesizeColumn(bodyScope, argColName, desiredTyp, nil /* expr */, nil /* scalar */)
 			col.setParamOrd(i)
 			params[i] = col.id
+=======
+			argColName := funcParamColName(param.Name, inParamIdx)
+			col := b.synthesizeColumn(bodyScope, argColName, paramTyp, nil /* expr */, nil /* scalar */)
+			col.setParamOrd(inParamIdx)
+			params[inParamIdx] = col.id
+			inParamIdx++
+		}
+		// Keep track of the all parameters with resolved types for PL/pgSQL
+		// routines. This includes OUT parameters.
+		if o.Language == tree.RoutineLangPLpgSQL {
+			paramsForPLpgSQL = append(paramsForPLpgSQL, routineParam{
+				name:       param.Name,
+				typ:        paramTyp,
+				class:      param.Class,
+				recordType: isRecordType,
+			})
+>>>>>>> Stashed changes
 		}
 	}
 
@@ -503,8 +537,13 @@ func (b *Builder) buildRoutine(
 			SetInsideDataSource(oldInsideDataSource).
 			SetIsProcedure(isProc)
 		plBuilder := newPLpgSQLBuilder(
+<<<<<<< Updated upstream
 			b, options, def.Name, stmt.AST.Label, colRefs,
 			routineParams, f.ResolvedType(), outScope, resultBufferID,
+=======
+			b, options, def.Name, stmt.AST.Label, paramsForPLpgSQL,
+			f.ResolvedType(), outScope, resultBufferID,
+>>>>>>> Stashed changes
 		)
 		stmtScope := plBuilder.buildRootBlock(stmt.AST, bodyScope, routineParams)
 		if !isSetReturning {
@@ -923,8 +962,8 @@ func (b *Builder) buildPLpgSQLDoBody(do *plpgsqltree.DoBlock) *scope {
 	// Build an expression for each statement in the function body.
 	options := basePLOptions().WithIsProcedure().WithIsDoBlock()
 	plBuilder := newPLpgSQLBuilder(
-		b, options, doBlockRoutineName, do.Block.Label, nil, /* colRefs */
-		nil /* routineParams */, types.Void, nil /* outScope */, 0, /* resultBufferID */
+		b, options, doBlockRoutineName, do.Block.Label, nil, /* routineParams */
+		types.Void, nil /* outScope */, 0, /* resultBufferID */
 	)
 	// Allocate a fresh scope, since DO blocks do not take parameters or reference
 	// variables or columns from the calling context.

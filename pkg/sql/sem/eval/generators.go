@@ -39,7 +39,7 @@ func GetFuncGenerator(
 func GetRoutineGenerator(
 	ctx context.Context, evalCtx *Context, expr *tree.RoutineExpr,
 ) (ValueGenerator, error) {
-	args, err := (*evaluator)(evalCtx).evalRoutineArgs(ctx, expr.Args)
+	args, argTypes, err := (*evaluator)(evalCtx).evalRoutineArgs(ctx, expr.Args)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func GetRoutineGenerator(
 			}
 		}
 	}
-	return (*evaluator)(evalCtx).Planner.RoutineExprGenerator(ctx, expr, args), nil
+	return (*evaluator)(evalCtx).Planner.RoutineExprGenerator(ctx, expr, args, argTypes), nil
 }
 
 // Table generators, also called "set-generating functions", are

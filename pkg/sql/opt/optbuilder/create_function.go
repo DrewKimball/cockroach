@@ -468,7 +468,7 @@ func (b *Builder) buildCreateFunction(cf *tree.CreateRoutine, inScope *scope) (o
 			SetSkipSQL(skipSQL)
 		b.factory.FoldingControl().TemporarilyDisallowStableFolds(func() {
 			plBuilder := newPLpgSQLBuilder(
-				b, options, cf.Name.Object(), stmt.AST.Label, nil /* colRefs */, routineParams,
+				b, options, cf.Name.Object(), stmt.AST.Label, routineParams,
 				funcReturnType, nil /* outScope */, 0, /* resultBufferID */
 			)
 			stmtScope = plBuilder.buildRootBlock(stmt.AST, bodyScope, routineParams)

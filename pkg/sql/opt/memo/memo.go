@@ -660,6 +660,11 @@ func (m *Memo) NextWithID() opt.WithID {
 	return m.curWithID
 }
 
+// MaxWithID returns the highest assigned identifier for a WITH expression.
+func (m *Memo) MaxWithID() opt.WithID {
+	return m.curWithID
+}
+
 // NextRoutineResultBufferID returns a not-yet-assigned identifier for the
 // result buffer of a PL/pgSQL set-returning function.
 func (m *Memo) NextRoutineResultBufferID() RoutineResultBufferID {
