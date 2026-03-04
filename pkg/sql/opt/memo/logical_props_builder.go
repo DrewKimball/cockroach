@@ -2043,6 +2043,7 @@ func MakeTableFuncDep(md *opt.Metadata, tabID opt.TableID) *props.FuncDepSet {
 		// Already made.
 		return fd
 	}
+	tableNotNullCols := makeTableNotNullCols(md, tabID)
 
 	// Make now and annotate the metadata table with it for next time.
 	var allCols opt.ColSet
@@ -2131,8 +2132,9 @@ func MakeTableFuncDep(md *opt.Metadata, tabID opt.TableID) *props.FuncDepSet {
 		hasNulls := false
 		for i := 0; i < unique.ColumnCount(); i++ {
 			ord := unique.ColumnOrdinal(tab, i)
-			keyCols.Add(tabID.ColumnID(ord))
-			if tab.Column(ord).IsNullable() {
+			colID := tabID.ColumnID(ord)
+			keyCols.Add(colID)
+			if tableNotNullCols.Contains(colID) {
 				hasNulls = true
 			}
 		}
@@ -2155,9 +2157,8 @@ func MakeTableFuncDep(md *opt.Metadata, tabID opt.TableID) *props.FuncDepSet {
 	// Add computed columns.
 	for i, n := 0, tab.ColumnCount(); i < n; i++ {
 		if tab.Column(i).IsComputed() {
-			tabMeta := md.TableMeta(tabID)
-			colID := tabMeta.MetaID.ColumnID(i)
-			expr := tabMeta.ComputedCols[colID]
+			colID := tabID.ColumnID(i)
+			expr := md.TableMeta(tabID).ComputedCols[colID]
 			if expr == nil {
 				// The computed columns haven't been added to the metadata.
 				continue
@@ -2182,8 +2183,105 @@ func MakeTableFuncDep(md *opt.Metadata, tabID opt.TableID) *props.FuncDepSet {
 		}
 	}
 
+	// Add functional dependencies inferred from foreign keys.
+	inferFuncDepsFromForeignKeys(md, tab, tabID, tableNotNullCols, fd)
+
 	md.SetTableAnnotation(tabID, fdAnnID, fd)
 	return fd
+}
+
+// inferFuncDepsFromForeignKeys attempts to search across foreign key
+// constraints to infer additional functional dependencies for the given table.
+// This is possible when the referenced table has a UNIQUE constraint on a
+// subset of the foreign key columns.
+func inferFuncDepsFromForeignKeys(
+	md *opt.Metadata, tab cat.Table, tabID opt.TableID, notNullCols opt.ColSet, fd *props.FuncDepSet,
+) {
+	// Helper to extract the table column ordinals from constraints.
+	getColOrds := func(
+		tab cat.Table, count int,
+		getOrdFromConstraint func(tab cat.Table, i int) (tableOrd int),
+	) intsets.Fast {
+		var ords intsets.Fast
+		for i := range count {
+			ords.Add(getOrdFromConstraint(tab, i))
+		}
+		return ords
+	}
+	// Helper to translate ordinals from referenced table to opt columns in the
+	// origin table via the foreign key. All given ordinals must be present in the
+	// foreign key.
+	originColsFromRefOrds := func(
+		refTab cat.Table, fk cat.ForeignKeyConstraint, refOrds intsets.Fast,
+	) opt.ColSet {
+		var originCols opt.ColSet
+		for i := range fk.ColumnCount() {
+			refOrd := fk.ReferencedColumnOrdinal(refTab, i)
+			if refOrds.Contains(refOrd) {
+				colID := tabID.ColumnID(fk.OriginColumnOrdinal(tab, i))
+				originCols.Add(colID)
+			}
+		}
+		if originCols.Len() != refOrds.Len() {
+			panic(errors.AssertionFailedf(
+				"could not translate columns from referenced to origin table",
+			))
+		}
+		return originCols
+	}
+	// Add from foreign keys.
+	for i := range tab.OutboundForeignKeyCount() {
+		fk := tab.OutboundForeignKey(i)
+		if !fk.Validated() {
+			continue
+		}
+		matchFull := fk.MatchMethod() == tree.MatchFull
+		refTab := md.GetCachedTable(fk.ReferencedTableID())
+		if refTab == nil {
+			// Referenced table is not in metadata cache.
+			continue
+		}
+		// Search for a unique constraint on the referenced table that implies a
+		// functional dependency among the referencing columns.
+		refOrds := getColOrds(refTab, fk.ColumnCount(), fk.ReferencedColumnOrdinal)
+		for j := range refTab.UniqueCount() {
+			unique := refTab.Unique(j)
+			if !unique.Validated() {
+				// This unique constraint has not been validated, so we cannot use it
+				// as a key.
+				continue
+			}
+			if _, isPartial := unique.Predicate(); isPartial {
+				// A partial unique constraint only holds for a subset of rows.
+				continue
+			}
+			uniqueOrds := getColOrds(refTab, unique.ColumnCount(), unique.ColumnOrdinal)
+			if refOrds.Len() > uniqueOrds.Len() && uniqueOrds.SubsetOf(refOrds) {
+				// If the columns in the unique constraint are a strict subset of those
+				// in the foreign key, there is a functional dependency from the unique
+				// columns to the remaining foreign key columns. This functional
+				// dependency can be mapped to the origin table.
+				from := originColsFromRefOrds(refTab, fk, uniqueOrds)
+				to := originColsFromRefOrds(refTab, fk, refOrds.Difference(uniqueOrds))
+				if from.SubsetOf(notNullCols) {
+					// If none of the determinant columns are nullable, then this is a
+					// strict functional dependency.
+					fd.AddStrictDependency(from, to)
+				} else if uniqueOrds.Len() == 1 || matchFull {
+					// If columns are nullable, it is possible for rows not to have
+					// matches. The unique constraint does not imply a dependency for
+					// these non-matching rows.
+					//
+					// We can still add a lax dependency if the non-matching rows are
+					// always fully NULL across all columns. This is the case if either
+					// there is only one column, or if the foreign key uses MATCH FULL.
+					// TODO(drewk): does this actually work? Do we need a non-null region
+					//  column as well?
+					fd.AddLaxDependency(from, to, notNullCols)
+				}
+			}
+		}
+	}
 }
 
 func (b *logicalPropsBuilder) makeSetCardinality(

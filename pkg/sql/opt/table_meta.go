@@ -387,7 +387,7 @@ func (tm *TableMeta) IndexKeyColumnsMapInverted(indexOrd int) ColSet {
 }
 
 // SetConstraints sets the filters derived from check constraints; see
-// TableMeta.Constraint. The argument must be a *FiltersExpr.
+// TableMeta.ZoneConstraint. The argument must be a *FiltersExpr.
 func (tm *TableMeta) SetConstraints(constraints ScalarExpr) {
 	tm.Constraints = constraints
 }

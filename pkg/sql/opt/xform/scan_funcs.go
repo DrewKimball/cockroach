@@ -194,12 +194,12 @@ func (c *CustomFuncs) GenerateLocalityOptimizedScan(
 		return
 	}
 
-	// If the Scan has no Constraint, retrieve the constraint of the form
+	// If the Scan has no ZoneConstraint, retrieve the constraint of the form
 	// 'part_col IN (<part_1>, <part_2> ... <part_n>)' plus an expression
 	// representing any gaps between defined partitions (if any), all combined
 	// in a single constraint.
 	// It is expected that this constraint covers all rows in the table, so it is
-	// equivalent to a nil Constraint.
+	// equivalent to a nil ZoneConstraint.
 	idxConstraint := scanPrivate.Constraint
 	if idxConstraint == nil {
 		var ok bool
@@ -357,7 +357,7 @@ func (c *CustomFuncs) getLocalAndRemoteFilters(
 // filters for the "index" belonging to the table described by "tabMeta", and
 // builds the full set of spans covering both defined partitions and rows
 // belonging to no defined partition (or partitions defined as DEFAULT). If a
-// Constraint fails to be built or if the Constraint is unconstrained, this
+// ZoneConstraint fails to be built or if the ZoneConstraint is unconstrained, this
 // function returns (nil, false).
 // Partition spans that are 100% local will not be merged with other spans. Note
 // that if the partitioning columns have no CHECK constraint defined, suboptimal

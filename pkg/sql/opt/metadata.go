@@ -96,6 +96,10 @@ type Metadata struct {
 	// TableID.index().
 	tables []TableMeta
 
+	// cachedTables allows optimizer rules to resolve and cache tables that are
+	// not referenced by the query, but which may be useful during optimization.
+	cachedTables map[cat.StableID]cat.Table
+
 	// sequences stores information about each metadata sequence, indexed by SequenceID.
 	sequences []cat.Sequence
 
@@ -180,6 +184,14 @@ func (md *Metadata) Init() {
 		tables[i] = TableMeta{}
 	}
 
+	cachedTables := md.cachedTables
+	if cachedTables == nil {
+		cachedTables = make(map[cat.StableID]cat.Table)
+	}
+	for name := range md.cachedTables {
+		delete(md.cachedTables, name)
+	}
+
 	sequences := md.sequences
 	for i := range sequences {
 		sequences[i] = nil
@@ -257,8 +269,9 @@ func (md *Metadata) CopyFrom(from *Metadata, copyScalarFn func(Expr) Expr) {
 	if len(md.schemas) != 0 || len(md.cols) != 0 || len(md.tables) != 0 ||
 		len(md.sequences) != 0 || len(md.views) != 0 || len(md.userDefinedTypes) != 0 ||
 		len(md.userDefinedTypesSlice) != 0 || len(md.dataSourceDeps) != 0 ||
-		len(md.routineDeps) != 0 || len(md.objectRefsByName) != 0 || len(md.privileges) != 0 ||
-		len(md.builtinRefsByName) != 0 || md.rlsMeta.IsInitialized || len(md.hintIDs) != 0 {
+		len(md.cachedTables) != 0 || len(md.routineDeps) != 0 || len(md.objectRefsByName) != 0 ||
+		len(md.privileges) != 0 || len(md.builtinRefsByName) != 0 || md.rlsMeta.IsInitialized ||
+		len(md.hintIDs) != 0 {
 		panic(errors.AssertionFailedf("CopyFrom requires empty destination"))
 	}
 	md.schemas = append(md.schemas, from.schemas...)
@@ -292,6 +305,13 @@ func (md *Metadata) CopyFrom(from *Metadata, copyScalarFn func(Expr) Expr) {
 			// RegionConfig more than once for a given table.
 			md.SetTableAnnotation(tabID, regionConfigAnnID, regionConfig)
 		}
+	}
+
+	for id, tab := range from.cachedTables {
+		if md.cachedTables == nil {
+			md.cachedTables = make(map[cat.StableID]cat.Table)
+		}
+		md.cachedTables[id] = tab
 	}
 
 	for id, dataSource := range from.dataSourceDeps {
@@ -965,6 +985,25 @@ func (md *Metadata) AllTables() []TableMeta {
 // NumTables returns the number of tables in the metadata.
 func (md *Metadata) NumTables() int {
 	return len(md.tables)
+}
+
+// CacheTable caches the given table by its StableID. Returns true if the table
+// was not already cached.
+func (md *Metadata) CacheTable(tab cat.Table) bool {
+	if md.cachedTables == nil {
+		md.cachedTables = make(map[cat.StableID]cat.Table)
+	}
+	if _, inCache := md.cachedTables[tab.ID()]; inCache {
+		return false
+	}
+	md.cachedTables[tab.ID()] = tab
+	return true
+}
+
+// GetCachedTable retrieves a cached table by its StableID, or nil if the table
+// was not cached by calling CacheTable.
+func (md *Metadata) GetCachedTable(id cat.StableID) cat.Table {
+	return md.cachedTables[id]
 }
 
 // AddColumn assigns a new unique id to a column within the query and records

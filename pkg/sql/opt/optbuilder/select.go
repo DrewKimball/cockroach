@@ -492,6 +492,7 @@ func (b *Builder) buildScanFromTableRef(
 func (b *Builder) addTable(tab cat.Table, alias *tree.TableName) *opt.TableMeta {
 	md := b.factory.Metadata()
 	tabID := md.AddTable(tab, alias)
+	b.factory.OnAddTable(tab)
 	return md.TableMeta(tabID)
 }
 

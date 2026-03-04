@@ -893,6 +893,12 @@ func (f *FuncDepSet) AddStrictDependency(from, to opt.ColSet) {
 	f.tryToReduceKey(opt.ColSet{} /* notNullCols */)
 }
 
+// AddLaxDependency adds a new lax dependency to the set.
+func (f *FuncDepSet) AddLaxDependency(from, to, notNullCols opt.ColSet) {
+	f.addDependencyWithNotNullCols(from, to, notNullCols, false /* strict */)
+	f.tryToReduceKey(notNullCols)
+}
+
 // AddConstants adds a strict FD to the set that declares each given column as
 // having the same constant value for all rows. If a column is nullable, then
 // its value may be NULL, but then the column must be NULL for all rows. For
@@ -1774,6 +1780,7 @@ func (f *FuncDepSet) inClosureOf(cols, in opt.ColSet, strict bool) bool {
 	// properties that hold for lax dependencies), so only include them if they
 	// are reachable in a single lax dependency step from the input set.
 	if !strict {
+		// TODO: should be possible to reduce one lax dep with another in some cases
 		// Keep track of all columns reached through a lax or strict dependency.
 		laxIn := in.Copy()
 		for i := 0; i < len(f.deps); i++ {
@@ -1818,10 +1825,17 @@ func (f *FuncDepSet) inClosureOf(cols, in opt.ColSet, strict bool) bool {
 	return false
 }
 
-// addDependency adds a new dependency into the set. If another FD implies the
-// new FD, then it's not added. If it can be merged with an existing FD, that is
-// done. Otherwise, a brand new FD is added to the set.
+// addDependency is similar to addDependencyWithNotNullCols, but passes an empty
+// notNullCols set.
 func (f *FuncDepSet) addDependency(from, to opt.ColSet, strict bool) {
+	f.addDependencyWithNotNullCols(from, to, opt.ColSet{}, strict)
+}
+
+// addDependencyWithNotNullCols adds a new dependency into the set. If another
+// FD implies the new FD, then it's not added. If it can be merged with an
+// existing FD, that is done. Otherwise, a brand new FD is added to the set.
+// The notNullCols set is used for reducing lax dependencies.
+func (f *FuncDepSet) addDependencyWithNotNullCols(from, to, notNullCols opt.ColSet, strict bool) {
 	// Fast-path for trivial no-op dependency.
 	if to.SubsetOf(from) {
 		return
@@ -1882,6 +1896,36 @@ func (f *FuncDepSet) addDependency(from, to opt.ColSet, strict bool) {
 				// The new FD can at least add its determinant to an existing FD.
 				fd.to = fd.to.Union(to)
 				added = true
+			} else if (strict || !fd.strict) && from.SubsetOf(fd.from) {
+				// The new FD may be able to reduce an existing FD.
+				toIntersectsFrom := to.Intersects(fd.from)
+				if toIntersectsFrom && !fd.strict {
+					// There is some subtlety when the new FD's dependent includes some
+					// columns from the existing FD's determinant. If the existing FD is
+					// lax, we can only remove columns from its determinant if they are
+					// known to be not-null. Example:
+					//   (a,b)~~>(c), (a)-->(b)
+					// If b is nullable, it is valid for (a,b,c) to have these rows:
+					//   (1, NULL, 1)
+					//   (1, NULL, 2)
+					// Thus, we cannot reduce the FD to (a)~~>(c) if b is nullable.
+					reduceCols := to.Intersection(fd.from)
+					reduceCols.IntersectionWith(notNullCols)
+					fd.from = fd.from.Difference(reduceCols)
+					fd.to = fd.to.Union(to)
+					fd.to.DifferenceWith(fd.from)
+					fd.to.UnionWith(reduceCols)
+				} else {
+					// Simply combine the dependent columns.
+					fd.to = fd.to.Union(to)
+					if toIntersectsFrom {
+						// Remove dependant columns from the determinant.
+						fd.from = fd.from.Difference(fd.to)
+					}
+				}
+
+				// It is possible that the result now implies the new FD.
+				added = fd.implies(&newFD)
 			}
 		}
 
@@ -2016,6 +2060,27 @@ func (f *funcDep) implies(fd *funcDep) bool {
 	}
 	return false
 }
+
+//// combine attempts to add information from the given FD into this FD. This is
+//// possible when the given FD's determinant is a subset of this FD's
+//// determinant. This results in a larger dependant, and can result in a stronger
+//// FD if columns can be removed from this FD's determinant. It returns true if
+//// this FD was improved.
+//func (f *funcDep) combine(fd *funcDep, notNullCols opt.ColSet) bool {
+//	if f.strict && !fd.strict {
+//		// Cannot combine a lax FD with a strict FD.
+//		return false
+//	}
+//	if fd.from.Len() >= f.from.Len() || !fd.from.SubsetOf(f.from) {
+//		// The given FD's determinant must be a strict subset of this FD's
+//		// determinant.
+//		return false
+//	}
+//	toAdd := fd.to
+//	if !f.strict {
+//		toAdd = toAdd.Intersection(notNullCols)
+//	}
+//}
 
 // removeFromCols removes columns in the given set from this FD's determinant.
 // If removing columns results in an empty determinant, then removeFromCols

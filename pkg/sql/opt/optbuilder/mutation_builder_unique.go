@@ -6,6 +6,8 @@
 package optbuilder
 
 import (
+	"fmt"
+
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/concurrency/isolation"
 	"github.com/cockroachdb/cockroach/pkg/server/telemetry"
 	"github.com/cockroachdb/cockroach/pkg/settings"
@@ -351,6 +353,14 @@ func (h *uniqueCheckHelper) init(mb *mutationBuilder, uniqueOrdinal int) bool {
 		uniqueCols.Add(colID)
 	})
 	fds := &h.scanScope.expr.Relational().FuncDeps
+	fmt.Println("unique check")
+	scanCols := h.scanScope.expr.Relational().OutputCols
+	md := h.mb.b.factory.Metadata()
+	for i, ok := scanCols.Next(0); ok; i, ok = scanCols.Next(i + 1) {
+		fmt.Println(i, md.ColumnMeta(i).Alias)
+	}
+	fmt.Println(fds)
+	fmt.Println(uniqueCols)
 	return !fds.ColsAreLaxKey(uniqueCols)
 }
 

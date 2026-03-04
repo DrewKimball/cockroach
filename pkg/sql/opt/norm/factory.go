@@ -476,6 +476,47 @@ func (f *Factory) onConstructScalar(scalar opt.ScalarExpr) opt.ScalarExpr {
 	return scalar
 }
 
+// OnAddTable is called by the opt-builder when a table is added to the
+// metadata. It can be called multiple times for the same table.
+func (f *Factory) OnAddTable(tab cat.Table) {
+	md := f.mem.Metadata()
+	md.CacheTable(tab)
+	if tab.IsRegionalByRow() {
+		// RBR tables benefit from an optimization that requires access to tables
+		// referenced by outbound foreign keys with the region column. Resolve these
+		// tables now, since they may not be directly referenced by the query.
+		// NOTE: while other cases could benefit in theory, this step is too
+		// expensive to do unconditionally.
+		//
+		// The region column is always the first column in the primary index.
+		regionColOrd := tab.Index(cat.PrimaryIndex).Column(0).Ordinal()
+		fkCount := tab.OutboundForeignKeyCount()
+		for i := range fkCount {
+			fk := tab.OutboundForeignKey(i)
+			if !fk.Validated() {
+				continue
+			}
+			hasRegionCol := func() bool {
+				for j := range fk.ColumnCount() {
+					if fk.OriginColumnOrdinal(tab, j) == regionColOrd {
+						return true
+					}
+				}
+				return false
+			}()
+			if !hasRegionCol {
+				continue
+			}
+			ds, _, err := f.catalog.ResolveDataSourceByID(f.ctx, cat.Flags{}, fk.ReferencedTableID())
+			if err != nil {
+				// Ignore tables that can't be resolved.
+				continue
+			}
+			md.CacheTable(ds.(cat.Table))
+		}
+	}
+}
+
 // ----------------------------------------------------------------------
 //
 // Convenience construction methods.

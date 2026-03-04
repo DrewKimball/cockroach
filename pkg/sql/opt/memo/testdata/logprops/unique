@@ -21,13 +21,13 @@ SELECT * FROM t
 project
  ├── columns: x:1(int!null) y:2(int) z:3(int!null) a:4(int) b:5(int!null) c:6(int!null)
  ├── key: (1)
- ├── fd: (1)-->(2-6), (2)~~>(1,3-6), (3)-->(1,2,4-6), (4,5)~~>(1-3,6), (5,6)-->(1-4)
+ ├── fd: (1)-->(2-6), (2)-->(1,3-6), (3)-->(1,2,4-6), (4,5)~~>(1-3,6), (5,6)-->(1-4)
  ├── prune: (1-6)
  ├── interesting orderings: (+1)
  └── scan t
       ├── columns: x:1(int!null) y:2(int) z:3(int!null) a:4(int) b:5(int!null) c:6(int!null) crdb_internal_mvcc_timestamp:7(decimal) tableoid:8(oid)
       ├── key: (1)
-      ├── fd: (1)-->(2-8), (2)~~>(1,3-8), (3)-->(1,2,4-8), (4,5)~~>(1-3,6-8), (5,6)-->(1-4,7,8)
+      ├── fd: (1)-->(2-8), (2)-->(1,3-8), (3)-->(1,2,4-8), (4,5)~~>(1-3,6-8), (5,6)-->(1-4,7,8)
       ├── prune: (1-8)
       └── interesting orderings: (+1)
 
@@ -51,7 +51,7 @@ project
       ├── scan t
       │    ├── columns: x:1(int!null) y:2(int) z:3(int!null) a:4(int) b:5(int!null) c:6(int!null) crdb_internal_mvcc_timestamp:7(decimal) tableoid:8(oid)
       │    ├── key: (1)
-      │    ├── fd: (1)-->(2-8), (2)~~>(1,3-8), (3)-->(1,2,4-8), (4,5)~~>(1-3,6-8), (5,6)-->(1-4,7,8)
+      │    ├── fd: (1)-->(2-8), (2)-->(1,3-8), (3)-->(1,2,4-8), (4,5)~~>(1-3,6-8), (5,6)-->(1-4,7,8)
       │    ├── prune: (1-8)
       │    └── interesting orderings: (+1)
       └── filters
@@ -79,7 +79,7 @@ project
       ├── scan t
       │    ├── columns: x:1(int!null) y:2(int) z:3(int!null) a:4(int) b:5(int!null) c:6(int!null) crdb_internal_mvcc_timestamp:7(decimal) tableoid:8(oid)
       │    ├── key: (1)
-      │    ├── fd: (1)-->(2-8), (2)~~>(1,3-8), (3)-->(1,2,4-8), (4,5)~~>(1-3,6-8), (5,6)-->(1-4,7,8)
+      │    ├── fd: (1)-->(2-8), (2)-->(1,3-8), (3)-->(1,2,4-8), (4,5)~~>(1-3,6-8), (5,6)-->(1-4,7,8)
       │    ├── prune: (1-8)
       │    └── interesting orderings: (+1)
       └── filters
@@ -90,3 +90,1084 @@ project
                 └── eq [type=bool]
                      ├── variable: b:5 [type=int]
                      └── const: 1 [type=int]
+
+# ------------------------------------------------------------------------------
+# Test interaction between unique checks and multi-region features.
+# ------------------------------------------------------------------------------
+
+# Given a FK reference to a parent table which is unique on a subset of the FK
+# columns, it is possible to infer a functional dependency on the child table.
+# Currently, this optimization is only applied to RBR tables and results in
+# FDs of the form (parent_id --> crdb_region). This results in two improvements:
+#
+# 1) If the child has a UNIQUE constraint on (parent_id), we can avoid expensive
+#    cross-region unique checks, and instead only check the region supplied by
+#    the input row.
+#
+# 2) If the child has a UNIQUE constraint on (crdb_region, parent_id), we can
+#    prove that (parent_id) alone is a key, potentially enabling other
+#    optimization rules to fire.
+#
+exec-ddl
+CREATE TABLE parent (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  pVal INT
+) LOCALITY REGIONAL BY ROW;
+----
+
+# Test UNIQUE constraint with nullable parent_id column only.
+exec-ddl
+CREATE TABLE child_nullable_no_region_col (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  parent_id UUID,
+  cVal INT,
+  FOREIGN KEY (crdb_region, parent_id) REFERENCES parent (crdb_region, id),
+  UNIQUE (parent_id)
+) LOCALITY REGIONAL BY ROW;
+----
+
+# Test UNIQUE constraint with nullable parent_id column and region column.
+exec-ddl
+CREATE TABLE child_nullable_region_col (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  parent_id UUID,
+  cVal INT,
+  FOREIGN KEY (crdb_region, parent_id) REFERENCES parent (crdb_region, id),
+  UNIQUE (crdb_region, parent_id)
+) LOCALITY REGIONAL BY ROW;
+----
+
+# Test UNIQUE constraint with non-NULL parent_id column only.
+exec-ddl
+CREATE TABLE child_no_region_col (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  parent_id UUID NOT NULL,
+  cVal INT,
+  FOREIGN KEY (crdb_region, parent_id) REFERENCES parent (crdb_region, id),
+  UNIQUE (parent_id)
+) LOCALITY REGIONAL BY ROW;
+----
+
+# Test UNIQUE constraint with non-NULL parent_id column and region column.
+exec-ddl
+CREATE TABLE child_region_col (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  parent_id UUID NOT NULL,
+  cVal INT,
+  FOREIGN KEY (crdb_region, parent_id) REFERENCES parent (crdb_region, id),
+  UNIQUE (crdb_region, parent_id)
+) LOCALITY REGIONAL BY ROW;
+----
+
+exec-ddl
+CREATE TABLE parent_multi (
+  a INT,
+  b INT,
+  pVal INT,
+  PRIMARY KEY (a, b)
+) LOCALITY REGIONAL BY ROW;
+----
+
+exec-ddl
+CREATE TABLE child_multi_nullable_no_region_col (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  parent_a INT,
+  parent_b INT,
+  cVal INT,
+  FOREIGN KEY (crdb_region, parent_a, parent_b) REFERENCES parent_multi (crdb_region, a, b),
+  UNIQUE (parent_a, parent_b)
+) LOCALITY REGIONAL BY ROW;
+----
+
+exec-ddl
+CREATE TABLE child_multi_nullable_region_col (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  parent_a INT,
+  parent_b INT,
+  cVal INT,
+  FOREIGN KEY (crdb_region, parent_a, parent_b) REFERENCES parent_multi (crdb_region, a, b),
+  UNIQUE (crdb_region, parent_a, parent_b)
+) LOCALITY REGIONAL BY ROW;
+----
+
+exec-ddl
+CREATE TABLE child_multi_no_region_col (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  parent_a INT NOT NULL,
+  parent_b INT NOT NULL,
+  cVal INT,
+  FOREIGN KEY (crdb_region, parent_a, parent_b) REFERENCES parent_multi (crdb_region, a, b),
+  UNIQUE (parent_a, parent_b)
+) LOCALITY REGIONAL BY ROW;
+----
+
+exec-ddl
+CREATE TABLE child_multi_region_col (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  parent_a INT NOT NULL,
+  parent_b INT NOT NULL,
+  cVal INT,
+  FOREIGN KEY (crdb_region, parent_a, parent_b) REFERENCES parent_multi (crdb_region, a, b),
+  UNIQUE (crdb_region, parent_a, parent_b)
+) LOCALITY REGIONAL BY ROW;
+----
+
+build
+INSERT INTO child_nullable_no_region_col (parent_id, cVal) VALUES ('00000000-0000-0000-0000-000000000001', 10);
+----
+insert child_nullable_no_region_col
+ ├── columns: <none>
+ ├── insert-mapping:
+ │    ├── id_default:9 => child_nullable_no_region_col.id:1
+ │    ├── column1:7 => child_nullable_no_region_col.parent_id:2
+ │    ├── column2:8 => cval:3
+ │    └── crdb_region_default:10 => child_nullable_no_region_col.crdb_region:4
+ ├── check columns: check1:11(bool)
+ ├── input binding: &1
+ ├── cardinality: [0 - 0]
+ ├── stable+volatile, mutations
+ ├── project
+ │    ├── columns: check1:11(bool) column1:7(uuid!null) column2:8(int!null) id_default:9(uuid) crdb_region_default:10(string)
+ │    ├── cardinality: [1 - 1]
+ │    ├── stable+volatile
+ │    ├── key: ()
+ │    ├── fd: ()-->(7-11)
+ │    ├── prune: (7-11)
+ │    ├── project
+ │    │    ├── columns: id_default:9(uuid) crdb_region_default:10(string) column1:7(uuid!null) column2:8(int!null)
+ │    │    ├── cardinality: [1 - 1]
+ │    │    ├── stable+volatile
+ │    │    ├── key: ()
+ │    │    ├── fd: ()-->(7-10)
+ │    │    ├── prune: (7-10)
+ │    │    ├── values
+ │    │    │    ├── columns: column1:7(uuid!null) column2:8(int!null)
+ │    │    │    ├── cardinality: [1 - 1]
+ │    │    │    ├── key: ()
+ │    │    │    ├── fd: ()-->(7,8)
+ │    │    │    ├── prune: (7,8)
+ │    │    │    └── tuple [type=tuple{uuid, int}]
+ │    │    │         ├── const: '00000000-0000-0000-0000-000000000001' [type=uuid]
+ │    │    │         └── const: 10 [type=int]
+ │    │    └── projections
+ │    │         ├── function: gen_random_uuid [as=id_default:9, type=uuid, volatile]
+ │    │         └── function: default_to_database_primary_region [as=crdb_region_default:10, type=string, stable]
+ │    │              └── function: gateway_region [type=string]
+ │    └── projections
+ │         └── in [as=check1:11, type=bool, outer=(10)]
+ │              ├── variable: crdb_region_default:10 [type=string]
+ │              └── tuple [type=tuple{string, string, string}]
+ │                   ├── const: 'east' [type=string]
+ │                   ├── const: 'central' [type=string]
+ │                   └── const: 'west' [type=string]
+ └── f-k-checks
+      └── f-k-checks-item: child_nullable_no_region_col(crdb_region,parent_id) -> parent(crdb_region,id)
+           └── anti-join (hash)
+                ├── columns: crdb_region:18(string) parent_id:19(uuid!null)
+                ├── cardinality: [0 - 1]
+                ├── key: ()
+                ├── fd: ()-->(18,19)
+                ├── with-scan &1
+                │    ├── columns: crdb_region:18(string) parent_id:19(uuid!null)
+                │    ├── mapping:
+                │    │    ├──  crdb_region_default:10(string) => crdb_region:18(string)
+                │    │    └──  column1:7(uuid) => parent_id:19(uuid)
+                │    ├── cardinality: [1 - 1]
+                │    ├── key: ()
+                │    ├── fd: ()-->(18,19)
+                │    └── prune: (18,19)
+                ├── scan parent
+                │    ├── columns: parent.id:20(uuid!null) parent.crdb_region:22(string!null)
+                │    ├── check constraint expressions
+                │    │    └── in [type=bool, outer=(22), constraints=(/22: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+                │    │         ├── variable: parent.crdb_region:22 [type=string]
+                │    │         └── tuple [type=tuple{string, string, string}]
+                │    │              ├── const: 'east' [type=string]
+                │    │              ├── const: 'central' [type=string]
+                │    │              └── const: 'west' [type=string]
+                │    ├── flags: avoid-full-scan
+                │    ├── key: (20)
+                │    ├── fd: (20)-->(22)
+                │    ├── prune: (20,22)
+                │    ├── interesting orderings: (+22,+20)
+                │    └── unfiltered-cols: (20-24)
+                └── filters
+                     ├── eq [type=bool, outer=(18,22), constraints=(/18: (/NULL - ]; /22: (/NULL - ]), fd=(18)==(22), (22)==(18)]
+                     │    ├── variable: crdb_region:18 [type=string]
+                     │    └── variable: parent.crdb_region:22 [type=string]
+                     └── eq [type=bool, outer=(19,20), constraints=(/19: (/NULL - ]; /20: (/NULL - ]), fd=(19)==(20), (20)==(19)]
+                          ├── variable: parent_id:19 [type=uuid]
+                          └── variable: parent.id:20 [type=uuid]
+
+build
+SELECT *, crdb_region FROM child_nullable_no_region_col
+----
+project
+ ├── columns: id:1(uuid!null) parent_id:2(uuid) cval:3(int) crdb_region:4(string!null)
+ ├── key: (2)
+ ├── fd: (1)-->(2-4), (2)-->(1,3,4)
+ ├── prune: (1-4)
+ ├── interesting orderings: (+4,+1) (+4,+2)
+ └── scan child_nullable_no_region_col
+      ├── columns: id:1(uuid!null) parent_id:2(uuid) cval:3(int) crdb_region:4(string!null) crdb_internal_mvcc_timestamp:5(decimal) tableoid:6(oid)
+      ├── check constraint expressions
+      │    └── in [type=bool, outer=(4), constraints=(/4: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+      │         ├── variable: crdb_region:4 [type=string]
+      │         └── tuple [type=tuple{string, string, string}]
+      │              ├── const: 'east' [type=string]
+      │              ├── const: 'central' [type=string]
+      │              └── const: 'west' [type=string]
+      ├── key: (2)
+      ├── fd: (1)-->(2-6), (2)-->(1,3-6)
+      ├── prune: (1-6)
+      └── interesting orderings: (+4,+1) (+4,+2)
+
+build
+INSERT INTO child_nullable_region_col (parent_id, cVal) VALUES ('00000000-0000-0000-0000-000000000001', 10);
+----
+insert child_nullable_region_col
+ ├── columns: <none>
+ ├── insert-mapping:
+ │    ├── id_default:9 => child_nullable_region_col.id:1
+ │    ├── column1:7 => child_nullable_region_col.parent_id:2
+ │    ├── column2:8 => cval:3
+ │    └── crdb_region_default:10 => child_nullable_region_col.crdb_region:4
+ ├── check columns: check1:11(bool)
+ ├── input binding: &1
+ ├── cardinality: [0 - 0]
+ ├── stable+volatile, mutations
+ ├── project
+ │    ├── columns: check1:11(bool) column1:7(uuid!null) column2:8(int!null) id_default:9(uuid) crdb_region_default:10(string)
+ │    ├── cardinality: [1 - 1]
+ │    ├── stable+volatile
+ │    ├── key: ()
+ │    ├── fd: ()-->(7-11)
+ │    ├── prune: (7-11)
+ │    ├── project
+ │    │    ├── columns: id_default:9(uuid) crdb_region_default:10(string) column1:7(uuid!null) column2:8(int!null)
+ │    │    ├── cardinality: [1 - 1]
+ │    │    ├── stable+volatile
+ │    │    ├── key: ()
+ │    │    ├── fd: ()-->(7-10)
+ │    │    ├── prune: (7-10)
+ │    │    ├── values
+ │    │    │    ├── columns: column1:7(uuid!null) column2:8(int!null)
+ │    │    │    ├── cardinality: [1 - 1]
+ │    │    │    ├── key: ()
+ │    │    │    ├── fd: ()-->(7,8)
+ │    │    │    ├── prune: (7,8)
+ │    │    │    └── tuple [type=tuple{uuid, int}]
+ │    │    │         ├── const: '00000000-0000-0000-0000-000000000001' [type=uuid]
+ │    │    │         └── const: 10 [type=int]
+ │    │    └── projections
+ │    │         ├── function: gen_random_uuid [as=id_default:9, type=uuid, volatile]
+ │    │         └── function: default_to_database_primary_region [as=crdb_region_default:10, type=string, stable]
+ │    │              └── function: gateway_region [type=string]
+ │    └── projections
+ │         └── in [as=check1:11, type=bool, outer=(10)]
+ │              ├── variable: crdb_region_default:10 [type=string]
+ │              └── tuple [type=tuple{string, string, string}]
+ │                   ├── const: 'east' [type=string]
+ │                   ├── const: 'central' [type=string]
+ │                   └── const: 'west' [type=string]
+ └── f-k-checks
+      └── f-k-checks-item: child_nullable_region_col(crdb_region,parent_id) -> parent(crdb_region,id)
+           └── anti-join (hash)
+                ├── columns: crdb_region:18(string) parent_id:19(uuid!null)
+                ├── cardinality: [0 - 1]
+                ├── key: ()
+                ├── fd: ()-->(18,19)
+                ├── with-scan &1
+                │    ├── columns: crdb_region:18(string) parent_id:19(uuid!null)
+                │    ├── mapping:
+                │    │    ├──  crdb_region_default:10(string) => crdb_region:18(string)
+                │    │    └──  column1:7(uuid) => parent_id:19(uuid)
+                │    ├── cardinality: [1 - 1]
+                │    ├── key: ()
+                │    ├── fd: ()-->(18,19)
+                │    └── prune: (18,19)
+                ├── scan parent
+                │    ├── columns: parent.id:20(uuid!null) parent.crdb_region:22(string!null)
+                │    ├── check constraint expressions
+                │    │    └── in [type=bool, outer=(22), constraints=(/22: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+                │    │         ├── variable: parent.crdb_region:22 [type=string]
+                │    │         └── tuple [type=tuple{string, string, string}]
+                │    │              ├── const: 'east' [type=string]
+                │    │              ├── const: 'central' [type=string]
+                │    │              └── const: 'west' [type=string]
+                │    ├── flags: avoid-full-scan
+                │    ├── key: (20)
+                │    ├── fd: (20)-->(22)
+                │    ├── prune: (20,22)
+                │    ├── interesting orderings: (+22,+20)
+                │    └── unfiltered-cols: (20-24)
+                └── filters
+                     ├── eq [type=bool, outer=(18,22), constraints=(/18: (/NULL - ]; /22: (/NULL - ]), fd=(18)==(22), (22)==(18)]
+                     │    ├── variable: crdb_region:18 [type=string]
+                     │    └── variable: parent.crdb_region:22 [type=string]
+                     └── eq [type=bool, outer=(19,20), constraints=(/19: (/NULL - ]; /20: (/NULL - ]), fd=(19)==(20), (20)==(19)]
+                          ├── variable: parent_id:19 [type=uuid]
+                          └── variable: parent.id:20 [type=uuid]
+
+build
+SELECT *, crdb_region FROM child_nullable_region_col
+----
+project
+ ├── columns: id:1(uuid!null) parent_id:2(uuid) cval:3(int) crdb_region:4(string!null)
+ ├── key: (1)
+ ├── fd: (1)-->(2-4), (2)~~>(1,3,4)
+ ├── prune: (1-4)
+ ├── interesting orderings: (+4,+1) (+4,+2,+1)
+ └── scan child_nullable_region_col
+      ├── columns: id:1(uuid!null) parent_id:2(uuid) cval:3(int) crdb_region:4(string!null) crdb_internal_mvcc_timestamp:5(decimal) tableoid:6(oid)
+      ├── check constraint expressions
+      │    └── in [type=bool, outer=(4), constraints=(/4: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+      │         ├── variable: crdb_region:4 [type=string]
+      │         └── tuple [type=tuple{string, string, string}]
+      │              ├── const: 'east' [type=string]
+      │              ├── const: 'central' [type=string]
+      │              └── const: 'west' [type=string]
+      ├── key: (1)
+      ├── fd: (1)-->(2-6), (2)~~>(1,3-6)
+      ├── prune: (1-6)
+      └── interesting orderings: (+4,+1) (+4,+2,+1)
+
+build
+INSERT INTO child_no_region_col (parent_id, cVal) VALUES ('00000000-0000-0000-0000-000000000001', 10);
+----
+insert child_no_region_col
+ ├── columns: <none>
+ ├── insert-mapping:
+ │    ├── id_default:9 => child_no_region_col.id:1
+ │    ├── column1:7 => child_no_region_col.parent_id:2
+ │    ├── column2:8 => cval:3
+ │    └── crdb_region_default:10 => child_no_region_col.crdb_region:4
+ ├── check columns: check1:11(bool)
+ ├── input binding: &1
+ ├── cardinality: [0 - 0]
+ ├── stable+volatile, mutations
+ ├── project
+ │    ├── columns: check1:11(bool) column1:7(uuid!null) column2:8(int!null) id_default:9(uuid) crdb_region_default:10(string)
+ │    ├── cardinality: [1 - 1]
+ │    ├── stable+volatile
+ │    ├── key: ()
+ │    ├── fd: ()-->(7-11)
+ │    ├── prune: (7-11)
+ │    ├── project
+ │    │    ├── columns: id_default:9(uuid) crdb_region_default:10(string) column1:7(uuid!null) column2:8(int!null)
+ │    │    ├── cardinality: [1 - 1]
+ │    │    ├── stable+volatile
+ │    │    ├── key: ()
+ │    │    ├── fd: ()-->(7-10)
+ │    │    ├── prune: (7-10)
+ │    │    ├── values
+ │    │    │    ├── columns: column1:7(uuid!null) column2:8(int!null)
+ │    │    │    ├── cardinality: [1 - 1]
+ │    │    │    ├── key: ()
+ │    │    │    ├── fd: ()-->(7,8)
+ │    │    │    ├── prune: (7,8)
+ │    │    │    └── tuple [type=tuple{uuid, int}]
+ │    │    │         ├── const: '00000000-0000-0000-0000-000000000001' [type=uuid]
+ │    │    │         └── const: 10 [type=int]
+ │    │    └── projections
+ │    │         ├── function: gen_random_uuid [as=id_default:9, type=uuid, volatile]
+ │    │         └── function: default_to_database_primary_region [as=crdb_region_default:10, type=string, stable]
+ │    │              └── function: gateway_region [type=string]
+ │    └── projections
+ │         └── in [as=check1:11, type=bool, outer=(10)]
+ │              ├── variable: crdb_region_default:10 [type=string]
+ │              └── tuple [type=tuple{string, string, string}]
+ │                   ├── const: 'east' [type=string]
+ │                   ├── const: 'central' [type=string]
+ │                   └── const: 'west' [type=string]
+ └── f-k-checks
+      └── f-k-checks-item: child_no_region_col(crdb_region,parent_id) -> parent(crdb_region,id)
+           └── anti-join (hash)
+                ├── columns: crdb_region:18(string) parent_id:19(uuid!null)
+                ├── cardinality: [0 - 1]
+                ├── key: ()
+                ├── fd: ()-->(18,19)
+                ├── with-scan &1
+                │    ├── columns: crdb_region:18(string) parent_id:19(uuid!null)
+                │    ├── mapping:
+                │    │    ├──  crdb_region_default:10(string) => crdb_region:18(string)
+                │    │    └──  column1:7(uuid) => parent_id:19(uuid)
+                │    ├── cardinality: [1 - 1]
+                │    ├── key: ()
+                │    ├── fd: ()-->(18,19)
+                │    └── prune: (18,19)
+                ├── scan parent
+                │    ├── columns: parent.id:20(uuid!null) parent.crdb_region:22(string!null)
+                │    ├── check constraint expressions
+                │    │    └── in [type=bool, outer=(22), constraints=(/22: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+                │    │         ├── variable: parent.crdb_region:22 [type=string]
+                │    │         └── tuple [type=tuple{string, string, string}]
+                │    │              ├── const: 'east' [type=string]
+                │    │              ├── const: 'central' [type=string]
+                │    │              └── const: 'west' [type=string]
+                │    ├── flags: avoid-full-scan
+                │    ├── key: (20)
+                │    ├── fd: (20)-->(22)
+                │    ├── prune: (20,22)
+                │    ├── interesting orderings: (+22,+20)
+                │    └── unfiltered-cols: (20-24)
+                └── filters
+                     ├── eq [type=bool, outer=(18,22), constraints=(/18: (/NULL - ]; /22: (/NULL - ]), fd=(18)==(22), (22)==(18)]
+                     │    ├── variable: crdb_region:18 [type=string]
+                     │    └── variable: parent.crdb_region:22 [type=string]
+                     └── eq [type=bool, outer=(19,20), constraints=(/19: (/NULL - ]; /20: (/NULL - ]), fd=(19)==(20), (20)==(19)]
+                          ├── variable: parent_id:19 [type=uuid]
+                          └── variable: parent.id:20 [type=uuid]
+
+build
+SELECT *, crdb_region FROM child_no_region_col
+----
+project
+ ├── columns: id:1(uuid!null) parent_id:2(uuid!null) cval:3(int) crdb_region:4(string!null)
+ ├── key: (1)
+ ├── fd: (1)-->(2-4), (2)-->(1,3,4)
+ ├── prune: (1-4)
+ ├── interesting orderings: (+4,+1) (+4,+2)
+ └── scan child_no_region_col
+      ├── columns: id:1(uuid!null) parent_id:2(uuid!null) cval:3(int) crdb_region:4(string!null) crdb_internal_mvcc_timestamp:5(decimal) tableoid:6(oid)
+      ├── check constraint expressions
+      │    └── in [type=bool, outer=(4), constraints=(/4: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+      │         ├── variable: crdb_region:4 [type=string]
+      │         └── tuple [type=tuple{string, string, string}]
+      │              ├── const: 'east' [type=string]
+      │              ├── const: 'central' [type=string]
+      │              └── const: 'west' [type=string]
+      ├── key: (1)
+      ├── fd: (1)-->(2-6), (2)-->(1,3-6)
+      ├── prune: (1-6)
+      └── interesting orderings: (+4,+1) (+4,+2)
+
+build
+INSERT INTO child_region_col (parent_id, cVal) VALUES ('00000000-0000-0000-0000-000000000001', 10);
+----
+insert child_region_col
+ ├── columns: <none>
+ ├── insert-mapping:
+ │    ├── id_default:9 => child_region_col.id:1
+ │    ├── column1:7 => child_region_col.parent_id:2
+ │    ├── column2:8 => cval:3
+ │    └── crdb_region_default:10 => child_region_col.crdb_region:4
+ ├── check columns: check1:11(bool)
+ ├── input binding: &1
+ ├── cardinality: [0 - 0]
+ ├── stable+volatile, mutations
+ ├── project
+ │    ├── columns: check1:11(bool) column1:7(uuid!null) column2:8(int!null) id_default:9(uuid) crdb_region_default:10(string)
+ │    ├── cardinality: [1 - 1]
+ │    ├── stable+volatile
+ │    ├── key: ()
+ │    ├── fd: ()-->(7-11)
+ │    ├── prune: (7-11)
+ │    ├── project
+ │    │    ├── columns: id_default:9(uuid) crdb_region_default:10(string) column1:7(uuid!null) column2:8(int!null)
+ │    │    ├── cardinality: [1 - 1]
+ │    │    ├── stable+volatile
+ │    │    ├── key: ()
+ │    │    ├── fd: ()-->(7-10)
+ │    │    ├── prune: (7-10)
+ │    │    ├── values
+ │    │    │    ├── columns: column1:7(uuid!null) column2:8(int!null)
+ │    │    │    ├── cardinality: [1 - 1]
+ │    │    │    ├── key: ()
+ │    │    │    ├── fd: ()-->(7,8)
+ │    │    │    ├── prune: (7,8)
+ │    │    │    └── tuple [type=tuple{uuid, int}]
+ │    │    │         ├── const: '00000000-0000-0000-0000-000000000001' [type=uuid]
+ │    │    │         └── const: 10 [type=int]
+ │    │    └── projections
+ │    │         ├── function: gen_random_uuid [as=id_default:9, type=uuid, volatile]
+ │    │         └── function: default_to_database_primary_region [as=crdb_region_default:10, type=string, stable]
+ │    │              └── function: gateway_region [type=string]
+ │    └── projections
+ │         └── in [as=check1:11, type=bool, outer=(10)]
+ │              ├── variable: crdb_region_default:10 [type=string]
+ │              └── tuple [type=tuple{string, string, string}]
+ │                   ├── const: 'east' [type=string]
+ │                   ├── const: 'central' [type=string]
+ │                   └── const: 'west' [type=string]
+ └── f-k-checks
+      └── f-k-checks-item: child_region_col(crdb_region,parent_id) -> parent(crdb_region,id)
+           └── anti-join (hash)
+                ├── columns: crdb_region:18(string) parent_id:19(uuid!null)
+                ├── cardinality: [0 - 1]
+                ├── key: ()
+                ├── fd: ()-->(18,19)
+                ├── with-scan &1
+                │    ├── columns: crdb_region:18(string) parent_id:19(uuid!null)
+                │    ├── mapping:
+                │    │    ├──  crdb_region_default:10(string) => crdb_region:18(string)
+                │    │    └──  column1:7(uuid) => parent_id:19(uuid)
+                │    ├── cardinality: [1 - 1]
+                │    ├── key: ()
+                │    ├── fd: ()-->(18,19)
+                │    └── prune: (18,19)
+                ├── scan parent
+                │    ├── columns: parent.id:20(uuid!null) parent.crdb_region:22(string!null)
+                │    ├── check constraint expressions
+                │    │    └── in [type=bool, outer=(22), constraints=(/22: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+                │    │         ├── variable: parent.crdb_region:22 [type=string]
+                │    │         └── tuple [type=tuple{string, string, string}]
+                │    │              ├── const: 'east' [type=string]
+                │    │              ├── const: 'central' [type=string]
+                │    │              └── const: 'west' [type=string]
+                │    ├── flags: avoid-full-scan
+                │    ├── key: (20)
+                │    ├── fd: (20)-->(22)
+                │    ├── prune: (20,22)
+                │    ├── interesting orderings: (+22,+20)
+                │    └── unfiltered-cols: (20-24)
+                └── filters
+                     ├── eq [type=bool, outer=(18,22), constraints=(/18: (/NULL - ]; /22: (/NULL - ]), fd=(18)==(22), (22)==(18)]
+                     │    ├── variable: crdb_region:18 [type=string]
+                     │    └── variable: parent.crdb_region:22 [type=string]
+                     └── eq [type=bool, outer=(19,20), constraints=(/19: (/NULL - ]; /20: (/NULL - ]), fd=(19)==(20), (20)==(19)]
+                          ├── variable: parent_id:19 [type=uuid]
+                          └── variable: parent.id:20 [type=uuid]
+
+build
+SELECT *, crdb_region FROM child_region_col
+----
+project
+ ├── columns: id:1(uuid!null) parent_id:2(uuid!null) cval:3(int) crdb_region:4(string!null)
+ ├── key: (1)
+ ├── fd: (1)-->(2-4), (2)-->(1,3,4)
+ ├── prune: (1-4)
+ ├── interesting orderings: (+4,+1) (+4,+2)
+ └── scan child_region_col
+      ├── columns: id:1(uuid!null) parent_id:2(uuid!null) cval:3(int) crdb_region:4(string!null) crdb_internal_mvcc_timestamp:5(decimal) tableoid:6(oid)
+      ├── check constraint expressions
+      │    └── in [type=bool, outer=(4), constraints=(/4: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+      │         ├── variable: crdb_region:4 [type=string]
+      │         └── tuple [type=tuple{string, string, string}]
+      │              ├── const: 'east' [type=string]
+      │              ├── const: 'central' [type=string]
+      │              └── const: 'west' [type=string]
+      ├── key: (1)
+      ├── fd: (1)-->(2-6), (2)-->(1,3-6)
+      ├── prune: (1-6)
+      └── interesting orderings: (+4,+1) (+4,+2)
+
+# A functional dependency cannot be inferred if there are multiple foreign key colu
+build
+INSERT INTO child_multi_nullable_no_region_col (parent_a, parent_b, cVal) VALUES (1, 2, 10);
+----
+insert child_multi_nullable_no_region_col
+ ├── columns: <none>
+ ├── insert-mapping:
+ │    ├── id_default:11 => child_multi_nullable_no_region_col.id:1
+ │    ├── column1:8 => child_multi_nullable_no_region_col.parent_a:2
+ │    ├── column2:9 => child_multi_nullable_no_region_col.parent_b:3
+ │    ├── column3:10 => child_multi_nullable_no_region_col.cval:4
+ │    └── crdb_region_default:12 => child_multi_nullable_no_region_col.crdb_region:5
+ ├── check columns: check1:13(bool)
+ ├── input binding: &1
+ ├── cardinality: [0 - 0]
+ ├── stable+volatile, mutations
+ ├── project
+ │    ├── columns: check1:13(bool) column1:8(int!null) column2:9(int!null) column3:10(int!null) id_default:11(uuid) crdb_region_default:12(string)
+ │    ├── cardinality: [1 - 1]
+ │    ├── stable+volatile
+ │    ├── key: ()
+ │    ├── fd: ()-->(8-13)
+ │    ├── prune: (8-13)
+ │    ├── project
+ │    │    ├── columns: id_default:11(uuid) crdb_region_default:12(string) column1:8(int!null) column2:9(int!null) column3:10(int!null)
+ │    │    ├── cardinality: [1 - 1]
+ │    │    ├── stable+volatile
+ │    │    ├── key: ()
+ │    │    ├── fd: ()-->(8-12)
+ │    │    ├── prune: (8-12)
+ │    │    ├── values
+ │    │    │    ├── columns: column1:8(int!null) column2:9(int!null) column3:10(int!null)
+ │    │    │    ├── cardinality: [1 - 1]
+ │    │    │    ├── key: ()
+ │    │    │    ├── fd: ()-->(8-10)
+ │    │    │    ├── prune: (8-10)
+ │    │    │    └── tuple [type=tuple{int, int, int}]
+ │    │    │         ├── const: 1 [type=int]
+ │    │    │         ├── const: 2 [type=int]
+ │    │    │         └── const: 10 [type=int]
+ │    │    └── projections
+ │    │         ├── function: gen_random_uuid [as=id_default:11, type=uuid, volatile]
+ │    │         └── function: default_to_database_primary_region [as=crdb_region_default:12, type=string, stable]
+ │    │              └── function: gateway_region [type=string]
+ │    └── projections
+ │         └── in [as=check1:13, type=bool, outer=(12)]
+ │              ├── variable: crdb_region_default:12 [type=string]
+ │              └── tuple [type=tuple{string, string, string}]
+ │                   ├── const: 'east' [type=string]
+ │                   ├── const: 'central' [type=string]
+ │                   └── const: 'west' [type=string]
+ ├── unique-checks
+ │    └── unique-checks-item: child_multi_nullable_no_region_col(parent_a,parent_b)
+ │         └── project
+ │              ├── columns: parent_a:22(int!null) parent_b:23(int!null)
+ │              ├── cardinality: [0 - 1]
+ │              ├── key: ()
+ │              ├── fd: ()-->(22,23)
+ │              ├── prune: (22,23)
+ │              └── semi-join (hash)
+ │                   ├── columns: id:21(uuid) parent_a:22(int!null) parent_b:23(int!null) cval:24(int!null) crdb_region:25(string)
+ │                   ├── cardinality: [0 - 1]
+ │                   ├── key: ()
+ │                   ├── fd: ()-->(21-25)
+ │                   ├── prune: (24)
+ │                   ├── with-scan &1
+ │                   │    ├── columns: id:21(uuid) parent_a:22(int!null) parent_b:23(int!null) cval:24(int!null) crdb_region:25(string)
+ │                   │    ├── mapping:
+ │                   │    │    ├──  id_default:11(uuid) => id:21(uuid)
+ │                   │    │    ├──  column1:8(int) => parent_a:22(int)
+ │                   │    │    ├──  column2:9(int) => parent_b:23(int)
+ │                   │    │    ├──  column3:10(int) => cval:24(int)
+ │                   │    │    └──  crdb_region_default:12(string) => crdb_region:25(string)
+ │                   │    ├── cardinality: [1 - 1]
+ │                   │    ├── key: ()
+ │                   │    ├── fd: ()-->(21-25)
+ │                   │    └── prune: (21-25)
+ │                   ├── scan child_multi_nullable_no_region_col
+ │                   │    ├── columns: child_multi_nullable_no_region_col.id:14(uuid!null) child_multi_nullable_no_region_col.parent_a:15(int) child_multi_nullable_no_region_col.parent_b:16(int) child_multi_nullable_no_region_col.cval:17(int) child_multi_nullable_no_region_col.crdb_region:18(string!null)
+ │                   │    ├── check constraint expressions
+ │                   │    │    └── in [type=bool, outer=(18), constraints=(/18: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+ │                   │    │         ├── variable: child_multi_nullable_no_region_col.crdb_region:18 [type=string]
+ │                   │    │         └── tuple [type=tuple{string, string, string}]
+ │                   │    │              ├── const: 'east' [type=string]
+ │                   │    │              ├── const: 'central' [type=string]
+ │                   │    │              └── const: 'west' [type=string]
+ │                   │    ├── flags: avoid-full-scan
+ │                   │    ├── key: (14,18)
+ │                   │    ├── fd: (14,18)-->(15-17), (15,16,18)~~>(14,17)
+ │                   │    ├── prune: (14-18)
+ │                   │    ├── interesting orderings: (+18,+14) (+18,+15,+16,+14)
+ │                   │    └── unfiltered-cols: (14-20)
+ │                   └── filters
+ │                        ├── eq [type=bool, outer=(15,22), constraints=(/15: (/NULL - ]; /22: (/NULL - ]), fd=(15)==(22), (22)==(15)]
+ │                        │    ├── variable: parent_a:22 [type=int]
+ │                        │    └── variable: child_multi_nullable_no_region_col.parent_a:15 [type=int]
+ │                        ├── eq [type=bool, outer=(16,23), constraints=(/16: (/NULL - ]; /23: (/NULL - ]), fd=(16)==(23), (23)==(16)]
+ │                        │    ├── variable: parent_b:23 [type=int]
+ │                        │    └── variable: child_multi_nullable_no_region_col.parent_b:16 [type=int]
+ │                        └── or [type=bool, outer=(14,18,21,25)]
+ │                             ├── ne [type=bool]
+ │                             │    ├── variable: id:21 [type=uuid]
+ │                             │    └── variable: child_multi_nullable_no_region_col.id:14 [type=uuid]
+ │                             └── ne [type=bool]
+ │                                  ├── variable: crdb_region:25 [type=string]
+ │                                  └── variable: child_multi_nullable_no_region_col.crdb_region:18 [type=string]
+ └── f-k-checks
+      └── f-k-checks-item: child_multi_nullable_no_region_col(crdb_region,parent_a,parent_b) -> parent_multi(crdb_region,a,b)
+           └── anti-join (hash)
+                ├── columns: crdb_region:33(string) parent_a:34(int!null) parent_b:35(int!null)
+                ├── cardinality: [0 - 1]
+                ├── key: ()
+                ├── fd: ()-->(33-35)
+                ├── with-scan &1
+                │    ├── columns: crdb_region:33(string) parent_a:34(int!null) parent_b:35(int!null)
+                │    ├── mapping:
+                │    │    ├──  crdb_region_default:12(string) => crdb_region:33(string)
+                │    │    ├──  column1:8(int) => parent_a:34(int)
+                │    │    └──  column2:9(int) => parent_b:35(int)
+                │    ├── cardinality: [1 - 1]
+                │    ├── key: ()
+                │    ├── fd: ()-->(33-35)
+                │    └── prune: (33-35)
+                ├── scan parent_multi
+                │    ├── columns: a:36(int!null) b:37(int!null) parent_multi.crdb_region:39(string!null)
+                │    ├── check constraint expressions
+                │    │    └── in [type=bool, outer=(39), constraints=(/39: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+                │    │         ├── variable: parent_multi.crdb_region:39 [type=string]
+                │    │         └── tuple [type=tuple{string, string, string}]
+                │    │              ├── const: 'east' [type=string]
+                │    │              ├── const: 'central' [type=string]
+                │    │              └── const: 'west' [type=string]
+                │    ├── flags: avoid-full-scan
+                │    ├── key: (36,37)
+                │    ├── fd: (36,37)-->(39)
+                │    ├── prune: (36,37,39)
+                │    ├── interesting orderings: (+39,+36,+37)
+                │    └── unfiltered-cols: (36-41)
+                └── filters
+                     ├── eq [type=bool, outer=(33,39), constraints=(/33: (/NULL - ]; /39: (/NULL - ]), fd=(33)==(39), (39)==(33)]
+                     │    ├── variable: crdb_region:33 [type=string]
+                     │    └── variable: parent_multi.crdb_region:39 [type=string]
+                     ├── eq [type=bool, outer=(34,36), constraints=(/34: (/NULL - ]; /36: (/NULL - ]), fd=(34)==(36), (36)==(34)]
+                     │    ├── variable: parent_a:34 [type=int]
+                     │    └── variable: a:36 [type=int]
+                     └── eq [type=bool, outer=(35,37), constraints=(/35: (/NULL - ]; /37: (/NULL - ]), fd=(35)==(37), (37)==(35)]
+                          ├── variable: parent_b:35 [type=int]
+                          └── variable: b:37 [type=int]
+
+build
+SELECT *, crdb_region FROM child_multi_nullable_no_region_col
+----
+project
+ ├── columns: id:1(uuid!null) parent_a:2(int) parent_b:3(int) cval:4(int) crdb_region:5(string!null)
+ ├── key: (1)
+ ├── fd: (1)-->(2-5), (2,3)-->(1,4,5)
+ ├── prune: (1-5)
+ ├── interesting orderings: (+5,+1) (+5,+2,+3)
+ └── scan child_multi_nullable_no_region_col
+      ├── columns: id:1(uuid!null) parent_a:2(int) parent_b:3(int) cval:4(int) crdb_region:5(string!null) crdb_internal_mvcc_timestamp:6(decimal) tableoid:7(oid)
+      ├── check constraint expressions
+      │    └── in [type=bool, outer=(5), constraints=(/5: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+      │         ├── variable: crdb_region:5 [type=string]
+      │         └── tuple [type=tuple{string, string, string}]
+      │              ├── const: 'east' [type=string]
+      │              ├── const: 'central' [type=string]
+      │              └── const: 'west' [type=string]
+      ├── key: (1)
+      ├── fd: (1)-->(2-7), (2,3)-->(1,4-7)
+      ├── prune: (1-7)
+      └── interesting orderings: (+5,+1) (+5,+2,+3)
+
+build
+INSERT INTO child_multi_nullable_region_col (parent_a, parent_b, cVal) VALUES (1, 2, 10);
+----
+insert child_multi_nullable_region_col
+ ├── columns: <none>
+ ├── insert-mapping:
+ │    ├── id_default:11 => id:1
+ │    ├── column1:8 => child_multi_nullable_region_col.parent_a:2
+ │    ├── column2:9 => child_multi_nullable_region_col.parent_b:3
+ │    ├── column3:10 => cval:4
+ │    └── crdb_region_default:12 => child_multi_nullable_region_col.crdb_region:5
+ ├── check columns: check1:13(bool)
+ ├── input binding: &1
+ ├── cardinality: [0 - 0]
+ ├── stable+volatile, mutations
+ ├── project
+ │    ├── columns: check1:13(bool) column1:8(int!null) column2:9(int!null) column3:10(int!null) id_default:11(uuid) crdb_region_default:12(string)
+ │    ├── cardinality: [1 - 1]
+ │    ├── stable+volatile
+ │    ├── key: ()
+ │    ├── fd: ()-->(8-13)
+ │    ├── prune: (8-13)
+ │    ├── project
+ │    │    ├── columns: id_default:11(uuid) crdb_region_default:12(string) column1:8(int!null) column2:9(int!null) column3:10(int!null)
+ │    │    ├── cardinality: [1 - 1]
+ │    │    ├── stable+volatile
+ │    │    ├── key: ()
+ │    │    ├── fd: ()-->(8-12)
+ │    │    ├── prune: (8-12)
+ │    │    ├── values
+ │    │    │    ├── columns: column1:8(int!null) column2:9(int!null) column3:10(int!null)
+ │    │    │    ├── cardinality: [1 - 1]
+ │    │    │    ├── key: ()
+ │    │    │    ├── fd: ()-->(8-10)
+ │    │    │    ├── prune: (8-10)
+ │    │    │    └── tuple [type=tuple{int, int, int}]
+ │    │    │         ├── const: 1 [type=int]
+ │    │    │         ├── const: 2 [type=int]
+ │    │    │         └── const: 10 [type=int]
+ │    │    └── projections
+ │    │         ├── function: gen_random_uuid [as=id_default:11, type=uuid, volatile]
+ │    │         └── function: default_to_database_primary_region [as=crdb_region_default:12, type=string, stable]
+ │    │              └── function: gateway_region [type=string]
+ │    └── projections
+ │         └── in [as=check1:13, type=bool, outer=(12)]
+ │              ├── variable: crdb_region_default:12 [type=string]
+ │              └── tuple [type=tuple{string, string, string}]
+ │                   ├── const: 'east' [type=string]
+ │                   ├── const: 'central' [type=string]
+ │                   └── const: 'west' [type=string]
+ └── f-k-checks
+      └── f-k-checks-item: child_multi_nullable_region_col(crdb_region,parent_a,parent_b) -> parent_multi(crdb_region,a,b)
+           └── anti-join (hash)
+                ├── columns: crdb_region:21(string) parent_a:22(int!null) parent_b:23(int!null)
+                ├── cardinality: [0 - 1]
+                ├── key: ()
+                ├── fd: ()-->(21-23)
+                ├── with-scan &1
+                │    ├── columns: crdb_region:21(string) parent_a:22(int!null) parent_b:23(int!null)
+                │    ├── mapping:
+                │    │    ├──  crdb_region_default:12(string) => crdb_region:21(string)
+                │    │    ├──  column1:8(int) => parent_a:22(int)
+                │    │    └──  column2:9(int) => parent_b:23(int)
+                │    ├── cardinality: [1 - 1]
+                │    ├── key: ()
+                │    ├── fd: ()-->(21-23)
+                │    └── prune: (21-23)
+                ├── scan parent_multi
+                │    ├── columns: a:24(int!null) b:25(int!null) parent_multi.crdb_region:27(string!null)
+                │    ├── check constraint expressions
+                │    │    └── in [type=bool, outer=(27), constraints=(/27: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+                │    │         ├── variable: parent_multi.crdb_region:27 [type=string]
+                │    │         └── tuple [type=tuple{string, string, string}]
+                │    │              ├── const: 'east' [type=string]
+                │    │              ├── const: 'central' [type=string]
+                │    │              └── const: 'west' [type=string]
+                │    ├── flags: avoid-full-scan
+                │    ├── key: (24,25)
+                │    ├── fd: (24,25)-->(27)
+                │    ├── prune: (24,25,27)
+                │    ├── interesting orderings: (+27,+24,+25)
+                │    └── unfiltered-cols: (24-29)
+                └── filters
+                     ├── eq [type=bool, outer=(21,27), constraints=(/21: (/NULL - ]; /27: (/NULL - ]), fd=(21)==(27), (27)==(21)]
+                     │    ├── variable: crdb_region:21 [type=string]
+                     │    └── variable: parent_multi.crdb_region:27 [type=string]
+                     ├── eq [type=bool, outer=(22,24), constraints=(/22: (/NULL - ]; /24: (/NULL - ]), fd=(22)==(24), (24)==(22)]
+                     │    ├── variable: parent_a:22 [type=int]
+                     │    └── variable: a:24 [type=int]
+                     └── eq [type=bool, outer=(23,25), constraints=(/23: (/NULL - ]; /25: (/NULL - ]), fd=(23)==(25), (25)==(23)]
+                          ├── variable: parent_b:23 [type=int]
+                          └── variable: b:25 [type=int]
+
+build
+SELECT *, crdb_region FROM child_multi_nullable_region_col
+----
+project
+ ├── columns: id:1(uuid!null) parent_a:2(int) parent_b:3(int) cval:4(int) crdb_region:5(string!null)
+ ├── key: (1)
+ ├── fd: (1)-->(2-5), (2,3,5)~~>(1,4)
+ ├── prune: (1-5)
+ ├── interesting orderings: (+5,+1) (+5,+2,+3,+1)
+ └── scan child_multi_nullable_region_col
+      ├── columns: id:1(uuid!null) parent_a:2(int) parent_b:3(int) cval:4(int) crdb_region:5(string!null) crdb_internal_mvcc_timestamp:6(decimal) tableoid:7(oid)
+      ├── check constraint expressions
+      │    └── in [type=bool, outer=(5), constraints=(/5: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+      │         ├── variable: crdb_region:5 [type=string]
+      │         └── tuple [type=tuple{string, string, string}]
+      │              ├── const: 'east' [type=string]
+      │              ├── const: 'central' [type=string]
+      │              └── const: 'west' [type=string]
+      ├── key: (1)
+      ├── fd: (1)-->(2-7), (2,3,5)~~>(1,4,6,7)
+      ├── prune: (1-7)
+      └── interesting orderings: (+5,+1) (+5,+2,+3,+1)
+
+build
+INSERT INTO child_multi_no_region_col (parent_a, parent_b, cVal) VALUES (1, 2, 10);
+----
+insert child_multi_no_region_col
+ ├── columns: <none>
+ ├── insert-mapping:
+ │    ├── id_default:11 => id:1
+ │    ├── column1:8 => child_multi_no_region_col.parent_a:2
+ │    ├── column2:9 => child_multi_no_region_col.parent_b:3
+ │    ├── column3:10 => cval:4
+ │    └── crdb_region_default:12 => child_multi_no_region_col.crdb_region:5
+ ├── check columns: check1:13(bool)
+ ├── input binding: &1
+ ├── cardinality: [0 - 0]
+ ├── stable+volatile, mutations
+ ├── project
+ │    ├── columns: check1:13(bool) column1:8(int!null) column2:9(int!null) column3:10(int!null) id_default:11(uuid) crdb_region_default:12(string)
+ │    ├── cardinality: [1 - 1]
+ │    ├── stable+volatile
+ │    ├── key: ()
+ │    ├── fd: ()-->(8-13)
+ │    ├── prune: (8-13)
+ │    ├── project
+ │    │    ├── columns: id_default:11(uuid) crdb_region_default:12(string) column1:8(int!null) column2:9(int!null) column3:10(int!null)
+ │    │    ├── cardinality: [1 - 1]
+ │    │    ├── stable+volatile
+ │    │    ├── key: ()
+ │    │    ├── fd: ()-->(8-12)
+ │    │    ├── prune: (8-12)
+ │    │    ├── values
+ │    │    │    ├── columns: column1:8(int!null) column2:9(int!null) column3:10(int!null)
+ │    │    │    ├── cardinality: [1 - 1]
+ │    │    │    ├── key: ()
+ │    │    │    ├── fd: ()-->(8-10)
+ │    │    │    ├── prune: (8-10)
+ │    │    │    └── tuple [type=tuple{int, int, int}]
+ │    │    │         ├── const: 1 [type=int]
+ │    │    │         ├── const: 2 [type=int]
+ │    │    │         └── const: 10 [type=int]
+ │    │    └── projections
+ │    │         ├── function: gen_random_uuid [as=id_default:11, type=uuid, volatile]
+ │    │         └── function: default_to_database_primary_region [as=crdb_region_default:12, type=string, stable]
+ │    │              └── function: gateway_region [type=string]
+ │    └── projections
+ │         └── in [as=check1:13, type=bool, outer=(12)]
+ │              ├── variable: crdb_region_default:12 [type=string]
+ │              └── tuple [type=tuple{string, string, string}]
+ │                   ├── const: 'east' [type=string]
+ │                   ├── const: 'central' [type=string]
+ │                   └── const: 'west' [type=string]
+ └── f-k-checks
+      └── f-k-checks-item: child_multi_no_region_col(crdb_region,parent_a,parent_b) -> parent_multi(crdb_region,a,b)
+           └── anti-join (hash)
+                ├── columns: crdb_region:21(string) parent_a:22(int!null) parent_b:23(int!null)
+                ├── cardinality: [0 - 1]
+                ├── key: ()
+                ├── fd: ()-->(21-23)
+                ├── with-scan &1
+                │    ├── columns: crdb_region:21(string) parent_a:22(int!null) parent_b:23(int!null)
+                │    ├── mapping:
+                │    │    ├──  crdb_region_default:12(string) => crdb_region:21(string)
+                │    │    ├──  column1:8(int) => parent_a:22(int)
+                │    │    └──  column2:9(int) => parent_b:23(int)
+                │    ├── cardinality: [1 - 1]
+                │    ├── key: ()
+                │    ├── fd: ()-->(21-23)
+                │    └── prune: (21-23)
+                ├── scan parent_multi
+                │    ├── columns: a:24(int!null) b:25(int!null) parent_multi.crdb_region:27(string!null)
+                │    ├── check constraint expressions
+                │    │    └── in [type=bool, outer=(27), constraints=(/27: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+                │    │         ├── variable: parent_multi.crdb_region:27 [type=string]
+                │    │         └── tuple [type=tuple{string, string, string}]
+                │    │              ├── const: 'east' [type=string]
+                │    │              ├── const: 'central' [type=string]
+                │    │              └── const: 'west' [type=string]
+                │    ├── flags: avoid-full-scan
+                │    ├── key: (24,25)
+                │    ├── fd: (24,25)-->(27)
+                │    ├── prune: (24,25,27)
+                │    ├── interesting orderings: (+27,+24,+25)
+                │    └── unfiltered-cols: (24-29)
+                └── filters
+                     ├── eq [type=bool, outer=(21,27), constraints=(/21: (/NULL - ]; /27: (/NULL - ]), fd=(21)==(27), (27)==(21)]
+                     │    ├── variable: crdb_region:21 [type=string]
+                     │    └── variable: parent_multi.crdb_region:27 [type=string]
+                     ├── eq [type=bool, outer=(22,24), constraints=(/22: (/NULL - ]; /24: (/NULL - ]), fd=(22)==(24), (24)==(22)]
+                     │    ├── variable: parent_a:22 [type=int]
+                     │    └── variable: a:24 [type=int]
+                     └── eq [type=bool, outer=(23,25), constraints=(/23: (/NULL - ]; /25: (/NULL - ]), fd=(23)==(25), (25)==(23)]
+                          ├── variable: parent_b:23 [type=int]
+                          └── variable: b:25 [type=int]
+
+build
+SELECT *, crdb_region FROM child_multi_no_region_col
+----
+project
+ ├── columns: id:1(uuid!null) parent_a:2(int!null) parent_b:3(int!null) cval:4(int) crdb_region:5(string!null)
+ ├── key: (1)
+ ├── fd: (1)-->(2-5), (2,3)-->(1,4,5)
+ ├── prune: (1-5)
+ ├── interesting orderings: (+5,+1) (+5,+2,+3)
+ └── scan child_multi_no_region_col
+      ├── columns: id:1(uuid!null) parent_a:2(int!null) parent_b:3(int!null) cval:4(int) crdb_region:5(string!null) crdb_internal_mvcc_timestamp:6(decimal) tableoid:7(oid)
+      ├── check constraint expressions
+      │    └── in [type=bool, outer=(5), constraints=(/5: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+      │         ├── variable: crdb_region:5 [type=string]
+      │         └── tuple [type=tuple{string, string, string}]
+      │              ├── const: 'east' [type=string]
+      │              ├── const: 'central' [type=string]
+      │              └── const: 'west' [type=string]
+      ├── key: (1)
+      ├── fd: (1)-->(2-7), (2,3)-->(1,4-7)
+      ├── prune: (1-7)
+      └── interesting orderings: (+5,+1) (+5,+2,+3)
+
+build
+INSERT INTO child_multi_region_col (parent_a, parent_b, cVal) VALUES (1, 2, 10);
+----
+insert child_multi_region_col
+ ├── columns: <none>
+ ├── insert-mapping:
+ │    ├── id_default:11 => id:1
+ │    ├── column1:8 => child_multi_region_col.parent_a:2
+ │    ├── column2:9 => child_multi_region_col.parent_b:3
+ │    ├── column3:10 => cval:4
+ │    └── crdb_region_default:12 => child_multi_region_col.crdb_region:5
+ ├── check columns: check1:13(bool)
+ ├── input binding: &1
+ ├── cardinality: [0 - 0]
+ ├── stable+volatile, mutations
+ ├── project
+ │    ├── columns: check1:13(bool) column1:8(int!null) column2:9(int!null) column3:10(int!null) id_default:11(uuid) crdb_region_default:12(string)
+ │    ├── cardinality: [1 - 1]
+ │    ├── stable+volatile
+ │    ├── key: ()
+ │    ├── fd: ()-->(8-13)
+ │    ├── prune: (8-13)
+ │    ├── project
+ │    │    ├── columns: id_default:11(uuid) crdb_region_default:12(string) column1:8(int!null) column2:9(int!null) column3:10(int!null)
+ │    │    ├── cardinality: [1 - 1]
+ │    │    ├── stable+volatile
+ │    │    ├── key: ()
+ │    │    ├── fd: ()-->(8-12)
+ │    │    ├── prune: (8-12)
+ │    │    ├── values
+ │    │    │    ├── columns: column1:8(int!null) column2:9(int!null) column3:10(int!null)
+ │    │    │    ├── cardinality: [1 - 1]
+ │    │    │    ├── key: ()
+ │    │    │    ├── fd: ()-->(8-10)
+ │    │    │    ├── prune: (8-10)
+ │    │    │    └── tuple [type=tuple{int, int, int}]
+ │    │    │         ├── const: 1 [type=int]
+ │    │    │         ├── const: 2 [type=int]
+ │    │    │         └── const: 10 [type=int]
+ │    │    └── projections
+ │    │         ├── function: gen_random_uuid [as=id_default:11, type=uuid, volatile]
+ │    │         └── function: default_to_database_primary_region [as=crdb_region_default:12, type=string, stable]
+ │    │              └── function: gateway_region [type=string]
+ │    └── projections
+ │         └── in [as=check1:13, type=bool, outer=(12)]
+ │              ├── variable: crdb_region_default:12 [type=string]
+ │              └── tuple [type=tuple{string, string, string}]
+ │                   ├── const: 'east' [type=string]
+ │                   ├── const: 'central' [type=string]
+ │                   └── const: 'west' [type=string]
+ └── f-k-checks
+      └── f-k-checks-item: child_multi_region_col(crdb_region,parent_a,parent_b) -> parent_multi(crdb_region,a,b)
+           └── anti-join (hash)
+                ├── columns: crdb_region:21(string) parent_a:22(int!null) parent_b:23(int!null)
+                ├── cardinality: [0 - 1]
+                ├── key: ()
+                ├── fd: ()-->(21-23)
+                ├── with-scan &1
+                │    ├── columns: crdb_region:21(string) parent_a:22(int!null) parent_b:23(int!null)
+                │    ├── mapping:
+                │    │    ├──  crdb_region_default:12(string) => crdb_region:21(string)
+                │    │    ├──  column1:8(int) => parent_a:22(int)
+                │    │    └──  column2:9(int) => parent_b:23(int)
+                │    ├── cardinality: [1 - 1]
+                │    ├── key: ()
+                │    ├── fd: ()-->(21-23)
+                │    └── prune: (21-23)
+                ├── scan parent_multi
+                │    ├── columns: a:24(int!null) b:25(int!null) parent_multi.crdb_region:27(string!null)
+                │    ├── check constraint expressions
+                │    │    └── in [type=bool, outer=(27), constraints=(/27: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+                │    │         ├── variable: parent_multi.crdb_region:27 [type=string]
+                │    │         └── tuple [type=tuple{string, string, string}]
+                │    │              ├── const: 'east' [type=string]
+                │    │              ├── const: 'central' [type=string]
+                │    │              └── const: 'west' [type=string]
+                │    ├── flags: avoid-full-scan
+                │    ├── key: (24,25)
+                │    ├── fd: (24,25)-->(27)
+                │    ├── prune: (24,25,27)
+                │    ├── interesting orderings: (+27,+24,+25)
+                │    └── unfiltered-cols: (24-29)
+                └── filters
+                     ├── eq [type=bool, outer=(21,27), constraints=(/21: (/NULL - ]; /27: (/NULL - ]), fd=(21)==(27), (27)==(21)]
+                     │    ├── variable: crdb_region:21 [type=string]
+                     │    └── variable: parent_multi.crdb_region:27 [type=string]
+                     ├── eq [type=bool, outer=(22,24), constraints=(/22: (/NULL - ]; /24: (/NULL - ]), fd=(22)==(24), (24)==(22)]
+                     │    ├── variable: parent_a:22 [type=int]
+                     │    └── variable: a:24 [type=int]
+                     └── eq [type=bool, outer=(23,25), constraints=(/23: (/NULL - ]; /25: (/NULL - ]), fd=(23)==(25), (25)==(23)]
+                          ├── variable: parent_b:23 [type=int]
+                          └── variable: b:25 [type=int]
+
+build
+SELECT *, crdb_region FROM child_multi_region_col
+----
+project
+ ├── columns: id:1(uuid!null) parent_a:2(int!null) parent_b:3(int!null) cval:4(int) crdb_region:5(string!null)
+ ├── key: (1)
+ ├── fd: (1)-->(2-5), (2,3)-->(1,4,5)
+ ├── prune: (1-5)
+ ├── interesting orderings: (+5,+1) (+5,+2,+3)
+ └── scan child_multi_region_col
+      ├── columns: id:1(uuid!null) parent_a:2(int!null) parent_b:3(int!null) cval:4(int) crdb_region:5(string!null) crdb_internal_mvcc_timestamp:6(decimal) tableoid:7(oid)
+      ├── check constraint expressions
+      │    └── in [type=bool, outer=(5), constraints=(/5: [/'central' - /'central'] [/'east' - /'east'] [/'west' - /'west']; tight)]
+      │         ├── variable: crdb_region:5 [type=string]
+      │         └── tuple [type=tuple{string, string, string}]
+      │              ├── const: 'east' [type=string]
+      │              ├── const: 'central' [type=string]
+      │              └── const: 'west' [type=string]
+      ├── key: (1)
+      ├── fd: (1)-->(2-7), (2,3)-->(1,4-7)
+      ├── prune: (1-7)
+      └── interesting orderings: (+5,+1) (+5,+2,+3)
