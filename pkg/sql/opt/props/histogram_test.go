@@ -437,7 +437,7 @@ func TestFilterBucket(t *testing.T) {
 		// mark the lower bound of the second bucket. Set the iterator to point to
 		// the second bucket.
 		iter.setIdx(1)
-		b := getFilteredBucket(&iter, &keyCtx, span, colOffset)
+		b := getFilteredBucket(&evalCtx, &iter, &keyCtx, span, colOffset)
 		roundBucket(&b)
 		return &b, nil
 	}

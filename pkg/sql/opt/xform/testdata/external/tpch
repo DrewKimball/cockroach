@@ -2258,10 +2258,9 @@ sort
  └── project
       ├── columns: s_name:2!null s_address:3!null
       ├── immutable
-      └── inner-join (lookup nation)
+      └── inner-join (hash)
            ├── columns: s_suppkey:1!null s_name:2!null s_address:3!null s_nationkey:4!null n_nationkey:10!null n_name:11!null
-           ├── key columns: [4] = [10]
-           ├── lookup columns are key
+           ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
            ├── immutable
            ├── key: (1)
            ├── fd: ()-->(11), (1)-->(2-4), (4)==(10), (10)==(4)
@@ -2327,8 +2326,18 @@ sort
            │         │         └── filters
            │         │              └── p_name:24 LIKE 'forest%' [outer=(24), constraints=(/24: [/'forest' - /'foresu'); tight)]
            │         └── filters (true)
+           ├── select
+           │    ├── columns: n_nationkey:10!null n_name:11!null
+           │    ├── key: (10)
+           │    ├── fd: ()-->(11)
+           │    ├── scan nation
+           │    │    ├── columns: n_nationkey:10!null n_name:11!null
+           │    │    ├── key: (10)
+           │    │    └── fd: (10)-->(11)
+           │    └── filters
+           │         └── n_name:11 = 'CANADA' [outer=(11), constraints=(/11: [/'CANADA' - /'CANADA']; tight), fd=()-->(11)]
            └── filters
-                └── n_name:11 = 'CANADA' [outer=(11), constraints=(/11: [/'CANADA' - /'CANADA']; tight), fd=()-->(11)]
+                └── s_nationkey:4 = n_nationkey:10 [outer=(4,10), constraints=(/4: (/NULL - ]; /10: (/NULL - ]), fd=(4)==(10), (10)==(4)]
 
 # --------------------------------------------------
 # Q21

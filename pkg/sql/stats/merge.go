@@ -362,10 +362,10 @@ func tryOverlap(
 // within the range between filterLower and filterUpper. It assumes that values
 // are uniformly distributed within the bucket.
 func filterBucket(
-	bucket boundedBucket, filterLower, filterUpper tree.Datum,
+	evalCtx *eval.Context, bucket boundedBucket, filterLower, filterUpper tree.Datum,
 ) (numRange, distinctRange float64) {
 	rangeBefore, rangeAfter, ok := datumrange.GetRangesBeforeAndAfter(
-		bucket.lowerBound, bucket.UpperBound, filterLower, filterUpper, false, /* swap */
+		evalCtx, bucket.lowerBound, bucket.UpperBound, filterLower, filterUpper, false, /* swap */
 	)
 
 	if ok && rangeBefore > 0 {
@@ -446,7 +446,7 @@ func mergeHistograms(
 			if cmp < 0 {
 				// The partial bucket partially overlaps with the first full bucket,
 				// so we only emit the non-overlapping part.
-				numRange, distinctRange := filterBucket(pBucket, pBucket.lowerBound, fLowerBound)
+				numRange, distinctRange := filterBucket(evalCtx, pBucket, pBucket.lowerBound, fLowerBound)
 
 				merged = append(merged, cat.HistogramBucket{
 					NumEq:         full[0].NumEq,
@@ -486,8 +486,8 @@ func mergeHistograms(
 				break
 			}
 
-			pNumRange, pDistinctRange := filterBucket(pBucket, overlapLower, overlapUpper)
-			fNumRange, fDistinctRange := filterBucket(fBucket, overlapLower, overlapUpper)
+			pNumRange, pDistinctRange := filterBucket(evalCtx, pBucket, overlapLower, overlapUpper)
+			fNumRange, fDistinctRange := filterBucket(evalCtx, fBucket, overlapLower, overlapUpper)
 
 			// Merge the filtered partial bucket into the merged bucket by overwriting
 			// the overlapping counts.
@@ -532,7 +532,7 @@ func mergeHistograms(
 		if cmp < 0 {
 			// The partial bucket overlaps with the last full bucket, so we only
 			// emit the non-overlapping part.
-			numRange, distinctRange := filterBucket(pBucket, fUpperBound, pBucket.UpperBound)
+			numRange, distinctRange := filterBucket(evalCtx, pBucket, fUpperBound, pBucket.UpperBound)
 
 			merged = append(merged, cat.HistogramBucket{
 				NumEq:         partial[j].NumEq,

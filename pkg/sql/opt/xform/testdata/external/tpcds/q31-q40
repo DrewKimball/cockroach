@@ -350,11 +350,13 @@ scalar-group-by
  ├── immutable
  ├── key: ()
  ├── fd: ()-->(159)
- ├── inner-join (lookup catalog_sales)
+ ├── inner-join (hash)
  │    ├── columns: cs_sold_date_sk:1!null cs_item_sk:16!null cs_ext_discount_amt:23!null i_item_sk:37!null d_date_sk:61!null "?column?":158!null
- │    ├── key columns: [37] = [16]
+ │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
  │    ├── immutable
  │    ├── fd: (37,61)-->(158), (16)==(37), (37)==(16), (1)==(61), (61)==(1)
+ │    ├── scan catalog_sales
+ │    │    └── columns: cs_sold_date_sk:1 cs_item_sk:16!null cs_ext_discount_amt:23
  │    ├── project
  │    │    ├── columns: "?column?":158!null i_item_sk:37!null d_date_sk:61!null
  │    │    ├── immutable
@@ -412,6 +414,7 @@ scalar-group-by
  │    │    └── projections
  │    │         └── avg:157 * 1.3 [as="?column?":158, outer=(157), immutable]
  │    └── filters
+ │         ├── i_item_sk:37 = cs_item_sk:16 [outer=(16,37), constraints=(/16: (/NULL - ]; /37: (/NULL - ]), fd=(16)==(37), (37)==(16)]
  │         ├── d_date_sk:61 = cs_sold_date_sk:1 [outer=(1,61), constraints=(/1: (/NULL - ]; /61: (/NULL - ]), fd=(1)==(61), (61)==(1)]
  │         └── cs_ext_discount_amt:23 > "?column?":158 [outer=(23,158), immutable, constraints=(/23: (/NULL - ]; /158: (/NULL - ])]
  └── aggregations
@@ -1291,47 +1294,47 @@ limit
  │         ├── fd: (1)-->(2,5,6,14), (31)-->(33), (25)==(31), (31)==(25), (1)==(26,76), (26)==(1,76), (76)==(1,26)
  │         ├── ordering: +2
  │         ├── limit hint: 385.21
- │         ├── sort
+ │         ├── inner-join (lookup date_dim)
  │         │    ├── columns: i_item_sk:1!null i_item_id:2!null i_item_desc:5 i_current_price:6!null i_manufact_id:14!null inv_date_sk:25!null inv_item_sk:26!null inv_quantity_on_hand:28!null d_date_sk:31!null d_date:33!null
+ │         │    ├── key columns: [25] = [31]
+ │         │    ├── lookup columns are key
  │         │    ├── immutable
  │         │    ├── fd: (1)-->(2,5,6,14), (31)-->(33), (25)==(31), (31)==(25), (1)==(26), (26)==(1)
  │         │    ├── ordering: +2
  │         │    ├── limit hint: 100.00
- │         │    └── inner-join (hash)
- │         │         ├── columns: i_item_sk:1!null i_item_id:2!null i_item_desc:5 i_current_price:6!null i_manufact_id:14!null inv_date_sk:25!null inv_item_sk:26!null inv_quantity_on_hand:28!null d_date_sk:31!null d_date:33!null
- │         │         ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
- │         │         ├── immutable
- │         │         ├── fd: (1)-->(2,5,6,14), (31)-->(33), (25)==(31), (31)==(25), (1)==(26), (26)==(1)
- │         │         ├── inner-join (lookup inventory)
- │         │         │    ├── columns: inv_date_sk:25!null inv_item_sk:26!null inv_quantity_on_hand:28!null d_date_sk:31!null d_date:33!null
- │         │         │    ├── key columns: [31] = [25]
- │         │         │    ├── fd: (31)-->(33), (25)==(31), (31)==(25)
- │         │         │    ├── select
- │         │         │    │    ├── columns: d_date_sk:31!null d_date:33!null
- │         │         │    │    ├── key: (31)
- │         │         │    │    ├── fd: (31)-->(33)
- │         │         │    │    ├── scan date_dim
- │         │         │    │    │    ├── columns: d_date_sk:31!null d_date:33
- │         │         │    │    │    ├── key: (31)
- │         │         │    │    │    └── fd: (31)-->(33)
- │         │         │    │    └── filters
- │         │         │    │         └── (d_date:33 >= '2002-03-29') AND (d_date:33 <= '2002-05-28') [outer=(33), constraints=(/33: [/'2002-03-29' - /'2002-05-28']; tight)]
- │         │         │    └── filters
- │         │         │         └── (inv_quantity_on_hand:28 >= 100) AND (inv_quantity_on_hand:28 <= 500) [outer=(28), constraints=(/28: [/100 - /500]; tight)]
- │         │         ├── select
- │         │         │    ├── columns: i_item_sk:1!null i_item_id:2!null i_item_desc:5 i_current_price:6!null i_manufact_id:14!null
- │         │         │    ├── immutable
- │         │         │    ├── key: (1)
- │         │         │    ├── fd: (1)-->(2,5,6,14)
- │         │         │    ├── scan item
- │         │         │    │    ├── columns: i_item_sk:1!null i_item_id:2!null i_item_desc:5 i_current_price:6 i_manufact_id:14
- │         │         │    │    ├── key: (1)
- │         │         │    │    └── fd: (1)-->(2,5,6,14)
- │         │         │    └── filters
- │         │         │         ├── (i_current_price:6 >= 29) AND (i_current_price:6 <= 59.00) [outer=(6), immutable, constraints=(/6: [/29 - /59.00]; tight)]
- │         │         │         └── i_manufact_id:14 IN (705, 742, 777, 944) [outer=(14), constraints=(/14: [/705 - /705] [/742 - /742] [/777 - /777] [/944 - /944]; tight)]
- │         │         └── filters
- │         │              └── i_item_sk:1 = inv_item_sk:26 [outer=(1,26), constraints=(/1: (/NULL - ]; /26: (/NULL - ]), fd=(1)==(26), (26)==(1)]
+ │         │    ├── sort
+ │         │    │    ├── columns: i_item_sk:1!null i_item_id:2!null i_item_desc:5 i_current_price:6!null i_manufact_id:14!null inv_date_sk:25!null inv_item_sk:26!null inv_quantity_on_hand:28!null
+ │         │    │    ├── immutable
+ │         │    │    ├── fd: (1)-->(2,5,6,14), (1)==(26), (26)==(1)
+ │         │    │    ├── ordering: +2
+ │         │    │    ├── limit hint: 100.00
+ │         │    │    └── inner-join (hash)
+ │         │    │         ├── columns: i_item_sk:1!null i_item_id:2!null i_item_desc:5 i_current_price:6!null i_manufact_id:14!null inv_date_sk:25!null inv_item_sk:26!null inv_quantity_on_hand:28!null
+ │         │    │         ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
+ │         │    │         ├── immutable
+ │         │    │         ├── fd: (1)-->(2,5,6,14), (1)==(26), (26)==(1)
+ │         │    │         ├── select
+ │         │    │         │    ├── columns: inv_date_sk:25!null inv_item_sk:26!null inv_quantity_on_hand:28!null
+ │         │    │         │    ├── scan inventory
+ │         │    │         │    │    └── columns: inv_date_sk:25!null inv_item_sk:26!null inv_quantity_on_hand:28
+ │         │    │         │    └── filters
+ │         │    │         │         └── (inv_quantity_on_hand:28 >= 100) AND (inv_quantity_on_hand:28 <= 500) [outer=(28), constraints=(/28: [/100 - /500]; tight)]
+ │         │    │         ├── select
+ │         │    │         │    ├── columns: i_item_sk:1!null i_item_id:2!null i_item_desc:5 i_current_price:6!null i_manufact_id:14!null
+ │         │    │         │    ├── immutable
+ │         │    │         │    ├── key: (1)
+ │         │    │         │    ├── fd: (1)-->(2,5,6,14)
+ │         │    │         │    ├── scan item
+ │         │    │         │    │    ├── columns: i_item_sk:1!null i_item_id:2!null i_item_desc:5 i_current_price:6 i_manufact_id:14
+ │         │    │         │    │    ├── key: (1)
+ │         │    │         │    │    └── fd: (1)-->(2,5,6,14)
+ │         │    │         │    └── filters
+ │         │    │         │         ├── (i_current_price:6 >= 29) AND (i_current_price:6 <= 59.00) [outer=(6), immutable, constraints=(/6: [/29 - /59.00]; tight)]
+ │         │    │         │         └── i_manufact_id:14 IN (705, 742, 777, 944) [outer=(14), constraints=(/14: [/705 - /705] [/742 - /742] [/777 - /777] [/944 - /944]; tight)]
+ │         │    │         └── filters
+ │         │    │              └── i_item_sk:1 = inv_item_sk:26 [outer=(1,26), constraints=(/1: (/NULL - ]; /26: (/NULL - ]), fd=(1)==(26), (26)==(1)]
+ │         │    └── filters
+ │         │         └── (d_date:33 >= '2002-03-29') AND (d_date:33 <= '2002-05-28') [outer=(33), constraints=(/33: [/'2002-03-29' - /'2002-05-28']; tight)]
  │         └── filters (true)
  └── 100
 
@@ -1967,7 +1970,7 @@ limit
  │    │    ├── columns: column136:136 column138:138 w_state:76 i_item_id:83!null
  │    │    ├── immutable
  │    │    ├── ordering: +76,+83
- │    │    ├── limit hint: 238.98
+ │    │    ├── limit hint: 2518.37
  │    │    ├── left-join (lookup catalog_returns)
  │    │    │    ├── columns: cs_sold_date_sk:1!null cs_warehouse_sk:15!null cs_item_sk:16!null cs_order_number:18!null cs_sales_price:22 cr_item_sk:39 cr_order_number:53 cr_refunded_cash:60 w_warehouse_sk:66!null w_state:76 i_item_sk:82!null i_item_id:83!null i_current_price:87!null d_date_sk:106!null d_date:108!null
  │    │    │    ├── key columns: [16 18] = [39 53]
@@ -1976,7 +1979,7 @@ limit
  │    │    │    ├── key: (18,82)
  │    │    │    ├── fd: (16,18)-->(1,15,22,39,53,60), (39,53)-->(60), (66)-->(76), (82)-->(83,87), (106)-->(108), (15)==(66), (66)==(15), (16)==(82), (82)==(16), (1)==(106), (106)==(1)
  │    │    │    ├── ordering: +76,+83
- │    │    │    ├── limit hint: 238.98
+ │    │    │    ├── limit hint: 2518.37
  │    │    │    ├── inner-join (lookup date_dim)
  │    │    │    │    ├── columns: cs_sold_date_sk:1!null cs_warehouse_sk:15!null cs_item_sk:16!null cs_order_number:18!null cs_sales_price:22 w_warehouse_sk:66!null w_state:76 i_item_sk:82!null i_item_id:83!null i_current_price:87!null d_date_sk:106!null d_date:108!null
  │    │    │    │    ├── key columns: [1] = [106]
@@ -1985,14 +1988,14 @@ limit
  │    │    │    │    ├── key: (18,82)
  │    │    │    │    ├── fd: (66)-->(76), (82)-->(83,87), (16,18)-->(1,15,22), (106)-->(108), (1)==(106), (106)==(1), (16)==(82), (82)==(16), (15)==(66), (66)==(15)
  │    │    │    │    ├── ordering: +76,+83
- │    │    │    │    ├── limit hint: 300.00
+ │    │    │    │    ├── limit hint: 2600.00
  │    │    │    │    ├── sort
  │    │    │    │    │    ├── columns: cs_sold_date_sk:1 cs_warehouse_sk:15!null cs_item_sk:16!null cs_order_number:18!null cs_sales_price:22 w_warehouse_sk:66!null w_state:76 i_item_sk:82!null i_item_id:83!null i_current_price:87!null
  │    │    │    │    │    ├── immutable
  │    │    │    │    │    ├── key: (18,82)
  │    │    │    │    │    ├── fd: (66)-->(76), (16,18)-->(1,15,22), (82)-->(83,87), (16)==(82), (82)==(16), (15)==(66), (66)==(15)
  │    │    │    │    │    ├── ordering: +76,+83
- │    │    │    │    │    ├── limit hint: 9000.00
+ │    │    │    │    │    ├── limit hint: 6600.00
  │    │    │    │    │    └── inner-join (hash)
  │    │    │    │    │         ├── columns: cs_sold_date_sk:1 cs_warehouse_sk:15!null cs_item_sk:16!null cs_order_number:18!null cs_sales_price:22 w_warehouse_sk:66!null w_state:76 i_item_sk:82!null i_item_id:83!null i_current_price:87!null
  │    │    │    │    │         ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)

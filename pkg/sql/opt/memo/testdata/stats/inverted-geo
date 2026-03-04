@@ -107,7 +107,7 @@ memo (optimized, ~15KB, required=[presentation: i:1])
  │    │    └── cost: 2656.90
  │    └── []
  │         ├── best: (select G8 G7)
- │         └── cost: 3671.93
+ │         └── cost: 3764.03
  ├── G5: (const 1)
  ├── G6: (scan t,cols=(1,2))
  │    ├── [ordering: +1] [limit hint: 9.00]
@@ -118,22 +118,22 @@ memo (optimized, ~15KB, required=[presentation: i:1])
  │         └── cost: 2128.52
  ├── G7: (filters G9)
  ├── G8: (index-join G10 t,cols=(1,2))
- │    ├── [ordering: +1] [limit hint: 1.53]
+ │    ├── [ordering: +1] [limit hint: 1.57]
  │    │    ├── best: (sort G8)
- │    │    └── cost: 3399.85
+ │    │    └── cost: 3485.33
  │    └── []
  │         ├── best: (index-join G10 t,cols=(1,2))
- │         └── cost: 3329.20
+ │         └── cost: 3412.64
  ├── G9: (function G11 st_intersects)
  ├── G10: (inverted-filter G12 g_inverted_key)
  │    └── []
  │         ├── best: (inverted-filter G12 g_inverted_key)
- │         └── cost: 1272.99
+ │         └── cost: 1304.49
  ├── G11: (scalar-list G13 G14)
  ├── G12: (scan t@t_g_idx,inverted,cols=(3,6),constrained inverted)
  │    └── []
  │         ├── best: (scan t@t_g_idx,inverted,cols=(3,6),constrained inverted)
- │         └── cost: 1261.09
+ │         └── cost: 1292.29
  ├── G13: (const '010200000002000000000000000000E03F000000000000E03F666666666666E63F666666666666E63F')
  └── G14: (variable g)
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/cockroach/pkg/sql/rowenc/keyside"
+	"github.com/cockroachdb/cockroach/pkg/sql/sem/eval"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/tree"
 	"github.com/cockroachdb/cockroach/pkg/sql/types"
 	"github.com/cockroachdb/cockroach/pkg/util/encoding"
@@ -66,7 +67,9 @@ import (
 //		 rangeAfter := 8,025,821,355,276,500,992 - 7,815,264,235,947,622,400
 //	             := 210,557,119,328,878,600
 func GetRangesBeforeAndAfter(
-	beforeLowerBound, beforeUpperBound, afterLowerBound, afterUpperBound tree.Datum, swap bool,
+	evalCtx *eval.Context,
+	beforeLowerBound, beforeUpperBound, afterLowerBound, afterUpperBound tree.Datum,
+	swap bool,
 ) (rangeBefore, rangeAfter float64, ok bool) {
 	// If the data types don't match, don't bother trying to calculate the range
 	// sizes. This should almost never happen, but we want to avoid type
@@ -86,23 +89,22 @@ func GetRangesBeforeAndAfter(
 
 	// The calculations below assume that all bounds are inclusive.
 	// TODO(rytaft): handle more types here.
-	switch beforeLowerBound.ResolvedType().Family() {
+	typFamily := beforeLowerBound.ResolvedType().Family()
+	switch typFamily {
 	case types.IntFamily:
 		rangeBefore = float64(*beforeUpperBound.(*tree.DInt)) - float64(*beforeLowerBound.(*tree.DInt))
 		rangeAfter = float64(*afterUpperBound.(*tree.DInt)) - float64(*afterLowerBound.(*tree.DInt))
-		return rangeBefore, rangeAfter, true
 
 	case types.DateFamily:
 		lowerBefore := beforeLowerBound.(*tree.DDate)
 		upperBefore := beforeUpperBound.(*tree.DDate)
 		lowerAfter := afterLowerBound.(*tree.DDate)
 		upperAfter := afterUpperBound.(*tree.DDate)
-		if lowerBefore.IsFinite() && upperBefore.IsFinite() && lowerAfter.IsFinite() && upperAfter.IsFinite() {
-			rangeBefore = float64(upperBefore.PGEpochDays()) - float64(lowerBefore.PGEpochDays())
-			rangeAfter = float64(upperAfter.PGEpochDays()) - float64(lowerAfter.PGEpochDays())
-			return rangeBefore, rangeAfter, true
+		if !lowerBefore.IsFinite() || !upperBefore.IsFinite() || !lowerAfter.IsFinite() || !upperAfter.IsFinite() {
+			return 0, 0, false
 		}
-		return 0, 0, false
+		rangeBefore = float64(upperBefore.PGEpochDays()) - float64(lowerBefore.PGEpochDays())
+		rangeAfter = float64(upperAfter.PGEpochDays()) - float64(lowerAfter.PGEpochDays())
 
 	case types.DecimalFamily:
 		lowerBefore, err := beforeLowerBound.(*tree.DDecimal).Float64()
@@ -123,12 +125,10 @@ func GetRangesBeforeAndAfter(
 		}
 		rangeBefore = upperBefore - lowerBefore
 		rangeAfter = upperAfter - lowerAfter
-		return rangeBefore, rangeAfter, true
 
 	case types.FloatFamily:
 		rangeBefore = float64(*beforeUpperBound.(*tree.DFloat)) - float64(*beforeLowerBound.(*tree.DFloat))
 		rangeAfter = float64(*afterUpperBound.(*tree.DFloat)) - float64(*afterLowerBound.(*tree.DFloat))
-		return rangeBefore, rangeAfter, true
 
 	case types.TimestampFamily:
 		lowerBefore := beforeLowerBound.(*tree.DTimestamp).Time
@@ -137,7 +137,6 @@ func GetRangesBeforeAndAfter(
 		upperAfter := afterUpperBound.(*tree.DTimestamp).Time
 		rangeBefore = float64(upperBefore.Sub(lowerBefore))
 		rangeAfter = float64(upperAfter.Sub(lowerAfter))
-		return rangeBefore, rangeAfter, true
 
 	case types.TimestampTZFamily:
 		lowerBefore := beforeLowerBound.(*tree.DTimestampTZ).Time
@@ -146,7 +145,6 @@ func GetRangesBeforeAndAfter(
 		upperAfter := afterUpperBound.(*tree.DTimestampTZ).Time
 		rangeBefore = float64(upperBefore.Sub(lowerBefore))
 		rangeAfter = float64(upperAfter.Sub(lowerAfter))
-		return rangeBefore, rangeAfter, true
 
 	case types.TimeFamily:
 		lowerBefore := beforeLowerBound.(*tree.DTime)
@@ -155,7 +153,6 @@ func GetRangesBeforeAndAfter(
 		upperAfter := afterUpperBound.(*tree.DTime)
 		rangeBefore = float64(*upperBefore) - float64(*lowerBefore)
 		rangeAfter = float64(*upperAfter) - float64(*lowerAfter)
-		return rangeBefore, rangeAfter, true
 
 	case types.TimeTZFamily:
 		// timeTZOffsetSecsRange is the total number of possible values for offset.
@@ -175,7 +172,6 @@ func GetRangesBeforeAndAfter(
 		rangeAfter *= float64(timeTZOffsetSecsRange)
 		rangeBefore += float64(upperBefore.OffsetSecs - lowerBefore.OffsetSecs)
 		rangeAfter += float64(upperAfter.OffsetSecs - lowerAfter.OffsetSecs)
-		return rangeBefore, rangeAfter, true
 
 	case types.StringFamily, types.BytesFamily, types.UuidFamily, types.INetFamily:
 		// For non-numeric types, convert the datums to encoded keys to
@@ -206,12 +202,18 @@ func GetRangesBeforeAndAfter(
 		rangeAfter = float64(binary.BigEndian.Uint64(boundArrByte[3]) -
 			binary.BigEndian.Uint64(boundArrByte[2]))
 
-		return rangeBefore, rangeAfter, true
-
 	default:
 		// Range calculations are not supported for the given type family.
 		return 0, 0, false
 	}
+
+	// UUID columns are expected to be uniformly distributed. For other types,
+	// clamp the selectivity to 1 in 1,000 to avoid extreme under-estimates.
+	//if typFamily != types.UuidFamily {
+	const minNonNumericSel = 1.0 / 100.0
+	rangeAfter = max(rangeAfter, rangeBefore*minNonNumericSel)
+	//}
+	return rangeBefore, rangeAfter, true
 }
 
 // getCommonPrefix returns the first index where the value at said index differs

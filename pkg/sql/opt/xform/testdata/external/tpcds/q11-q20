@@ -1067,36 +1067,36 @@ scalar-group-by
  ├── semi-join (hash)
  │    ├── columns: cs1.cs_ship_date_sk:3!null cs1.cs_ship_addr_sk:11!null cs1.cs_call_center_sk:12!null cs1.cs_warehouse_sk:15 cs1.cs_order_number:18!null cs1.cs_ext_ship_cost:29 cs1.cs_net_profit:34 d_date_sk:37!null d_date:39!null ca_address_sk:67!null ca_state:75!null cc_call_center_sk:82!null cc_county:107!null
  │    ├── fd: ()-->(75,107), (37)-->(39), (3)==(37), (37)==(3), (11)==(67), (67)==(11), (12)==(82), (82)==(12)
- │    ├── inner-join (lookup customer_address)
+ │    ├── inner-join (lookup date_dim)
  │    │    ├── columns: cs1.cs_ship_date_sk:3!null cs1.cs_ship_addr_sk:11!null cs1.cs_call_center_sk:12!null cs1.cs_warehouse_sk:15 cs1.cs_order_number:18!null cs1.cs_ext_ship_cost:29 cs1.cs_net_profit:34 d_date_sk:37!null d_date:39!null ca_address_sk:67!null ca_state:75!null cc_call_center_sk:82!null cc_county:107!null
- │    │    ├── key columns: [11] = [67]
+ │    │    ├── key columns: [3] = [37]
  │    │    ├── lookup columns are key
  │    │    ├── fd: ()-->(75,107), (37)-->(39), (12)==(82), (82)==(12), (11)==(67), (67)==(11), (3)==(37), (37)==(3)
  │    │    ├── anti-join (hash)
- │    │    │    ├── columns: cs1.cs_ship_date_sk:3!null cs1.cs_ship_addr_sk:11 cs1.cs_call_center_sk:12!null cs1.cs_warehouse_sk:15 cs1.cs_order_number:18!null cs1.cs_ext_ship_cost:29 cs1.cs_net_profit:34 d_date_sk:37!null d_date:39!null cc_call_center_sk:82!null cc_county:107!null
- │    │    │    ├── fd: ()-->(107), (37)-->(39), (12)==(82), (82)==(12), (3)==(37), (37)==(3)
+ │    │    │    ├── columns: cs1.cs_ship_date_sk:3 cs1.cs_ship_addr_sk:11!null cs1.cs_call_center_sk:12!null cs1.cs_warehouse_sk:15 cs1.cs_order_number:18!null cs1.cs_ext_ship_cost:29 cs1.cs_net_profit:34 ca_address_sk:67!null ca_state:75!null cc_call_center_sk:82!null cc_county:107!null
+ │    │    │    ├── fd: ()-->(75,107), (12)==(82), (82)==(12), (11)==(67), (67)==(11)
  │    │    │    ├── inner-join (hash)
- │    │    │    │    ├── columns: cs1.cs_ship_date_sk:3!null cs1.cs_ship_addr_sk:11 cs1.cs_call_center_sk:12!null cs1.cs_warehouse_sk:15 cs1.cs_order_number:18!null cs1.cs_ext_ship_cost:29 cs1.cs_net_profit:34 d_date_sk:37!null d_date:39!null cc_call_center_sk:82!null cc_county:107!null
+ │    │    │    │    ├── columns: cs1.cs_ship_date_sk:3 cs1.cs_ship_addr_sk:11!null cs1.cs_call_center_sk:12!null cs1.cs_warehouse_sk:15 cs1.cs_order_number:18!null cs1.cs_ext_ship_cost:29 cs1.cs_net_profit:34 ca_address_sk:67!null ca_state:75!null cc_call_center_sk:82!null cc_county:107!null
  │    │    │    │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
- │    │    │    │    ├── fd: ()-->(107), (37)-->(39), (12)==(82), (82)==(12), (3)==(37), (37)==(3)
+ │    │    │    │    ├── fd: ()-->(75,107), (12)==(82), (82)==(12), (11)==(67), (67)==(11)
  │    │    │    │    ├── inner-join (hash)
- │    │    │    │    │    ├── columns: cs1.cs_ship_date_sk:3!null cs1.cs_ship_addr_sk:11 cs1.cs_call_center_sk:12 cs1.cs_warehouse_sk:15 cs1.cs_order_number:18!null cs1.cs_ext_ship_cost:29 cs1.cs_net_profit:34 d_date_sk:37!null d_date:39!null
+ │    │    │    │    │    ├── columns: cs1.cs_ship_date_sk:3 cs1.cs_ship_addr_sk:11!null cs1.cs_call_center_sk:12 cs1.cs_warehouse_sk:15 cs1.cs_order_number:18!null cs1.cs_ext_ship_cost:29 cs1.cs_net_profit:34 ca_address_sk:67!null ca_state:75!null
  │    │    │    │    │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
- │    │    │    │    │    ├── fd: (37)-->(39), (3)==(37), (37)==(3)
+ │    │    │    │    │    ├── fd: ()-->(75), (11)==(67), (67)==(11)
  │    │    │    │    │    ├── scan catalog_sales [as=cs1]
  │    │    │    │    │    │    └── columns: cs1.cs_ship_date_sk:3 cs1.cs_ship_addr_sk:11 cs1.cs_call_center_sk:12 cs1.cs_warehouse_sk:15 cs1.cs_order_number:18!null cs1.cs_ext_ship_cost:29 cs1.cs_net_profit:34
  │    │    │    │    │    ├── select
- │    │    │    │    │    │    ├── columns: d_date_sk:37!null d_date:39!null
- │    │    │    │    │    │    ├── key: (37)
- │    │    │    │    │    │    ├── fd: (37)-->(39)
- │    │    │    │    │    │    ├── scan date_dim
- │    │    │    │    │    │    │    ├── columns: d_date_sk:37!null d_date:39
- │    │    │    │    │    │    │    ├── key: (37)
- │    │    │    │    │    │    │    └── fd: (37)-->(39)
+ │    │    │    │    │    │    ├── columns: ca_address_sk:67!null ca_state:75!null
+ │    │    │    │    │    │    ├── key: (67)
+ │    │    │    │    │    │    ├── fd: ()-->(75)
+ │    │    │    │    │    │    ├── scan customer_address
+ │    │    │    │    │    │    │    ├── columns: ca_address_sk:67!null ca_state:75
+ │    │    │    │    │    │    │    ├── key: (67)
+ │    │    │    │    │    │    │    └── fd: (67)-->(75)
  │    │    │    │    │    │    └── filters
- │    │    │    │    │    │         └── (d_date:39 >= '2002-04-01') AND (d_date:39 <= '2002-05-31') [outer=(39), constraints=(/39: [/'2002-04-01' - /'2002-05-31']; tight)]
+ │    │    │    │    │    │         └── ca_state:75 = 'PA' [outer=(75), constraints=(/75: [/'PA' - /'PA']; tight), fd=()-->(75)]
  │    │    │    │    │    └── filters
- │    │    │    │    │         └── cs1.cs_ship_date_sk:3 = d_date_sk:37 [outer=(3,37), constraints=(/3: (/NULL - ]; /37: (/NULL - ]), fd=(3)==(37), (37)==(3)]
+ │    │    │    │    │         └── cs1.cs_ship_addr_sk:11 = ca_address_sk:67 [outer=(11,67), constraints=(/11: (/NULL - ]; /67: (/NULL - ]), fd=(11)==(67), (67)==(11)]
  │    │    │    │    ├── select
  │    │    │    │    │    ├── columns: cc_call_center_sk:82!null cc_county:107!null
  │    │    │    │    │    ├── key: (82)
@@ -1114,7 +1114,7 @@ scalar-group-by
  │    │    │    └── filters
  │    │    │         └── cs1.cs_order_number:18 = cr_order_number:167 [outer=(18,167), constraints=(/18: (/NULL - ]; /167: (/NULL - ]), fd=(18)==(167), (167)==(18)]
  │    │    └── filters
- │    │         └── ca_state:75 = 'PA' [outer=(75), constraints=(/75: [/'PA' - /'PA']; tight), fd=()-->(75)]
+ │    │         └── (d_date:39 >= '2002-04-01') AND (d_date:39 <= '2002-05-31') [outer=(39), constraints=(/39: [/'2002-04-01' - /'2002-05-31']; tight)]
  │    ├── scan catalog_sales [as=cs2]
  │    │    └── columns: cs2.cs_warehouse_sk:129 cs2.cs_order_number:132!null
  │    └── filters

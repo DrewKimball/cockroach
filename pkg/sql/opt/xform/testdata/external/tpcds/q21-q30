@@ -86,46 +86,52 @@ top-k
       │    │    │    ├── key: (7,23,47)
       │    │    │    ├── fd: (1-3)-->(4), (7)-->(9), (23)-->(24,28), (47)-->(49), (3)==(7), (7)==(3), (2)==(23), (23)==(2), (1)==(47), (47)==(1)
       │    │    │    ├── inner-join (hash)
-      │    │    │    │    ├── columns: inv_date_sk:1!null inv_item_sk:2!null inv_warehouse_sk:3!null inv_quantity_on_hand:4 i_item_sk:23!null i_item_id:24!null i_current_price:28!null d_date_sk:47!null d_date:49!null
+      │    │    │    │    ├── columns: inv_date_sk:1!null inv_item_sk:2!null inv_warehouse_sk:3!null inv_quantity_on_hand:4 w_warehouse_sk:7!null w_warehouse_name:9 i_item_sk:23!null i_item_id:24!null i_current_price:28!null
       │    │    │    │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
       │    │    │    │    ├── immutable
-      │    │    │    │    ├── key: (3,23,47)
-      │    │    │    │    ├── fd: (23)-->(24,28), (1-3)-->(4), (47)-->(49), (1)==(47), (47)==(1), (2)==(23), (23)==(2)
-      │    │    │    │    ├── inner-join (lookup inventory)
-      │    │    │    │    │    ├── columns: inv_date_sk:1!null inv_item_sk:2!null inv_warehouse_sk:3!null inv_quantity_on_hand:4 d_date_sk:47!null d_date:49!null
-      │    │    │    │    │    ├── key columns: [47] = [1]
-      │    │    │    │    │    ├── key: (2,3,47)
-      │    │    │    │    │    ├── fd: (1-3)-->(4), (47)-->(49), (1)==(47), (47)==(1)
-      │    │    │    │    │    ├── select
-      │    │    │    │    │    │    ├── columns: d_date_sk:47!null d_date:49!null
-      │    │    │    │    │    │    ├── key: (47)
-      │    │    │    │    │    │    ├── fd: (47)-->(49)
-      │    │    │    │    │    │    ├── scan date_dim
-      │    │    │    │    │    │    │    ├── columns: d_date_sk:47!null d_date:49
-      │    │    │    │    │    │    │    ├── key: (47)
-      │    │    │    │    │    │    │    └── fd: (47)-->(49)
-      │    │    │    │    │    │    └── filters
-      │    │    │    │    │    │         └── (d_date:49 >= '1999-05-23') AND (d_date:49 <= '1999-07-22') [outer=(49), constraints=(/49: [/'1999-05-23' - /'1999-07-22']; tight)]
-      │    │    │    │    │    └── filters (true)
-      │    │    │    │    ├── select
-      │    │    │    │    │    ├── columns: i_item_sk:23!null i_item_id:24!null i_current_price:28!null
+      │    │    │    │    ├── key: (1,7,23)
+      │    │    │    │    ├── fd: (1-3)-->(4), (7)-->(9), (23)-->(24,28), (3)==(7), (7)==(3), (2)==(23), (23)==(2)
+      │    │    │    │    ├── inner-join (hash)
+      │    │    │    │    │    ├── columns: inv_date_sk:1!null inv_item_sk:2!null inv_warehouse_sk:3!null inv_quantity_on_hand:4 i_item_sk:23!null i_item_id:24!null i_current_price:28!null
+      │    │    │    │    │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
       │    │    │    │    │    ├── immutable
-      │    │    │    │    │    ├── key: (23)
-      │    │    │    │    │    ├── fd: (23)-->(24,28)
-      │    │    │    │    │    ├── scan item
-      │    │    │    │    │    │    ├── columns: i_item_sk:23!null i_item_id:24!null i_current_price:28
+      │    │    │    │    │    ├── key: (1,3,23)
+      │    │    │    │    │    ├── fd: (1-3)-->(4), (23)-->(24,28), (2)==(23), (23)==(2)
+      │    │    │    │    │    ├── scan inventory
+      │    │    │    │    │    │    ├── columns: inv_date_sk:1!null inv_item_sk:2!null inv_warehouse_sk:3!null inv_quantity_on_hand:4
+      │    │    │    │    │    │    ├── key: (1-3)
+      │    │    │    │    │    │    └── fd: (1-3)-->(4)
+      │    │    │    │    │    ├── select
+      │    │    │    │    │    │    ├── columns: i_item_sk:23!null i_item_id:24!null i_current_price:28!null
+      │    │    │    │    │    │    ├── immutable
       │    │    │    │    │    │    ├── key: (23)
-      │    │    │    │    │    │    └── fd: (23)-->(24,28)
+      │    │    │    │    │    │    ├── fd: (23)-->(24,28)
+      │    │    │    │    │    │    ├── scan item
+      │    │    │    │    │    │    │    ├── columns: i_item_sk:23!null i_item_id:24!null i_current_price:28
+      │    │    │    │    │    │    │    ├── key: (23)
+      │    │    │    │    │    │    │    └── fd: (23)-->(24,28)
+      │    │    │    │    │    │    └── filters
+      │    │    │    │    │    │         └── (i_current_price:28 >= 0.99) AND (i_current_price:28 <= 1.49) [outer=(28), immutable, constraints=(/28: [/0.99 - /1.49]; tight)]
       │    │    │    │    │    └── filters
-      │    │    │    │    │         └── (i_current_price:28 >= 0.99) AND (i_current_price:28 <= 1.49) [outer=(28), immutable, constraints=(/28: [/0.99 - /1.49]; tight)]
+      │    │    │    │    │         └── i_item_sk:23 = inv_item_sk:2 [outer=(2,23), constraints=(/2: (/NULL - ]; /23: (/NULL - ]), fd=(2)==(23), (23)==(2)]
+      │    │    │    │    ├── scan warehouse
+      │    │    │    │    │    ├── columns: w_warehouse_sk:7!null w_warehouse_name:9
+      │    │    │    │    │    ├── key: (7)
+      │    │    │    │    │    └── fd: (7)-->(9)
       │    │    │    │    └── filters
-      │    │    │    │         └── i_item_sk:23 = inv_item_sk:2 [outer=(2,23), constraints=(/2: (/NULL - ]; /23: (/NULL - ]), fd=(2)==(23), (23)==(2)]
-      │    │    │    ├── scan warehouse
-      │    │    │    │    ├── columns: w_warehouse_sk:7!null w_warehouse_name:9
-      │    │    │    │    ├── key: (7)
-      │    │    │    │    └── fd: (7)-->(9)
+      │    │    │    │         └── inv_warehouse_sk:3 = w_warehouse_sk:7 [outer=(3,7), constraints=(/3: (/NULL - ]; /7: (/NULL - ]), fd=(3)==(7), (7)==(3)]
+      │    │    │    ├── select
+      │    │    │    │    ├── columns: d_date_sk:47!null d_date:49!null
+      │    │    │    │    ├── key: (47)
+      │    │    │    │    ├── fd: (47)-->(49)
+      │    │    │    │    ├── scan date_dim
+      │    │    │    │    │    ├── columns: d_date_sk:47!null d_date:49
+      │    │    │    │    │    ├── key: (47)
+      │    │    │    │    │    └── fd: (47)-->(49)
+      │    │    │    │    └── filters
+      │    │    │    │         └── (d_date:49 >= '1999-05-23') AND (d_date:49 <= '1999-07-22') [outer=(49), constraints=(/49: [/'1999-05-23' - /'1999-07-22']; tight)]
       │    │    │    └── filters
-      │    │    │         └── inv_warehouse_sk:3 = w_warehouse_sk:7 [outer=(3,7), constraints=(/3: (/NULL - ]; /7: (/NULL - ]), fd=(3)==(7), (7)==(3)]
+      │    │    │         └── inv_date_sk:1 = d_date_sk:47 [outer=(1,47), constraints=(/1: (/NULL - ]; /47: (/NULL - ]), fd=(1)==(47), (47)==(1)]
       │    │    └── projections
       │    │         ├── CASE WHEN d_date:49 < '1999-06-22' THEN inv_quantity_on_hand:4 ELSE 0 END [as=column77:77, outer=(4,49)]
       │    │         └── CASE WHEN d_date:49 >= '1999-06-22' THEN inv_quantity_on_hand:4 ELSE 0 END [as=column79:79, outer=(4,49)]

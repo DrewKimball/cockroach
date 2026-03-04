@@ -522,7 +522,7 @@ func (h *Histogram) filter(
 			// which allow exclusive ranges to be converted to inclusive ones.
 			cmpStarts := filteredSpan.CompareStarts(&keyCtx, &left)
 			filteredSpan.PreferInclusive(&keyCtx)
-			filteredBucket = getFilteredBucket(&iter, &keyCtx, &filteredSpan, colOffset)
+			filteredBucket = getFilteredBucket(h.evalCtx, &iter, &keyCtx, &filteredSpan, colOffset)
 			if !desc && cmpStarts != 0 {
 				// We need to add an empty bucket before the new bucket.
 				ub := h.getPrevUpperBound(ctx, filteredSpan.StartKey(), filteredSpan.StartBoundary(), colOffset)
@@ -897,7 +897,11 @@ func (sb *spanBuilder) makeSpanFromBucket(
 // the size of NumRange if the bucket is cut off in the middle. In this case,
 // we use the heuristic that NumRange is reduced by half.
 func getFilteredBucket(
-	iter *histogramIter, keyCtx *constraint.KeyContext, filteredSpan *constraint.Span, colOffset int,
+	evalCtx *eval.Context,
+	iter *histogramIter,
+	keyCtx *constraint.KeyContext,
+	filteredSpan *constraint.Span,
+	colOffset int,
 ) cat.HistogramBucket {
 	spanLowerBound := filteredSpan.StartKey().Value(colOffset)
 	spanUpperBound := filteredSpan.EndKey().Value(colOffset)
@@ -926,7 +930,7 @@ func getFilteredBucket(
 	// date-time types will have ok=true, since these are the only types for
 	// which we can accurately calculate the range size of a non-equality span.
 	rangeBefore, rangeAfter, ok := datumrange.GetRangesBeforeAndAfter(
-		bucketLowerBound, bucketUpperBound, spanLowerBound, spanUpperBound, iter.desc,
+		evalCtx, bucketLowerBound, bucketUpperBound, spanLowerBound, spanUpperBound, iter.desc,
 	)
 
 	// Determine whether this span represents an equality condition.

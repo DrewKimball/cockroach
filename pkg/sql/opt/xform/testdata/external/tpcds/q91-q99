@@ -170,11 +170,13 @@ scalar-group-by
  ├── immutable
  ├── key: ()
  ├── fd: ()-->(159)
- ├── inner-join (lookup web_sales)
+ ├── inner-join (hash)
  │    ├── columns: ws_sold_date_sk:1!null ws_item_sk:4!null ws_ext_discount_amt:23!null i_item_sk:37!null d_date_sk:61!null "?column?":158!null
- │    ├── key columns: [37] = [4]
+ │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
  │    ├── immutable
  │    ├── fd: (37,61)-->(158), (4)==(37), (37)==(4), (1)==(61), (61)==(1)
+ │    ├── scan web_sales
+ │    │    └── columns: ws_sold_date_sk:1 ws_item_sk:4!null ws_ext_discount_amt:23
  │    ├── project
  │    │    ├── columns: "?column?":158!null i_item_sk:37!null d_date_sk:61!null
  │    │    ├── immutable
@@ -232,6 +234,7 @@ scalar-group-by
  │    │    └── projections
  │    │         └── avg:157 * 1.3 [as="?column?":158, outer=(157), immutable]
  │    └── filters
+ │         ├── i_item_sk:37 = ws_item_sk:4 [outer=(4,37), constraints=(/4: (/NULL - ]; /37: (/NULL - ]), fd=(4)==(37), (37)==(4)]
  │         ├── d_date_sk:61 = ws_sold_date_sk:1 [outer=(1,61), constraints=(/1: (/NULL - ]; /61: (/NULL - ]), fd=(1)==(61), (61)==(1)]
  │         └── ws_ext_discount_amt:23 > "?column?":158 [outer=(23,158), immutable, constraints=(/23: (/NULL - ]; /158: (/NULL - ])]
  └── aggregations
@@ -395,35 +398,35 @@ scalar-group-by
  │    │    │    │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
  │    │    │    │    ├── fd: ()-->(96), (37)-->(39), (14)==(82), (82)==(14), (3)==(37), (37)==(3)
  │    │    │    │    ├── inner-join (hash)
- │    │    │    │    │    ├── columns: ws1.ws_ship_date_sk:3!null ws1.ws_ship_addr_sk:12 ws1.ws_web_site_sk:14 ws1.ws_warehouse_sk:16 ws1.ws_order_number:18!null ws1.ws_ext_ship_cost:29 ws1.ws_net_profit:34 d_date_sk:37!null d_date:39!null
+ │    │    │    │    │    ├── columns: ws1.ws_ship_date_sk:3 ws1.ws_ship_addr_sk:12 ws1.ws_web_site_sk:14!null ws1.ws_warehouse_sk:16 ws1.ws_order_number:18!null ws1.ws_ext_ship_cost:29 ws1.ws_net_profit:34 web_site_sk:82!null web_company_name:96!null
  │    │    │    │    │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
- │    │    │    │    │    ├── fd: (37)-->(39), (3)==(37), (37)==(3)
+ │    │    │    │    │    ├── fd: ()-->(96), (14)==(82), (82)==(14)
  │    │    │    │    │    ├── scan web_sales [as=ws1]
  │    │    │    │    │    │    └── columns: ws1.ws_ship_date_sk:3 ws1.ws_ship_addr_sk:12 ws1.ws_web_site_sk:14 ws1.ws_warehouse_sk:16 ws1.ws_order_number:18!null ws1.ws_ext_ship_cost:29 ws1.ws_net_profit:34
  │    │    │    │    │    ├── select
- │    │    │    │    │    │    ├── columns: d_date_sk:37!null d_date:39!null
- │    │    │    │    │    │    ├── key: (37)
- │    │    │    │    │    │    ├── fd: (37)-->(39)
- │    │    │    │    │    │    ├── scan date_dim
- │    │    │    │    │    │    │    ├── columns: d_date_sk:37!null d_date:39
- │    │    │    │    │    │    │    ├── key: (37)
- │    │    │    │    │    │    │    └── fd: (37)-->(39)
- │    │    │    │    │    │    └── filters
- │    │    │    │    │    │         └── (d_date:39 >= '2002-05-01') AND (d_date:39 <= '2002-06-30') [outer=(39), constraints=(/39: [/'2002-05-01' - /'2002-06-30']; tight)]
- │    │    │    │    │    └── filters
- │    │    │    │    │         └── ws1.ws_ship_date_sk:3 = d_date_sk:37 [outer=(3,37), constraints=(/3: (/NULL - ]; /37: (/NULL - ]), fd=(3)==(37), (37)==(3)]
- │    │    │    │    ├── select
- │    │    │    │    │    ├── columns: web_site_sk:82!null web_company_name:96!null
- │    │    │    │    │    ├── key: (82)
- │    │    │    │    │    ├── fd: ()-->(96)
- │    │    │    │    │    ├── scan web_site
- │    │    │    │    │    │    ├── columns: web_site_sk:82!null web_company_name:96
+ │    │    │    │    │    │    ├── columns: web_site_sk:82!null web_company_name:96!null
  │    │    │    │    │    │    ├── key: (82)
- │    │    │    │    │    │    └── fd: (82)-->(96)
+ │    │    │    │    │    │    ├── fd: ()-->(96)
+ │    │    │    │    │    │    ├── scan web_site
+ │    │    │    │    │    │    │    ├── columns: web_site_sk:82!null web_company_name:96
+ │    │    │    │    │    │    │    ├── key: (82)
+ │    │    │    │    │    │    │    └── fd: (82)-->(96)
+ │    │    │    │    │    │    └── filters
+ │    │    │    │    │    │         └── web_company_name:96 = 'pri' [outer=(96), constraints=(/96: [/'pri' - /'pri']; tight), fd=()-->(96)]
  │    │    │    │    │    └── filters
- │    │    │    │    │         └── web_company_name:96 = 'pri' [outer=(96), constraints=(/96: [/'pri' - /'pri']; tight), fd=()-->(96)]
+ │    │    │    │    │         └── ws1.ws_web_site_sk:14 = web_site_sk:82 [outer=(14,82), constraints=(/14: (/NULL - ]; /82: (/NULL - ]), fd=(14)==(82), (82)==(14)]
+ │    │    │    │    ├── select
+ │    │    │    │    │    ├── columns: d_date_sk:37!null d_date:39!null
+ │    │    │    │    │    ├── key: (37)
+ │    │    │    │    │    ├── fd: (37)-->(39)
+ │    │    │    │    │    ├── scan date_dim
+ │    │    │    │    │    │    ├── columns: d_date_sk:37!null d_date:39
+ │    │    │    │    │    │    ├── key: (37)
+ │    │    │    │    │    │    └── fd: (37)-->(39)
+ │    │    │    │    │    └── filters
+ │    │    │    │    │         └── (d_date:39 >= '2002-05-01') AND (d_date:39 <= '2002-06-30') [outer=(39), constraints=(/39: [/'2002-05-01' - /'2002-06-30']; tight)]
  │    │    │    │    └── filters
- │    │    │    │         └── ws1.ws_web_site_sk:14 = web_site_sk:82 [outer=(14,82), constraints=(/14: (/NULL - ]; /82: (/NULL - ]), fd=(14)==(82), (82)==(14)]
+ │    │    │    │         └── ws1.ws_ship_date_sk:3 = d_date_sk:37 [outer=(3,37), constraints=(/3: (/NULL - ]; /37: (/NULL - ]), fd=(3)==(37), (37)==(3)]
  │    │    │    ├── scan web_returns [as=wr1]
  │    │    │    │    └── columns: wr_order_number:159!null
  │    │    │    └── filters
@@ -519,33 +522,32 @@ with &1 (ws_wh)
       │    ├── semi-join (hash)
       │    │    ├── columns: ws1.ws_ship_date_sk:75!null ws1.ws_ship_addr_sk:84!null ws1.ws_web_site_sk:86!null ws1.ws_order_number:90!null ws1.ws_ext_ship_cost:101 ws1.ws_net_profit:106 d_date_sk:109!null d_date:111!null ca_address_sk:139!null ca_state:147!null web_site_sk:154!null web_company_name:168!null
       │    │    ├── fd: ()-->(147,168), (109)-->(111), (86)==(154), (154)==(86), (84)==(139), (139)==(84), (75)==(109), (109)==(75)
-      │    │    ├── inner-join (lookup customer_address)
+      │    │    ├── inner-join (hash)
       │    │    │    ├── columns: ws1.ws_ship_date_sk:75!null ws1.ws_ship_addr_sk:84!null ws1.ws_web_site_sk:86!null ws1.ws_order_number:90!null ws1.ws_ext_ship_cost:101 ws1.ws_net_profit:106 d_date_sk:109!null d_date:111!null ca_address_sk:139!null ca_state:147!null web_site_sk:154!null web_company_name:168!null
-      │    │    │    ├── key columns: [84] = [139]
-      │    │    │    ├── lookup columns are key
+      │    │    │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
       │    │    │    ├── fd: ()-->(147,168), (109)-->(111), (86)==(154), (154)==(86), (84)==(139), (139)==(84), (75)==(109), (109)==(75)
       │    │    │    ├── inner-join (hash)
-      │    │    │    │    ├── columns: ws1.ws_ship_date_sk:75!null ws1.ws_ship_addr_sk:84 ws1.ws_web_site_sk:86!null ws1.ws_order_number:90!null ws1.ws_ext_ship_cost:101 ws1.ws_net_profit:106 d_date_sk:109!null d_date:111!null web_site_sk:154!null web_company_name:168!null
+      │    │    │    │    ├── columns: ws1.ws_ship_date_sk:75 ws1.ws_ship_addr_sk:84!null ws1.ws_web_site_sk:86!null ws1.ws_order_number:90!null ws1.ws_ext_ship_cost:101 ws1.ws_net_profit:106 ca_address_sk:139!null ca_state:147!null web_site_sk:154!null web_company_name:168!null
       │    │    │    │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
-      │    │    │    │    ├── fd: ()-->(168), (109)-->(111), (86)==(154), (154)==(86), (75)==(109), (109)==(75)
+      │    │    │    │    ├── fd: ()-->(147,168), (86)==(154), (154)==(86), (84)==(139), (139)==(84)
       │    │    │    │    ├── inner-join (hash)
-      │    │    │    │    │    ├── columns: ws1.ws_ship_date_sk:75!null ws1.ws_ship_addr_sk:84 ws1.ws_web_site_sk:86 ws1.ws_order_number:90!null ws1.ws_ext_ship_cost:101 ws1.ws_net_profit:106 d_date_sk:109!null d_date:111!null
+      │    │    │    │    │    ├── columns: ws1.ws_ship_date_sk:75 ws1.ws_ship_addr_sk:84!null ws1.ws_web_site_sk:86 ws1.ws_order_number:90!null ws1.ws_ext_ship_cost:101 ws1.ws_net_profit:106 ca_address_sk:139!null ca_state:147!null
       │    │    │    │    │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-more)
-      │    │    │    │    │    ├── fd: (109)-->(111), (75)==(109), (109)==(75)
+      │    │    │    │    │    ├── fd: ()-->(147), (84)==(139), (139)==(84)
       │    │    │    │    │    ├── scan web_sales [as=ws1]
       │    │    │    │    │    │    └── columns: ws1.ws_ship_date_sk:75 ws1.ws_ship_addr_sk:84 ws1.ws_web_site_sk:86 ws1.ws_order_number:90!null ws1.ws_ext_ship_cost:101 ws1.ws_net_profit:106
       │    │    │    │    │    ├── select
-      │    │    │    │    │    │    ├── columns: d_date_sk:109!null d_date:111!null
-      │    │    │    │    │    │    ├── key: (109)
-      │    │    │    │    │    │    ├── fd: (109)-->(111)
-      │    │    │    │    │    │    ├── scan date_dim
-      │    │    │    │    │    │    │    ├── columns: d_date_sk:109!null d_date:111
-      │    │    │    │    │    │    │    ├── key: (109)
-      │    │    │    │    │    │    │    └── fd: (109)-->(111)
+      │    │    │    │    │    │    ├── columns: ca_address_sk:139!null ca_state:147!null
+      │    │    │    │    │    │    ├── key: (139)
+      │    │    │    │    │    │    ├── fd: ()-->(147)
+      │    │    │    │    │    │    ├── scan customer_address
+      │    │    │    │    │    │    │    ├── columns: ca_address_sk:139!null ca_state:147
+      │    │    │    │    │    │    │    ├── key: (139)
+      │    │    │    │    │    │    │    └── fd: (139)-->(147)
       │    │    │    │    │    │    └── filters
-      │    │    │    │    │    │         └── (d_date:111 >= '2001-04-01') AND (d_date:111 <= '2001-05-31') [outer=(111), constraints=(/111: [/'2001-04-01' - /'2001-05-31']; tight)]
+      │    │    │    │    │    │         └── ca_state:147 = 'VA' [outer=(147), constraints=(/147: [/'VA' - /'VA']; tight), fd=()-->(147)]
       │    │    │    │    │    └── filters
-      │    │    │    │    │         └── ws1.ws_ship_date_sk:75 = d_date_sk:109 [outer=(75,109), constraints=(/75: (/NULL - ]; /109: (/NULL - ]), fd=(75)==(109), (109)==(75)]
+      │    │    │    │    │         └── ws1.ws_ship_addr_sk:84 = ca_address_sk:139 [outer=(84,139), constraints=(/84: (/NULL - ]; /139: (/NULL - ]), fd=(84)==(139), (139)==(84)]
       │    │    │    │    ├── select
       │    │    │    │    │    ├── columns: web_site_sk:154!null web_company_name:168!null
       │    │    │    │    │    ├── key: (154)
@@ -558,8 +560,18 @@ with &1 (ws_wh)
       │    │    │    │    │         └── web_company_name:168 = 'pri' [outer=(168), constraints=(/168: [/'pri' - /'pri']; tight), fd=()-->(168)]
       │    │    │    │    └── filters
       │    │    │    │         └── ws1.ws_web_site_sk:86 = web_site_sk:154 [outer=(86,154), constraints=(/86: (/NULL - ]; /154: (/NULL - ]), fd=(86)==(154), (154)==(86)]
+      │    │    │    ├── select
+      │    │    │    │    ├── columns: d_date_sk:109!null d_date:111!null
+      │    │    │    │    ├── key: (109)
+      │    │    │    │    ├── fd: (109)-->(111)
+      │    │    │    │    ├── scan date_dim
+      │    │    │    │    │    ├── columns: d_date_sk:109!null d_date:111
+      │    │    │    │    │    ├── key: (109)
+      │    │    │    │    │    └── fd: (109)-->(111)
+      │    │    │    │    └── filters
+      │    │    │    │         └── (d_date:111 >= '2001-04-01') AND (d_date:111 <= '2001-05-31') [outer=(111), constraints=(/111: [/'2001-04-01' - /'2001-05-31']; tight)]
       │    │    │    └── filters
-      │    │    │         └── ca_state:147 = 'VA' [outer=(147), constraints=(/147: [/'VA' - /'VA']; tight), fd=()-->(147)]
+      │    │    │         └── ws1.ws_ship_date_sk:75 = d_date_sk:109 [outer=(75,109), constraints=(/75: (/NULL - ]; /109: (/NULL - ]), fd=(75)==(109), (109)==(75)]
       │    │    ├── with-scan &1 (ws_wh)
       │    │    │    ├── columns: ws_order_number:182!null
       │    │    │    └── mapping:

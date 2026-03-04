@@ -2335,15 +2335,15 @@ distribution: local
 └── • render
     │
     └── • filter
-        │ estimated row count: 1
+        │ estimated row count: 28
         │ filter: t IS NULL
         │
         └── • index join
-            │ estimated row count: 10
+            │ estimated row count: 335
             │ table: st@st_pkey
             │
             └── • scan
-                  estimated row count: 10 (0.01% of the table; stats collected <hidden> ago; using stats forecast)
+                  estimated row count: 335 (0.34% of the table; stats collected <hidden> ago; using stats forecast)
                   table: st@st_s_idx
                   spans: [/0 - /9]
 
