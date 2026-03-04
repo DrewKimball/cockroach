@@ -268,6 +268,19 @@ func (c *CustomFuncs) AddColToSet(set opt.ColSet, col opt.ColumnID) opt.ColSet {
 	return newSet
 }
 
+// ContainsCol returns true if the given ColSet contains the given column.
+func (c *CustomFuncs) ContainsCol(set opt.ColSet, col opt.ColumnID) bool {
+	return set.Contains(col)
+}
+
+// RemoveCol returns a new ColSet with the given column removed from the input
+// ColSet.
+func (c *CustomFuncs) RemoveCol(set opt.ColSet, col opt.ColumnID) opt.ColSet {
+	newSet := set.Copy()
+	newSet.Remove(col)
+	return newSet
+}
+
 // SingleColFromSet returns the single column in s. Panics if s does not contain
 // exactly one column.
 func (c *CustomFuncs) SingleColFromSet(s opt.ColSet) opt.ColumnID {
@@ -1307,6 +1320,24 @@ func (c *CustomFuncs) ProjectExtraCol(
 ) memo.RelExpr {
 	projections := memo.ProjectionsExpr{c.f.ConstructProjectionsItem(extra, extraID)}
 	return c.f.ConstructProject(in, projections, in.Relational().OutputCols)
+}
+
+// RemoveProjectionsItem returns a new list that is a copy of the given list,
+// except that it does not contain the given search item. If the list contains
+// the item multiple times, then only the first instance is removed. If the list
+// does not contain the item, then the method panics.
+func (c *CustomFuncs) RemoveProjectionsItem(
+	projections memo.ProjectionsExpr, search *memo.ProjectionsItem,
+) memo.ProjectionsExpr {
+	newProjections := make(memo.ProjectionsExpr, len(projections)-1)
+	for i := range projections {
+		if search == &projections[i] {
+			copy(newProjections, projections[:i])
+			copy(newProjections[i:], projections[i+1:])
+			return newProjections
+		}
+	}
+	panic(errors.AssertionFailedf("item to remove is not in the list: %v", search))
 }
 
 // ----------------------------------------------------------------------

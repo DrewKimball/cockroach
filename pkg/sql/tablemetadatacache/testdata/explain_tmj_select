@@ -1,6 +1,7 @@
 explain-select-query
 ----
 ----
+<<<<<<< Updated upstream
 EXPLAIN (REDACT) 
 WITH cte (n_id, n_name, "n_parentID", db_name, "n_parentSchemaID", schema_name, d) AS (
    SELECT
@@ -27,6 +28,16 @@ SELECT
     db_name,
     "n_parentSchemaID" AS "parentSchemaID",
     schema_name,
+=======
+EXPLAIN (OPT, VERBOSE) 
+SELECT 
+    n.id,
+    n.name,
+    n."parentID",
+    db_name.name as db_name,
+    n."parentSchemaID",
+    schema_name.name as schema_name,
+>>>>>>> Stashed changes
     json_array_length(d->'table' -> 'columns') as columns,
     COALESCE(json_array_length(d->'table' -> 'indexes'), 0) as indexes,
     CASE
@@ -48,6 +59,7 @@ FROM
 AS OF SYSTEM TIME '-1us'
 
 ---
+<<<<<<< Updated upstream
 distribution: local
 
 • render
@@ -98,5 +110,161 @@ distribution: local
                └── aggregations
                     └── max
                          └── createdAt
+=======
+sort
+ ├── columns: id:4 name:3 parentID:1 db_name:18 parentSchemaID:2 schema_name:26 columns:49 indexes:50 table_type:51 auto_stats_enabled:52 stats_last_updated:48 span:53
+ ├── cardinality: [0 - 20]
+ ├── immutable
+ ├── stats: [rows=9.30993]
+ ├── cost: 3113.72015
+ ├── cost-flags: unbounded-cardinality
+ ├── fd: (1-3)-->(4), (4)-->(53)
+ ├── ordering: +1,+2,+3
+ ├── prune: (1-4,18,26,48-53)
+ ├── interesting orderings: (+1,+2,+3)
+ └── project
+      ├── columns: columns:49 indexes:50 table_type:51 auto_stats_enabled:52 span:53 n.parentID:1 n.parentSchemaID:2 n.name:3 n.id:4 db_name.name:18 schema_name.name:26 max:48
+      ├── cardinality: [0 - 20]
+      ├── immutable
+      ├── stats: [rows=9.30993]
+      ├── cost: 3111.76423
+      ├── cost-flags: unbounded-cardinality
+      ├── fd: (1-3)-->(4), (4)-->(53)
+      ├── prune: (1-4,18,26,48-53)
+      ├── interesting orderings: (+1,+2,+3)
+      ├── right-join (hash)
+      │    ├── columns: n.parentID:1 n.parentSchemaID:2 n.name:3 n.id:4 enc_desc.id:9 descriptor:10 crdb_internal.pb_to_json:15 db_name.parentID:16 db_name.name:18 db_name.id:19 schema_name.parentID:24 schema_name.name:26 schema_name.id:27 tableID:32 max:48
+      │    ├── cardinality: [0 - 20]
+      │    ├── immutable
+      │    ├── stats: [rows=9.30993, distinct(32)=8.62112, null(32)=0]
+      │    ├── cost: 3111.19563
+      │    ├── cost-flags: unbounded-cardinality
+      │    ├── fd: ()-->(16), (1-3)-->(4), (9)-->(10), (32)-->(48), (4)==(9), (9)==(4), (1)==(19,24), (19)==(1,24), (24)==(1,19), (2)==(27), (27)==(2)
+      │    ├── interesting orderings: (+(1|19|24),+(2|27),+3 opt(16)) (+32)
+      │    ├── group-by (streaming)
+      │    │    ├── columns: tableID:32 max:48
+      │    │    ├── grouping columns: tableID:32
+      │    │    ├── internal-ordering: +32
+      │    │    ├── stats: [rows=100, distinct(32)=100, null(32)=0]
+      │    │    ├── cost: 1190.45
+      │    │    ├── cost-flags: unbounded-cardinality
+      │    │    ├── key: (32)
+      │    │    ├── fd: (32)-->(48)
+      │    │    ├── prune: (48)
+      │    │    ├── interesting orderings: (+32)
+      │    │    ├── scan table_statistics
+      │    │    │    ├── columns: tableID:32 createdAt:36
+      │    │    │    ├── stats: [rows=1000, distinct(32)=100, null(32)=0]
+      │    │    │    ├── cost: 1169.42
+      │    │    │    ├── cost-flags: unbounded-cardinality
+      │    │    │    ├── ordering: +32
+      │    │    │    ├── prune: (32,36)
+      │    │    │    └── interesting orderings: (+32)
+      │    │    └── aggregations
+      │    │         └── max [as=max:48, outer=(36)]
+      │    │              └── createdAt:36
+      │    ├── top-k
+      │    │    ├── columns: n.parentID:1 n.parentSchemaID:2 n.name:3 n.id:4 enc_desc.id:9 descriptor:10 crdb_internal.pb_to_json:15 db_name.parentID:16 db_name.name:18 db_name.id:19 schema_name.parentID:24 schema_name.name:26 schema_name.id:27
+      │    │    ├── internal-ordering: +(1|19|24),+(2|27),+3 opt(16)
+      │    │    ├── k: 20
+      │    │    ├── cardinality: [0 - 20]
+      │    │    ├── immutable
+      │    │    ├── stats: [rows=9.30993, distinct(4)=8.62112, null(4)=0]
+      │    │    ├── cost: 1919.22961
+      │    │    ├── cost-flags: unbounded-cardinality
+      │    │    ├── fd: ()-->(16), (1-3)-->(4), (9)-->(10), (4)==(9), (9)==(4), (1)==(19,24), (19)==(1,24), (24)==(1,19), (2)==(27), (27)==(2)
+      │    │    ├── prune: (18,26)
+      │    │    ├── interesting orderings: (+(1|19|24),+(2|27),+3 opt(16))
+      │    │    └── inner-join (hash)
+      │    │         ├── columns: n.parentID:1 n.parentSchemaID:2 n.name:3 n.id:4 enc_desc.id:9 descriptor:10 crdb_internal.pb_to_json:15 db_name.parentID:16 db_name.name:18 db_name.id:19 schema_name.parentID:24 schema_name.name:26 schema_name.id:27
+      │    │         ├── immutable
+      │    │         ├── stats: [rows=9.30993, distinct(1)=8.56179, null(1)=0, distinct(2)=9.30993, null(2)=0, distinct(4)=8.62112, null(4)=0, distinct(24)=8.56179, null(24)=0, distinct(27)=9.30993, null(27)=0]
+      │    │         ├── cost: 1917.18059
+      │    │         ├── cost-flags: unbounded-cardinality
+      │    │         ├── fd: ()-->(16), (1-3)-->(4), (9)-->(10), (4)==(9), (9)==(4), (1)==(19,24), (19)==(1,24), (24)==(1,19), (2)==(27), (27)==(2)
+      │    │         ├── prune: (18,26)
+      │    │         ├── interesting orderings: (+24)
+      │    │         ├── project-set
+      │    │         │    ├── columns: n.parentID:1 n.parentSchemaID:2 n.name:3 n.id:4 enc_desc.id:9 descriptor:10 crdb_internal.pb_to_json:15
+      │    │         │    ├── immutable
+      │    │         │    ├── stats: [rows=308, distinct(1)=33.3301, null(1)=0, distinct(2)=33.3301, null(2)=0, distinct(4)=96.5929, null(4)=0]
+      │    │         │    ├── cost: 1473.95979
+      │    │         │    ├── cost-flags: unbounded-cardinality
+      │    │         │    ├── fd: (1-3)-->(4), (9)-->(10), (4)==(9), (9)==(4)
+      │    │         │    ├── inner-join (hash)
+      │    │         │    │    ├── columns: n.parentID:1 n.parentSchemaID:2 n.name:3 n.id:4 enc_desc.id:9 descriptor:10
+      │    │         │    │    ├── multiplicity: left-rows(zero-or-more), right-rows(zero-or-one)
+      │    │         │    │    ├── immutable
+      │    │         │    │    ├── stats: [rows=308, distinct(1)=33.3301, null(1)=0, distinct(2)=33.3301, null(2)=0, distinct(4)=96.5929, null(4)=0, distinct(9)=96.5929, null(9)=0]
+      │    │         │    │    ├── cost: 1470.85979
+      │    │         │    │    ├── cost-flags: unbounded-cardinality
+      │    │         │    │    ├── key: (1-3)
+      │    │         │    │    ├── fd: (1-3)-->(4), (9)-->(10), (4)==(9), (9)==(4)
+      │    │         │    │    ├── prune: (10)
+      │    │         │    │    ├── scan descriptor [as=enc_desc]
+      │    │         │    │    │    ├── columns: enc_desc.id:9 descriptor:10
+      │    │         │    │    │    ├── stats: [rows=1000, distinct(9)=1000, null(9)=0]
+      │    │         │    │    │    ├── cost: 1068.42
+      │    │         │    │    │    ├── cost-flags: unbounded-cardinality
+      │    │         │    │    │    ├── key: (9)
+      │    │         │    │    │    ├── fd: (9)-->(10)
+      │    │         │    │    │    ├── prune: (9,10)
+      │    │         │    │    │    ├── interesting orderings: (+9)
+      │    │         │    │    │    └── unfiltered-cols: (9-14)
+      │    │         │    │    ├── select
+      │    │         │    │    │    ├── columns: n.parentID:1 n.parentSchemaID:2 n.name:3 n.id:4
+      │    │         │    │    │    ├── immutable
+      │    │         │    │    │    ├── stats: [rows=311.111, distinct(1)=33.3333, null(1)=0, distinct(2)=33.3333, null(2)=0, distinct(4)=97.5929, null(4)=3.11111, distinct(1,2)=311.111, null(1,2)=0]
+      │    │         │    │    │    ├── cost: 381.383333
+      │    │         │    │    │    ├── cost-flags: unbounded-cardinality
+      │    │         │    │    │    ├── key: (1-3)
+      │    │         │    │    │    ├── fd: (1-3)-->(4)
+      │    │         │    │    │    ├── prune: (4)
+      │    │         │    │    │    ├── interesting orderings: (+1,+2,+3)
+      │    │         │    │    │    ├── scan namespace [as=n]
+      │    │         │    │    │    │    ├── columns: n.parentID:1 n.parentSchemaID:2 n.name:3 n.id:4
+      │    │         │    │    │    │    ├── constraint: /1/2/3: [/1/1/e'\x00' - ]
+      │    │         │    │    │    │    ├── stats: [rows=333.333, distinct(1)=33.3333, null(1)=0]
+      │    │         │    │    │    │    ├── cost: 378.02
+      │    │         │    │    │    │    ├── cost-flags: unbounded-cardinality
+      │    │         │    │    │    │    ├── key: (1-3)
+      │    │         │    │    │    │    ├── fd: (1-3)-->(4)
+      │    │         │    │    │    │    └── interesting orderings: (+1,+2,+3)
+      │    │         │    │    │    └── filters
+      │    │         │    │    │         └── n.parentSchemaID:2 != 0 [outer=(2), constraints=(/2: (/NULL - /-1] [/1 - ]; tight)]
+      │    │         │    │    └── filters
+      │    │         │    │         └── n.id:4 = enc_desc.id:9 [outer=(4,9), constraints=(/4: (/NULL - ]; /9: (/NULL - ]), fd=(4)==(9), (9)==(4)]
+      │    │         │    └── zip
+      │    │         │         └── crdb_internal.pb_to_json('cockroach.sql.sqlbase.Descriptor', descriptor:10) [outer=(10), immutable]
+      │    │         ├── inner-join (lookup namespace [as=schema_name])
+      │    │         │    ├── columns: db_name.parentID:16 db_name.name:18 db_name.id:19 schema_name.parentID:24 schema_name.name:26 schema_name.id:27
+      │    │         │    ├── key columns: [19] = [24]
+      │    │         │    ├── stats: [rows=33.5824, distinct(19)=8.56179, null(19)=0, distinct(24)=8.56179, null(24)=0]
+      │    │         │    ├── cost: 438.670004
+      │    │         │    ├── cost-flags: unbounded-cardinality
+      │    │         │    ├── fd: ()-->(16), (19)==(24), (24)==(19)
+      │    │         │    ├── interesting orderings: (+24)
+      │    │         │    ├── scan namespace [as=db_name]
+      │    │         │    │    ├── columns: db_name.parentID:16 db_name.name:18 db_name.id:19
+      │    │         │    │    ├── constraint: /16/17/18: [/0 - /0]
+      │    │         │    │    ├── stats: [rows=10, distinct(16)=1, null(16)=0, distinct(19)=9.56179, null(19)=0.1]
+      │    │         │    │    ├── cost: 28.7200001
+      │    │         │    │    ├── cost-flags: unbounded-cardinality
+      │    │         │    │    ├── fd: ()-->(16)
+      │    │         │    │    └── prune: (18,19)
+      │    │         │    └── filters
+      │    │         │         └── schema_name.id:27 != 0 [outer=(27), constraints=(/27: (/NULL - /-1] [/1 - ]; tight)]
+      │    │         └── filters
+      │    │              ├── n.parentID:1 = db_name.id:19 [outer=(1,19), constraints=(/1: (/NULL - ]; /19: (/NULL - ]), fd=(1)==(19), (19)==(1)]
+      │    │              └── n.parentSchemaID:2 = schema_name.id:27 [outer=(2,27), constraints=(/2: (/NULL - ]; /27: (/NULL - ]), fd=(2)==(27), (27)==(2)]
+      │    └── filters
+      │         └── tableID:32 = n.id:4 [outer=(4,32), constraints=(/4: (/NULL - ]; /32: (/NULL - ]), fd=(4)==(32), (32)==(4)]
+      └── projections
+           ├── json_array_length((crdb_internal.pb_to_json:15->'table')->'columns') [as=columns:49, outer=(15), immutable]
+           ├── COALESCE(json_array_length((crdb_internal.pb_to_json:15->'table')->'indexes'), 0) [as=indexes:50, outer=(15), immutable]
+           ├── CASE WHEN ((crdb_internal.pb_to_json:15->'table')->>'isMaterializedView') = 'true' THEN 'MATERIALIZED_VIEW' WHEN ((crdb_internal.pb_to_json:15->'table')->>'viewQuery') IS NOT NULL THEN 'VIEW' WHEN ((crdb_internal.pb_to_json:15->'table')->'sequenceOpts') IS NOT NULL THEN 'SEQUENCE' ELSE 'TABLE' END [as=table_type:51, outer=(15), immutable]
+           ├── (((crdb_internal.pb_to_json:15->'table')->'autoStatsSettings')->>'enabled')::BOOL [as=auto_stats_enabled:52, outer=(15), immutable]
+           └── crdb_internal.table_span(n.id:4) [as=span:53, outer=(4)]
+>>>>>>> Stashed changes
 ----
 ----

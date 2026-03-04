@@ -1354,18 +1354,17 @@ update abc
  ├── cardinality: [0 - 0]
  ├── volatile, mutations
  └── project
-      ├── columns: c_new:17!null a:6!null b:7!null c:8!null m:11!null n:12!null o:13 p:14 mnop.crdb_internal_mvcc_timestamp:15 mnop.tableoid:16
+      ├── columns: c_new:17!null o:13!null p:14!null a:6!null b:7!null c:8!null m:11!null n:12!null mnop.crdb_internal_mvcc_timestamp:15 mnop.tableoid:16
       ├── cardinality: [0 - 1]
       ├── immutable
       ├── key: ()
       ├── fd: ()-->(6-8,11-17), (7)==(12), (12)==(7)
       ├── inner-join (hash)
-      │    ├── columns: a:6!null b:7!null c:8!null m:11!null n:12!null o:13 p:14 mnop.crdb_internal_mvcc_timestamp:15 mnop.tableoid:16
+      │    ├── columns: a:6!null b:7!null c:8!null m:11!null n:12!null mnop.crdb_internal_mvcc_timestamp:15 mnop.tableoid:16
       │    ├── cardinality: [0 - 1]
       │    ├── multiplicity: left-rows(zero-or-one), right-rows(zero-or-one)
-      │    ├── immutable
       │    ├── key: ()
-      │    ├── fd: ()-->(6-8,11-16), (7)==(12), (12)==(7)
+      │    ├── fd: ()-->(6-8,11,12,15,16), (7)==(12), (12)==(7)
       │    ├── select
       │    │    ├── columns: a:6!null b:7 c:8!null
       │    │    ├── cardinality: [0 - 1]
@@ -1379,35 +1378,28 @@ update abc
       │    │    └── filters
       │    │         ├── a:6 = 1 [outer=(6), constraints=(/6: [/1 - /1]; tight), fd=()-->(6)]
       │    │         └── c:8 [outer=(8), constraints=(/8: [/true - /true]; tight), fd=()-->(8)]
-      │    ├── project
-      │    │    ├── columns: o:13 p:14 m:11!null n:12 mnop.crdb_internal_mvcc_timestamp:15 mnop.tableoid:16
+      │    ├── select
+      │    │    ├── columns: m:11!null n:12 mnop.crdb_internal_mvcc_timestamp:15 mnop.tableoid:16
       │    │    ├── cardinality: [0 - 1]
-      │    │    ├── immutable
       │    │    ├── key: ()
-      │    │    ├── fd: ()-->(11-16)
-      │    │    ├── select
+      │    │    ├── fd: ()-->(11,12,15,16)
+      │    │    ├── scan mnop
       │    │    │    ├── columns: m:11!null n:12 mnop.crdb_internal_mvcc_timestamp:15 mnop.tableoid:16
-      │    │    │    ├── cardinality: [0 - 1]
-      │    │    │    ├── key: ()
-      │    │    │    ├── fd: ()-->(11,12,15,16)
-      │    │    │    ├── scan mnop
-      │    │    │    │    ├── columns: m:11!null n:12 mnop.crdb_internal_mvcc_timestamp:15 mnop.tableoid:16
-      │    │    │    │    ├── computed column expressions
-      │    │    │    │    │    ├── o:13
-      │    │    │    │    │    │    └── m:11 + n:12
-      │    │    │    │    │    └── p:14
-      │    │    │    │    │         └── m:11 < n:12
-      │    │    │    │    ├── key: (11)
-      │    │    │    │    └── fd: (11)-->(12,15,16), (12)~~>(11,15,16)
-      │    │    │    └── filters
-      │    │    │         └── m:11 = 1 [outer=(11), constraints=(/11: [/1 - /1]; tight), fd=()-->(11)]
-      │    │    └── projections
-      │    │         ├── m:11 + n:12 [as=o:13, outer=(11,12), immutable]
-      │    │         └── m:11 < n:12 [as=p:14, outer=(11,12)]
+      │    │    │    ├── computed column expressions
+      │    │    │    │    ├── o:13
+      │    │    │    │    │    └── m:11 + n:12
+      │    │    │    │    └── p:14
+      │    │    │    │         └── m:11 < n:12
+      │    │    │    ├── key: (11)
+      │    │    │    └── fd: (11)-->(12,15,16), (12)~~>(11,15,16)
+      │    │    └── filters
+      │    │         └── m:11 = 1 [outer=(11), constraints=(/11: [/1 - /1]; tight), fd=()-->(11)]
       │    └── filters
       │         └── b:7 = n:12 [outer=(7,12), constraints=(/7: (/NULL - ]; /12: (/NULL - ]), fd=(7)==(12), (12)==(7)]
       └── projections
-           └── false [as=c_new:17]
+           ├── false [as=c_new:17]
+           ├── m:11 + n:12 [as=o:13, outer=(11,12), immutable]
+           └── m:11 < n:12 [as=p:14, outer=(11,12)]
 
 # Test that we do use swap mutations with computed columns.
 

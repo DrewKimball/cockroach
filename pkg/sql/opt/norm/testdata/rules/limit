@@ -1529,8 +1529,8 @@ distinct-on
  │    ├── project
  │    │    ├── scan ab
  │    │    └── projections
- │    │         ├── 1
- │    │         └── a * u
+ │    │         ├── a * u
+ │    │         └── 1
  │    └── filters (true)
  └── aggregations
       ├── const-agg
@@ -1557,14 +1557,14 @@ ON True
 distinct-on
  ├── left-join-apply
  │    ├── scan uv
- │    ├── inner-join (cross)
- │    │    ├── values
- │    │    │    └── (1,)
- │    │    ├── project
+ │    ├── project
+ │    │    ├── inner-join (cross)
+ │    │    │    ├── values
+ │    │    │    │    └── (1,)
  │    │    │    ├── scan ab
- │    │    │    └── projections
- │    │    │         └── a * u
- │    │    └── filters (true)
+ │    │    │    └── filters (true)
+ │    │    └── projections
+ │    │         └── a * u
  │    └── filters (true)
  └── aggregations
       ├── const-agg

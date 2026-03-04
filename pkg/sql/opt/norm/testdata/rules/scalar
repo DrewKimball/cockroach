@@ -2433,14 +2433,13 @@ project
  │    ├── key: (1)
  │    ├── fd: ()-->(25), (1)-->(25,26)
  │    ├── project
- │    │    ├── columns: c.k:1!null canary:25!null array:22
- │    │    ├── key: (1,22)
- │    │    ├── fd: ()-->(25)
- │    │    ├── scan a [as=b]
- │    │    │    ├── columns: b.k:8!null
- │    │    │    └── key: (8)
+ │    │    ├── columns: canary:25!null array:22 c.k:1!null
+ │    │    ├── key: (1)
+ │    │    ├── fd: ()-->(25), (1)-->(22)
+ │    │    ├── scan a [as=c]
+ │    │    │    ├── columns: c.k:1!null
+ │    │    │    └── key: (1)
  │    │    └── projections
- │    │         ├── b.k:8 [as=c.k:1, outer=(8)]
  │    │         ├── true [as=canary:25]
  │    │         └── indirection [as=array:22, subquery]
  │    │              ├── array-flatten

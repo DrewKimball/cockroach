@@ -527,6 +527,84 @@ $left
     (UnionCols $passThrough (OutputCols $right))
 )
 
+[HoistUnboundInnerJoinProjectionRight, Normalize]
+(InnerJoin | InnerJoinApply
+    $left:*
+    $right:(Project
+        $input:*
+        $projections:[
+            ...
+            $item:(ProjectionsItem $expr:* $col:*)
+            ...
+        ]
+    )
+    $on:* &
+
+        # Ensure that the join's ON condition does not reference the
+        # projections.
+        ^(ContainsCol (FilterOuterCols $on) $col)
+    $private:*
+)
+=>
+(Project
+    ((OpName)
+        $left
+        # Preserve all input columns here in case they are needed for the
+        # projection.
+        (Project
+            $input
+            (RemoveProjectionsItem $projections $item)
+            (OutputCols $input)
+        )
+        $on
+        $private
+    )
+    [ (ProjectionsItem $expr $col) ]
+    (RemoveCol
+        (UnionCols (OutputCols $left) (OutputCols $right))
+        $col
+    )
+)
+
+[HoistUnboundInnerJoinProjectionLeft, Normalize]
+(InnerJoin | InnerJoinApply
+    $left:(Project
+        $input:*
+        $projections:[
+            ...
+            $item:(ProjectionsItem $expr:* $col:*)
+            ...
+        ]
+    )
+    $right:* & ^(ContainsCol (OuterCols $right) $col)
+    $on:* &
+
+        # Ensure that the join's ON condition does not reference the
+        # projections.
+        ^(ContainsCol (FilterOuterCols $on) $col)
+    $private:*
+)
+=>
+(Project
+    ((OpName)
+        # Preserve all input columns here in case they are needed for the
+        # projection.
+        (Project
+            $input
+            (RemoveProjectionsItem $projections $item)
+            (OutputCols $input)
+        )
+        $right
+        $on
+        $private
+    )
+    [ (ProjectionsItem $expr $col) ]
+    (RemoveCol
+        (UnionCols (OutputCols $left) (OutputCols $right))
+        $col
+    )
+)
+
 # SimplifyJoinNotNullEquality simplifies an Is/IsNot equality filter condition
 # when it's not possible for it to be null, as in the following case:
 #

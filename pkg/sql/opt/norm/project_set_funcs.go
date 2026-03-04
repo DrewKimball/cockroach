@@ -34,8 +34,13 @@ func (c *CustomFuncs) CanConstructValuesFromZips(zip memo.ZipExpr) bool {
 			// Not a FunctionExpr.
 			return false
 		}
+		//if !fn.Overload.IsGenerator() {
+		//	// Scalar functions can be directly projected in the first row of the
+		//	// Values expression, so they can all be handled regardless of arguments.
+		//	continue
+		//}
 		if _, ok := unnestFuncs[fn.Name]; !ok {
-			// Not a supported function.
+			// Not a supported generator function.
 			return false
 		}
 		if len(fn.Args) != 1 {
@@ -58,11 +63,11 @@ func (c *CustomFuncs) CanConstructValuesFromZips(zip memo.ZipExpr) bool {
 // the given ArrayExpr(s) or the ConstExpr(s) that wrap a DArray or DJSON in the
 // given ZipExpr.
 //
-// The functions contained in the ZipExpr must be unnest, json_array_elements or
-// jsonb_array_elements functions with a single parameter each. The parameters
-// of the unnest functions must be either ArrayExprs or ConstExprs wrapping
-// DArrays. The parameters of the json_array_elements functions must be
-// ConstExprs wrapping DJSON datums.
+// The functions contained in the ZipExpr must be either scalar, or one of the
+// unnest, json_array_elements, or jsonb_array_elements generator functions with
+// a single parameter each. The parameters of the unnest functions must be
+// either ArrayExprs or ConstExprs wrapping DArrays. The parameters of the
+// json_array_elements functions must be ConstExprs wrapping DJSON datums.
 func (c *CustomFuncs) ConstructValuesFromZips(zip memo.ZipExpr) memo.RelExpr {
 	numCols := len(zip)
 	outColTypes := make([]*types.T, numCols)
@@ -81,7 +86,10 @@ func (c *CustomFuncs) ConstructValuesFromZips(zip memo.ZipExpr) memo.RelExpr {
 			outColTypes[i] = types.Jsonb
 
 		default:
-			panic(errors.AssertionFailedf("invalid function name: %v", function.Name))
+			if function.Overload.IsGenerator() {
+				panic(errors.AssertionFailedf("unexpected generator function: %v", function.Name))
+			}
+			outColTypes[i] = function.Typ
 		}
 		outColIDs[i] = zip[i].Cols[0]
 	}
@@ -89,8 +97,8 @@ func (c *CustomFuncs) ConstructValuesFromZips(zip memo.ZipExpr) memo.RelExpr {
 	// addValToOutRows inserts a value into outRows at the given index.
 	addValToOutRows := func(expr opt.ScalarExpr, rIndex, cIndex int) {
 		if rIndex >= len(outRows) {
-			// If this is the largest column encountered so far, make a new row and
-			// fill with NullExprs.
+			// If this column has more values than the others encountered so far, make
+			// a new row and pad the previous columns with NULL.
 			outRows = append(outRows, make(memo.ScalarListExpr, numCols))
 			for i := 0; i < numCols; i++ {
 				outRows[rIndex][i] = c.f.ConstructNull(outColTypes[cIndex])
@@ -102,6 +110,12 @@ func (c *CustomFuncs) ConstructValuesFromZips(zip memo.ZipExpr) memo.RelExpr {
 	// Fill outRows with values from the arrays in the ZipExpr.
 	for i := range zip {
 		function := zip[i].Fn.(*memo.FunctionExpr)
+		if !function.Overload.IsGenerator() {
+			// Scalar functions are always projected in the first row only.
+			const rIndex = 0
+			addValToOutRows(function, rIndex, i)
+			continue
+		}
 		param := function.Args[0]
 		switch t := param.(type) {
 		case *memo.ArrayExpr:

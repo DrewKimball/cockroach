@@ -6878,14 +6878,14 @@ left-join (hash)
 norm expect=TryRemapJoinOuterColsRight format=hide-all
 SELECT * FROM xy INNER JOIN LATERAL (SELECT a, a+x FROM ab) ON a = x
 ----
-inner-join (hash)
- ├── scan xy
- ├── project
+project
+ ├── inner-join (hash)
+ │    ├── scan xy
  │    ├── scan ab
- │    └── projections
- │         └── a + a
- └── filters
-      └── a = x
+ │    └── filters
+ │         └── a = x
+ └── projections
+      └── a + a
 
 # Case with ProjectSet.
 norm expect=TryRemapJoinOuterColsRight disable=ConvertZipArraysToValues format=hide-all
@@ -6905,18 +6905,18 @@ project
 norm expect=TryRemapJoinOuterColsRight format=hide-all
 SELECT * FROM xy INNER JOIN LATERAL (SELECT * FROM (SELECT a, b, b+x FROM ab) INNER JOIN uv ON b = u) ON a = x
 ----
-inner-join (hash)
- ├── scan xy
+project
  ├── inner-join (hash)
- │    ├── project
+ │    ├── scan xy
+ │    ├── inner-join (hash)
  │    │    ├── scan ab
- │    │    └── projections
- │    │         └── b + a
- │    ├── scan uv
+ │    │    ├── scan uv
+ │    │    └── filters
+ │    │         └── b = u
  │    └── filters
- │         └── b = u
- └── filters
-      └── a = x
+ │         └── a = x
+ └── projections
+      └── b + a
 
 # Case with an InnerJoin. The outer column is in the join filters.
 norm expect=TryRemapJoinOuterColsRight format=hide-all
