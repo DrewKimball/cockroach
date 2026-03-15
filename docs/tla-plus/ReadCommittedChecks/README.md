@@ -12,31 +12,28 @@ We can't just refresh the reads for checks/cascades up to the transaction commit
 
 ### Solution
 
-We can guarantee both correctness and progress if we ensure the following four rules:
+Both correctness and progress are guaranteed if we ensure the following three rules:
 
-1. **All isolation levels** must block when a check/cascade read encounters a weak-isolation intent or lock.
+1. **All isolation levels** must block when a check/cascade read encounters a weak-isolation intent or FOR UPDATE lock.
 2. **All isolation levels** must retry when a check/cascade read encounters a newer committed value (FailOnMoreRecent on the read itself).
 3. **Weak isolation levels** must perform their check/cascade reads only after successfully placing the intents (or locks) for the mutation that triggered the check/cascade.
-4. **Weak isolation levels** must perform their check/cascade reads at or above the mutation statement's write timestamp (which is known due to rule 3).
 
-Rules 1 and 2 are enforced at read time via FailOnMoreRecent semantics on the check/cascade read itself (not on a separate refresh step). This is a key change from V2.
+Rules 1 and 2 are enforced at read time via FailOnMoreRecent semantics on the check/cascade read itself (not on a separate refresh step).
 
-Rule 4 is handled by "refreshing" the read timestamp up to the write timestamp between the mutation write and the check/cascade read. Since rule 3 ensures the write has been placed and no check reads have happened yet, this refresh is trivially successful. The refresh also bumps the timestamp cache to prevent future conflicting writes.
+### Assumptions
 
-**Future optimization for rule 4**: Instead of refreshing, a future implementation could simply step the transaction read timestamp forward after the main statement query and before checks/cascades (and even between successive checks/cascades). This would let checks/cascades execute at later snapshots, reducing the span refresh footprint and the likelihood of retries. The tradeoff is that checks/cascades would observe data at a later timestamp than the main query, but this is likely acceptable since Postgres exhibits the same behavior.
+The proposal assumes the following existing system behavior:
 
-### Protecting [stmt_read_ts, stmt_write_ts]
+1. **WriteTooOld refresh**: Reads are refreshed and the read timestamp advanced when a write gets a WriteTooOld error. This prevents unnecessary statement-level retries and ensures the read timestamp stays close to the write timestamp.
+2. **Atomic intent resolution**: Pushing an intent to a higher timestamp or replacing it with a committed value happens atomically with removing the original intent. Readers (including followers) do not observe an intermediate state.
 
-The FailOnMoreRecent read behavior prevents stale reads by failing if any committed value exists above the read timestamp. The refresh step bumps the timestamp cache up to the write timestamp to prevent future writes below the write timestamp.
+### Correctness
 
-### Protecting [stmt_write_ts, txn_commit_ts]
+**SSI**: Correctness is guaranteed as before, since SSI transactions refresh reads up to their commit timestamp, preventing stale reads.
 
-The write timestamp may change after the statement completes, for example, if a later writing statement in the same transaction is bumped by the timestamp cache. We don't refresh check/cascade reads up to the final commit timestamp (that could cause user-visible retry errors). Instead, conflicting statements provide this protection: if a conflicting statement writes in the [stmt_write_ts, txn_commit_ts] interval, it will refresh its own check before completing. Either:
+**RC**: Rules 1 and 2 force conflicting transactions to block and retry once the RC transaction has placed its intents (or locks). This prevents conflicting transactions from invalidating an RC transaction's check/cascade reads even if the RC transaction's write timestamp is pushed arbitrarily far forward. Rule 3 ensures the RC transaction observes any conflicting transaction that has already placed its intents.
 
-- The conflicting statement's check read will encounter our intent and block/fail, or
-- Our intent has been resolved, and the conflicting statement's FailOnMoreRecent read will observe the committed value and fail.
-
-This relies on the assumption that pushing an intent to a later timestamp or replacing it with a committed value happens atomically with removing the original intent.
+**Mixed**: Rules 1 and 2 ensure that transactions of all isolation levels do not violate constraints when conflicting with a weak-isolation statement that has already completed. Rule 3 ensures that weak-isolation statements check for (and retry on discovering) conflicting writes up to that point.
 
 ## Overview
 
@@ -55,7 +52,7 @@ Both SSI and RC transactions maintain read and write timestamps:
 
 **Read Timestamp:**
 - **SSI**: Assigned once at transaction start, used for all reads
-- **RC**: Assigned per-statement, then stepped forward to write_ts before check reads (rule 4)
+- **RC**: Assigned per-statement, stepped forward to write_ts when a WriteTooOld bumps write_ts (assumption 1)
 
 **Write Timestamp:**
 - Assigned at transaction/statement start
@@ -65,12 +62,11 @@ Both SSI and RC transactions maintain read and write timestamps:
 
 ### RC Transaction Flow
 
-RC transactions follow a strict sequential flow (rules 3 and 4):
+RC transactions follow a strict sequential flow (rule 3):
 
-1. **Write** the mutation (places intent, may bump write_ts due to timestamp cache)
-2. **Refresh** read_ts up to write_ts (trivially successful), check for conflicts, bump timestamp cache
-3. **Read** the check/cascade with FailOnMoreRecent (blocks on weak-iso intents, follows standard MVCC for SSI intents, fails on newer committed values)
-4. **Commit** (no commit-time refresh needed)
+1. **Write** the mutation (places intent, may bump write_ts due to timestamp cache; if bumped, the existing WriteTooOld refresh steps read_ts to write_ts)
+2. **Read** the check/cascade with FailOnMoreRecent (blocks on weak-iso intents, follows standard MVCC for SSI intents, fails on newer committed values)
+3. **Commit** (no commit-time refresh needed)
 
 ### SSI Transaction Flow
 
@@ -103,10 +99,10 @@ read_ts < T <= commit_ts
 
 Where:
 - For SSI: `read_ts` is the transaction-level read timestamp
-- For RC: `read_ts` is write_ts (after the rule 4 refresh step)
+- For RC: `read_ts` is stepped to write_ts by the WriteTooOld refresh (assumption 1)
 
 This ensures that:
-- For RC transactions: The write-refresh-read sequence correctly prevents stale reads
+- For RC transactions: The write-then-read sequence with FailOnMoreRecent correctly prevents stale reads
 - For SSI transactions: The FailOnMoreRecent read + commit-time refresh works correctly
 - For mixed-isolation workloads: Both mechanisms interact correctly
 
@@ -157,7 +153,7 @@ The model checker should verify that:
 2. **NoStaleReads** holds: No transaction commits with stale reads
 3. **AllTransactionsFinalize** holds: All transactions eventually commit or abort
 
-If the invariants hold, this validates that the four rules correctly prevent stale reads across all isolation level combinations without requiring locks or full transaction-level refreshes for RC.
+If the invariants hold, this validates that the three rules correctly prevent stale reads across all isolation level combinations without requiring locks or full transaction-level refreshes for RC.
 
 ## Scenarios Covered
 

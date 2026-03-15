@@ -28,24 +28,25 @@ CONSTANTS
 (* raft application and prevent 1PC. It has also led to correctness     *)
 (* bugs due to predicate locking gaps.                                  *)
 (*                                                                      *)
-(* This spec validates a proposed alternative: four new rules that      *)
-(* allow non-locking RC check and cascade reads while maintaining       *)
+(* This spec validates a proposed alternative: three rules that allow   *)
+(* non-locking RC check and cascade reads while maintaining             *)
 (* correctness. The rules are:                                          *)
 (* 1. All isolation levels block when a check/cascade read encounters   *)
-(*    a weak-isolation intent or lock.                                  *)
+(*    a weak-isolation intent or FOR UPDATE lock.                       *)
 (* 2. All isolation levels retry when a check/cascade read encounters   *)
 (*    a newer committed value (FailOnMoreRecent on the read itself).   *)
 (* 3. Weak isolation levels perform check/cascade reads only after      *)
 (*    successfully placing the intents for the triggering mutation.     *)
-(* 4. Weak isolation levels perform check/cascade reads at or above     *)
-(*    the mutation statement's write timestamp.                         *)
+(*                                                                      *)
+(* The spec also assumes existing system behavior: reads are refreshed  *)
+(* and the read timestamp advanced when a write gets a WriteTooOld      *)
+(* error. This is modeled by the RCRefresh step, which steps read_ts    *)
+(* forward to write_ts and bumps the timestamp cache after the write.   *)
 (*                                                                      *)
 (* Both transaction types maintain read and write timestamps. Rules 1   *)
 (* and 2 are enforced at check/cascade read time via FailOnMoreRecent.  *)
-(* For RC, a refresh step between the write and read (RCRefresh)        *)
-(* implements rule 4 by stepping read_ts forward to write_ts and        *)
-(* bumping the timestamp cache. SSI relies on its standard commit-time  *)
-(* refresh for the [read_ts, write_ts] window.                          *)
+(* SSI relies on its standard commit-time refresh for the               *)
+(* [read_ts, write_ts] window.                                          *)
 (*                                                                      *)
 (* TIMESTAMP MODEL:                                                     *)
 (* We use a partial ordering model for timestamps instead of simple     *)
@@ -81,8 +82,8 @@ variables
   \*          before commit.
   \*          For RC, this is allocated at the start of every statement and
   \*          stepped between statements (advanced without checking for
-  \*          newer values). With the proposal, RC statements also refresh
-  \*          (instead of jumping) before beginning constraint checks.
+  \*          newer values). When a write gets a WriteTooOld error, the
+  \*          read timestamp is refreshed to the new write timestamp.
   \* write_ts: timestamp ID for write timestamp, can advance during transaction.
   \*           When status is "committed", this is the commit timestamp.
   txns = [t \in {TXN1, TXN2} |-> [
@@ -242,8 +243,9 @@ end macro;
 
 \* Each transaction process executes one statement consisting of a mutation
 \* (write) and a check/cascade (read). Both SSI and RC transactions maintain
-\* read_ts and write_ts. For RC, read_ts is stepped to write_ts before checking
-\* reads (rule 4). For SSI, read_ts is refreshed lazily.
+\* read_ts and write_ts. For RC, read_ts is stepped to write_ts when a
+\* WriteTooOld bumps write_ts (existing behavior). For SSI, read_ts is
+\* refreshed lazily at commit time.
 fair process txn \in TXNS
 variables
   \* Which key this txn reads and writes.
@@ -266,8 +268,8 @@ begin
     end either;
 
   \* Begin transaction/statement - allocate read and write timestamps.
-  \* Both SSI and RC allocate read_ts. For RC, this will later be stepped
-  \* forward to write_ts before check reads (rule 4).
+  \* Both SSI and RC allocate read_ts. For RC, this will be stepped
+  \* forward to write_ts if the write gets a WriteTooOld error.
   AssignReadTimestamp:
     alloc_ts_after(txns[self].read_ts, {});
 
@@ -288,7 +290,7 @@ begin
     end if;
 
   \* ================================================================
-  \* RC Path: write -> refresh -> read (rules 3, 4)
+  \* RC Path: write -> refresh -> read (rule 3)
   \* ================================================================
 
   \* Rule 3: RC must place intents before performing check/cascade reads.
@@ -303,19 +305,11 @@ begin
       intent_txn |-> self
     ];
 
-  \* Rule 4: Refresh read_ts up to write_ts before check/cascade reads.
-  \* Since no check reads have occurred yet, this refresh is trivially
-  \* successful. We step read_ts forward, check for conflicts, and bump
+  \* Model the existing WriteTooOld refresh behavior: when the write bumps
+  \* write_ts above read_ts, the refresher steps read_ts forward to
+  \* write_ts. Since no check reads have occurred yet (rule 3), this
+  \* refresh is trivially successful. We check for conflicts and bump
   \* the timestamp cache to prevent future conflicting writes.
-  \*
-  \* NOTE: We model this as a refresh to preserve current behavior, but a future
-  \* optimization could instead step the read timestamp forward after the
-  \* main statement query and before checks/cascades (and even between
-  \* successive checks/cascades). This would let checks/cascades execute
-  \* at later snapshots, reducing the span refresh footprint and the
-  \* likelihood of retries. The tradeoff is that checks/cascades would
-  \* observe data at a later timestamp than the main query, but this is
-  \* likely acceptable since Postgres exhibits the same behavior.
   RCRefresh:
     \* Refresh checks (read_ts, write_ts] for conflicts, matching the real
     \* RefreshRequest semantics. Values above write_ts are ignored.
