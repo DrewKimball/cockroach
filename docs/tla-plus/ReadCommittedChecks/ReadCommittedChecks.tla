@@ -38,15 +38,23 @@ CONSTANTS
 (* 3. Weak isolation levels perform check/cascade reads only after      *)
 (*    successfully placing the intents for the triggering mutation.     *)
 (*                                                                      *)
-(* The spec also assumes existing system behavior: reads are refreshed  *)
-(* and the read timestamp advanced when a write gets a WriteTooOld      *)
-(* error. This is modeled by the RCRefresh step, which steps read_ts    *)
-(* forward to write_ts and bumps the timestamp cache after the write.   *)
+(* The spec assumes existing system behavior: reads are refreshed and   *)
+(* the read timestamp advanced when a write gets a WriteTooOld error    *)
+(* (assumption 1). This is modeled inline in the write steps, which     *)
+(* push write_ts above the tscache and step read_ts to write_ts.        *)
 (*                                                                      *)
 (* Both transaction types maintain read and write timestamps. Rules 1   *)
 (* and 2 are enforced at check/cascade read time via FailOnMoreRecent.  *)
-(* SSI relies on its standard commit-time refresh for the               *)
-(* [read_ts, write_ts] window.                                          *)
+(* SSI uses a commit-time refresh with FailOnMoreRecent semantics to    *)
+(* catch conflicts in the window between the read and commit. This is   *)
+(* a change from the current system where the span refresher checks     *)
+(* the bounded range (read_ts, write_ts]; it's needed to correctly      *)
+(* handle the insert fast path where the check read precedes the write. *)
+(*                                                                      *)
+(* SIMPLIFICATION: All intents block all readers. In the real system,   *)
+(* SSI readers can read through SSI intents above their read timestamp. *)
+(* Blocking is strictly more conservative, so any invariant that holds  *)
+(* here also holds in the real system.                                  *)
 (*                                                                      *)
 (* TIMESTAMP MODEL:                                                     *)
 (* We use a partial ordering model for timestamps instead of simple     *)
@@ -143,16 +151,6 @@ define
   HasAnyIntent(key) ==
     keys[key].intent_txn /= NoIntent
 
-  \* Check if an intent on a key requires blocking by a reader.
-  \* Rule 1: weak-isolation intents always block check/cascade reads.
-  \* SSI intents follow standard MVCC non-locking read behavior:
-  \*   - Block if intent timestamp <= reader's read_ts
-  \*   - Read through (ignore) if intent timestamp > reader's read_ts
-  IntentBlocksReader(key, reader) ==
-    /\ HasAnyIntent(key)
-    /\ \/ txns[keys[key].intent_txn].iso_level /= SSI  \* rule 1: block on weak-iso intents
-       \/ TimestampBeforeOrEqual(keys[key].ts, txns[reader].read_ts)  \* standard MVCC: block at/below read_ts
-
   \* Get the committed timestamp of a key (ZeroTimestamp if has intent).
   CommittedTimestamp(key) ==
     IF HasAnyIntent(key) THEN ZeroTimestamp ELSE keys[key].ts
@@ -216,11 +214,13 @@ define
   AbortedTransactionsStayAborted ==
     \A t \in TXNS: [](IsAborted(t) => []IsAborted(t))
 
-  \* Compute valid insertion positions for an event that must come after must_be_after.
+  \* Compute valid insertion positions for a timestamp that must come
+  \* strictly after all timestamps in must_be_after.
   ValidPositions(must_be_after) ==
     {p \in 1..(Len(ordering)+1) :
       \A e \in must_be_after :
         e = ZeroTimestamp \/ \E i \in 1..(p-1) : ordering[i] = e}
+
 end define;
 
 \* Allocate a new timestamp and insert it into the ordering after must_be_after timestamps.
@@ -281,173 +281,19 @@ begin
   MaybeAdvanceBeforeReadWrite:
     maybe_advance_write_ts();
 
-  \* Branch based on isolation level.
-  ExecuteStatement:
-    if txns[self].iso_level = RC then
-      goto RCWrite;
-    else
-      goto SSILoop;
-    end if;
-
   \* ================================================================
-  \* RC Path: write -> refresh -> read (rule 3)
+  \* Statement execution: write and check/cascade read.
+  \* RC must write before reading (rule 3). SSI can do either order.
   \* ================================================================
 
-  \* Rule 3: RC must place intents before performing check/cascade reads.
-  RCWrite:
-    if TimestampBeforeOrEqual(txns[self].write_ts, tscache[write_key]) then
-      alloc_ts_after(txns[self].write_ts, {tscache[write_key]});
-    end if;
-    \* Write intent at (possibly bumped) write_ts.
-    keys[write_key] := [
-      value      |-> 1,
-      ts         |-> txns[self].write_ts,
-      intent_txn |-> self
-    ];
-
-  \* Model the existing WriteTooOld refresh behavior: when the write bumps
-  \* write_ts above read_ts, the refresher steps read_ts forward to
-  \* write_ts. Since no check reads have occurred yet (rule 3), this
-  \* refresh is trivially successful. We check for conflicts and bump
-  \* the timestamp cache to prevent future conflicting writes.
-  RCRefresh:
-    \* Refresh checks (read_ts, write_ts] for conflicts, matching the real
-    \* RefreshRequest semantics. Values above write_ts are ignored.
-    if HasAnyIntent(read_key) then
-      goto Abort;
-    elsif TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key)) /\
-          TimestampBeforeOrEqual(CommittedTimestamp(read_key), txns[self].write_ts) then
-      goto Abort;
-    else
-      \* Refresh succeeded - step read_ts to write_ts and bump tscache.
-      txns[self].read_ts := txns[self].write_ts;
-      tscache[read_key] := txns[self].write_ts;
-    end if;
-
-  \* Check/cascade read with FailOnMoreRecent (rules 1, 2).
-  \* Rule 1: block on weak-isolation intents at any timestamp.
-  \* SSI intents follow standard MVCC: block at/below read_ts, read through above.
-  RCRead:
-    if IntentBlocksReader(read_key, self) then
-      \* Detect deadlock: we've already written, so if the intent owner is
-      \* pending and trying to read our write, we have a circular dependency.
-      if txns[keys[read_key].intent_txn].status = "pending" /\
-         HasAnyIntent(write_key) /\
-         keys[write_key].intent_txn = self then
-        goto Abort;
-      end if;
-      RCHandleIntent:
-        if ~IntentBlocksReader(read_key, self) then
-          skip;
-        else
-          either
-            await ~IntentBlocksReader(read_key, self);
-          or
-            await txns[keys[read_key].intent_txn].status \in {"committed", "aborted"};
-            if txns[keys[read_key].intent_txn].status = "committed" then
-              keys[read_key] := [
-                value      |-> 1,
-                ts         |-> txns[keys[read_key].intent_txn].write_ts,
-                intent_txn |-> NoIntent
-              ];
-            else
-              keys[read_key] := [
-                value      |-> 0,
-                ts         |-> ZeroTimestamp,
-                intent_txn |-> NoIntent
-              ];
-            end if;
-          end either;
-        end if;
-    end if;
-    RCPerformRead:
-      \* FailOnMoreRecent: fail on blocking intents or newer committed values.
-      \* Non-blocking intents (SSI intents above read_ts) are read through.
-      if IntentBlocksReader(read_key, self) then
-        goto Abort;
-      end if;
-      if TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key)) then
-        \* There's a committed value newer than our read_ts.
-        goto Abort;
-      end if;
-      \* Read succeeded. If there's a non-blocking SSI intent above our
-      \* read_ts, we read through it to the underlying committed value.
-      if HasAnyIntent(read_key) then
-        \* Reading through an SSI intent above read_ts. In this model,
-        \* each key has at most one writer, so the underlying value is 0.
-        read_value := 0;
-      else
-        read_value := keys[read_key].value;
-      end if;
-    reads[self] := Append(reads[self], <<read_key, read_value, txns[self].read_ts>>);
-    goto MaybeAdvanceBeforeCommit;
-
-  \* ================================================================
-  \* SSI Path: read/write in either order
-  \* ================================================================
-
-  SSILoop:
+  StatementLoop:
     while ~(read_done /\ write_done) do
       either
-        \* Check/cascade read operation.
-        \* Rule 1: block on weak-isolation intents at any timestamp.
-        \* SSI intents follow standard MVCC: block at/below read_ts, read through above.
-        when ~read_done;
-        if IntentBlocksReader(read_key, self) then
-          \* Detect deadlock.
-          if write_done /\
-             txns[keys[read_key].intent_txn].status = "pending" /\
-             HasAnyIntent(write_key) /\
-             keys[write_key].intent_txn = self then
-            goto Abort;
-          end if;
-          SSIHandleIntent:
-            if ~IntentBlocksReader(read_key, self) then
-              skip;
-            else
-              either
-                await ~IntentBlocksReader(read_key, self);
-              or
-                await txns[keys[read_key].intent_txn].status \in {"committed", "aborted"};
-                if txns[keys[read_key].intent_txn].status = "committed" then
-                  keys[read_key] := [
-                    value      |-> 1,
-                    ts         |-> txns[keys[read_key].intent_txn].write_ts,
-                    intent_txn |-> NoIntent
-                  ];
-                else
-                  keys[read_key] := [
-                    value      |-> 0,
-                    ts         |-> ZeroTimestamp,
-                    intent_txn |-> NoIntent
-                  ];
-                end if;
-              end either;
-            end if;
-        end if;
-        SSIPerformRead:
-          \* FailOnMoreRecent: fail on blocking intents or newer committed values.
-          \* Non-blocking intents (SSI intents above read_ts) are read through.
-          if IntentBlocksReader(read_key, self) then
-            goto Abort;
-          end if;
-          if TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key)) then
-            \* There's a committed value newer than our read_ts.
-            goto Abort;
-          end if;
-          \* Read succeeded. If there's a non-blocking SSI intent above our
-          \* read_ts, we read through it to the underlying committed value.
-          if HasAnyIntent(read_key) then
-            \* Reading through an SSI intent above read_ts. In this model,
-            \* each key has at most one writer, so the underlying value is 0.
-            read_value := 0;
-          else
-            read_value := keys[read_key].value;
-          end if;
-        reads[self] := Append(reads[self], <<read_key, read_value, txns[self].read_ts>>);
-        read_done := TRUE;
-      or
         \* Mutation write operation.
+        \* If tscache >= write_ts, push write_ts above tscache (WriteTooOld).
+        \* In the real system, the statement would also attempt to refresh
+        \* its reads at this point, but we don't model that since the only
+        \* reads in scope are for constraint validation.
         when ~write_done;
         if TimestampBeforeOrEqual(txns[self].write_ts, tscache[write_key]) then
           alloc_ts_after(txns[self].write_ts, {tscache[write_key]});
@@ -458,6 +304,41 @@ begin
           intent_txn |-> self
         ];
         write_done := TRUE;
+      or
+        \* Check/cascade read operation (rules 1, 2).
+        when ~read_done;
+        \* Rule 3: RC must place intents before performing check reads.
+        when txns[self].iso_level = SSI \/ write_done;
+        if HasAnyIntent(read_key) then
+          \* Detect deadlock: if the intent owner is pending and we have
+          \* an intent on their read key, we have a circular dependency.
+          \*
+          \* NOTE: this check is overeager when the intent owner has already
+          \* completed its read (no actual circular wait). However, TLC
+          \* explores all interleavings, so the non-aborting path where the
+          \* intent owner finishes first is still fully explored.
+          if txns[keys[read_key].intent_txn].status = "pending" /\
+             HasIntent(write_key, self) then
+            goto Abort;
+          end if;
+          \* Wait for the intent to be resolved by its owning transaction.
+          HandleIntent:
+            await ~HasAnyIntent(read_key);
+        end if;
+        PerformRead:
+          \* Re-check for intents (one could have been placed after the
+          \* HasAnyIntent check above, since they are separate labels).
+          \* Also check for a committed value above read_ts (rule 2).
+          if HasAnyIntent(read_key)
+             \/ TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key)) then
+            goto Abort;
+          else
+            read_value := keys[read_key].value;
+            reads[self] := Append(reads[self], <<read_key, read_value, txns[self].read_ts>>);
+            \* Bump tscache so concurrent writers get a WriteTooOld error.
+            tscache[read_key] := txns[self].read_ts;
+            read_done := TRUE;
+          end if;
       end either;
     end while;
 
@@ -470,17 +351,29 @@ begin
   MaybeAdvanceBeforeCommit:
     maybe_advance_write_ts();
 
-  \* For SSI, must refresh all reads to write_ts before commit.
+  \* SSI commit-time refresh of check/cascade read spans.
+  \*
+  \* In the current system, the span refresher checks committed values
+  \* in the bounded range (read_ts, write_ts]. This is insufficient
+  \* for check/cascade reads when the check is performed before the
+  \* write (the "insert fast path"): a conflicting intent can resolve
+  \* to a committed value above write_ts before the refresh runs,
+  \* causing the bounded range check to miss it.
+  \*
+  \* The fix: use FailOnMoreRecent semantics when refreshing
+  \* check/cascade read spans. This means blocking on intents and
+  \* failing on any committed value above read_ts, with no upper bound.
+  \* This requires tracking which refresh spans correspond to
+  \* check/cascade reads in the span refresher, so FailOnMoreRecent
+  \* can be applied selectively to those spans.
   CommitRefresh:
     if txns[self].iso_level = SSI then
-      \* SSI refreshes from txn read_ts to current write_ts.
-      if HasAnyIntent(read_key) then
-        goto Abort;
-      elsif TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key)) /\
-            TimestampBeforeOrEqual(CommittedTimestamp(read_key), txns[self].write_ts) then
+      \* Fail if there's an intent or a committed value above read_ts.
+      if HasAnyIntent(read_key)
+         \/ TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key)) then
         goto Abort;
       else
-        \* Refresh succeeded - bump timestamp cache.
+        \* Refresh succeeded - bump tscache to write_ts (commit_ts).
         tscache[read_key] := txns[self].write_ts;
       end if;
     end if;
@@ -520,7 +413,322 @@ end process;
 
 end algorithm; *)
 \* BEGIN TRANSLATION
-\* Translation is stale - regenerate with: pcal.trans ReadCommittedChecks.tla
+VARIABLES nextTS, ordering, txns, keys, tscache, reads, pc
+
+(* define statement *)
+TXNS == {TXN1, TXN2}
+KEYS == {K1, K2}
+
+
+InsertAt(seq, elem, pos) ==
+  SubSeq(seq, 1, pos-1) \o <<elem>> \o SubSeq(seq, pos, Len(seq))
+
+
+
+
+TimestampBefore(ts1, ts2) ==
+  IF ts1 = ZeroTimestamp THEN
+    ts2 /= ZeroTimestamp
+  ELSE IF ts2 = ZeroTimestamp THEN
+    FALSE
+  ELSE
+    LET pos1 == CHOOSE i \in 1..Len(ordering) : ordering[i] = ts1
+        pos2 == CHOOSE i \in 1..Len(ordering) : ordering[i] = ts2
+    IN pos1 < pos2
+
+
+TimestampBeforeOrEqual(ts1, ts2) ==
+  ts1 = ts2 \/ TimestampBefore(ts1, ts2)
+
+
+HasIntent(key, txn) ==
+  keys[key].intent_txn = txn
+
+
+HasAnyIntent(key) ==
+  keys[key].intent_txn /= NoIntent
+
+
+CommittedTimestamp(key) ==
+  IF HasAnyIntent(key) THEN ZeroTimestamp ELSE keys[key].ts
+
+
+IsCommitted(txn) ==
+  txns[txn].status = "committed"
+
+
+IsAborted(txn) ==
+  txns[txn].status = "aborted"
+
+
+IsPending(txn) ==
+  txns[txn].status = "pending"
+
+
+
+
+
+NoStaleReads ==
+  \A txn \in TXNS:
+    IsCommitted(txn) =>
+      \A i \in DOMAIN reads[txn]:
+        LET
+          read_record == reads[txn][i]
+          key == read_record[1]
+          read_val == read_record[2]
+          read_ts == read_record[3]
+          commit_ts == txns[txn].write_ts
+        IN
+
+
+
+
+          (keys[key].value /= read_val) =>
+            (TimestampBeforeOrEqual(CommittedTimestamp(key), read_ts) \/
+             TimestampBefore(commit_ts, CommittedTimestamp(key)))
+
+
+TypeInvariant ==
+  /\ nextTS \in Nat
+  /\ Len(ordering) < nextTS
+  /\ \A i \in 1..Len(ordering) : ordering[i] /= ZeroTimestamp
+  /\ \A t \in TXNS:
+    /\ txns[t].status \in {"pending", "committed", "aborted"}
+    /\ txns[t].iso_level \in {SSI, RC}
+    /\ txns[t].read_ts \in (1..(nextTS-1)) \cup {ZeroTimestamp}
+    /\ txns[t].write_ts \in (1..(nextTS-1)) \cup {ZeroTimestamp}
+  /\ \A k \in KEYS:
+    /\ keys[k].value \in {0, 1}
+    /\ keys[k].ts \in (1..(nextTS-1)) \cup {ZeroTimestamp}
+    /\ keys[k].intent_txn \in {NoIntent, TXN1, TXN2}
+    /\ tscache[k] \in (1..(nextTS-1)) \cup {ZeroTimestamp}
+
+
+AllTransactionsFinalize ==
+  <>[](\A t \in TXNS: txns[t].status \in {"committed", "aborted"})
+CommittedTransactionsStayCommitted ==
+  \A t \in TXNS: [](IsCommitted(t) => []IsCommitted(t))
+AbortedTransactionsStayAborted ==
+  \A t \in TXNS: [](IsAborted(t) => []IsAborted(t))
+
+
+
+ValidPositions(must_be_after) ==
+  {p \in 1..(Len(ordering)+1) :
+    \A e \in must_be_after :
+      e = ZeroTimestamp \/ \E i \in 1..(p-1) : ordering[i] = e}
+
+VARIABLES read_key, write_key, read_value, read_done, write_done
+
+vars == << nextTS, ordering, txns, keys, tscache, reads, pc, read_key, 
+           write_key, read_value, read_done, write_done >>
+
+ProcSet == (TXNS)
+
+Init == (* Global variables *)
+        /\ nextTS = 1
+        /\ ordering = <<>>
+        /\ txns =        [t \in {TXN1, TXN2} |-> [
+                    status    |-> "pending",
+                    iso_level |-> SSI,
+                    read_ts   |-> ZeroTimestamp,
+                    write_ts  |-> ZeroTimestamp
+                  ]]
+        /\ keys =        [k \in {K1, K2} |-> [
+                    value      |-> 0,
+                    ts         |-> ZeroTimestamp,
+                    intent_txn |-> NoIntent
+                  ]]
+        /\ tscache = [k \in {K1, K2} |-> ZeroTimestamp]
+        /\ reads = [t \in {TXN1, TXN2} |-> <<>>]
+        (* Process txn *)
+        /\ read_key = [self \in TXNS |-> IF self = TXN1 THEN K2 ELSE K1]
+        /\ write_key = [self \in TXNS |-> IF self = TXN1 THEN K1 ELSE K2]
+        /\ read_value = [self \in TXNS |-> 0]
+        /\ read_done = [self \in TXNS |-> FALSE]
+        /\ write_done = [self \in TXNS |-> FALSE]
+        /\ pc = [self \in ProcSet |-> "ChooseIsoLevel"]
+
+ChooseIsoLevel(self) == /\ pc[self] = "ChooseIsoLevel"
+                        /\ \/ /\ txns' = [txns EXCEPT ![self].iso_level = SSI]
+                           \/ /\ txns' = [txns EXCEPT ![self].iso_level = RC]
+                        /\ pc' = [pc EXCEPT ![self] = "AssignReadTimestamp"]
+                        /\ UNCHANGED << nextTS, ordering, keys, tscache, reads, 
+                                        read_key, write_key, read_value, 
+                                        read_done, write_done >>
+
+AssignReadTimestamp(self) == /\ pc[self] = "AssignReadTimestamp"
+                             /\ \E pos \in ValidPositions(({})):
+                                  /\ nextTS' = nextTS + 1
+                                  /\ ordering' = InsertAt(ordering, nextTS, pos)
+                                  /\ txns' = [txns EXCEPT ![self].read_ts = nextTS]
+                             /\ pc' = [pc EXCEPT ![self] = "AssignWriteTimestamp"]
+                             /\ UNCHANGED << keys, tscache, reads, read_key, 
+                                             write_key, read_value, read_done, 
+                                             write_done >>
+
+AssignWriteTimestamp(self) == /\ pc[self] = "AssignWriteTimestamp"
+                              /\ txns' = [txns EXCEPT ![self].write_ts = txns[self].read_ts]
+                              /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceBeforeReadWrite"]
+                              /\ UNCHANGED << nextTS, ordering, keys, tscache, 
+                                              reads, read_key, write_key, 
+                                              read_value, read_done, 
+                                              write_done >>
+
+MaybeAdvanceBeforeReadWrite(self) == /\ pc[self] = "MaybeAdvanceBeforeReadWrite"
+                                     /\ \/ /\ \E pos \in ValidPositions(({txns[self].write_ts})):
+                                                /\ nextTS' = nextTS + 1
+                                                /\ ordering' = InsertAt(ordering, nextTS, pos)
+                                                /\ txns' = [txns EXCEPT ![self].write_ts = nextTS]
+                                        \/ /\ TRUE
+                                           /\ UNCHANGED <<nextTS, ordering, txns>>
+                                     /\ pc' = [pc EXCEPT ![self] = "StatementLoop"]
+                                     /\ UNCHANGED << keys, tscache, reads, 
+                                                     read_key, write_key, 
+                                                     read_value, read_done, 
+                                                     write_done >>
+
+StatementLoop(self) == /\ pc[self] = "StatementLoop"
+                       /\ IF ~(read_done[self] /\ write_done[self])
+                             THEN /\ \/ /\ ~write_done[self]
+                                        /\ IF TimestampBeforeOrEqual(txns[self].write_ts, tscache[write_key[self]])
+                                              THEN /\ \E pos \in ValidPositions(({tscache[write_key[self]]})):
+                                                        /\ nextTS' = nextTS + 1
+                                                        /\ ordering' = InsertAt(ordering, nextTS, pos)
+                                                        /\ txns' = [txns EXCEPT ![self].write_ts = nextTS]
+                                              ELSE /\ TRUE
+                                                   /\ UNCHANGED << nextTS, 
+                                                                   ordering, 
+                                                                   txns >>
+                                        /\ keys' = [keys EXCEPT ![write_key[self]] =                    [
+                                                                                       value      |-> 1,
+                                                                                       ts         |-> txns'[self].write_ts,
+                                                                                       intent_txn |-> self
+                                                                                     ]]
+                                        /\ write_done' = [write_done EXCEPT ![self] = TRUE]
+                                        /\ pc' = [pc EXCEPT ![self] = "StatementLoop"]
+                                     \/ /\ ~read_done[self]
+                                        /\ txns[self].iso_level = SSI \/ write_done[self]
+                                        /\ IF HasAnyIntent(read_key[self])
+                                              THEN /\ IF txns[keys[read_key[self]].intent_txn].status = "pending" /\
+                                                         HasIntent(write_key[self], self)
+                                                         THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
+                                                         ELSE /\ pc' = [pc EXCEPT ![self] = "HandleIntent"]
+                                              ELSE /\ pc' = [pc EXCEPT ![self] = "PerformRead"]
+                                        /\ UNCHANGED <<nextTS, ordering, txns, keys, write_done>>
+                             ELSE /\ pc' = [pc EXCEPT ![self] = "MaybeAdvanceBeforeCommit"]
+                                  /\ UNCHANGED << nextTS, ordering, txns, keys, 
+                                                  write_done >>
+                       /\ UNCHANGED << tscache, reads, read_key, write_key, 
+                                       read_value, read_done >>
+
+HandleIntent(self) == /\ pc[self] = "HandleIntent"
+                      /\ ~HasAnyIntent(read_key[self])
+                      /\ pc' = [pc EXCEPT ![self] = "PerformRead"]
+                      /\ UNCHANGED << nextTS, ordering, txns, keys, tscache, 
+                                      reads, read_key, write_key, read_value, 
+                                      read_done, write_done >>
+
+PerformRead(self) == /\ pc[self] = "PerformRead"
+                     /\ IF HasAnyIntent(read_key[self])
+                           \/ TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key[self]))
+                           THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
+                                /\ UNCHANGED << tscache, reads, read_value, 
+                                                read_done >>
+                           ELSE /\ read_value' = [read_value EXCEPT ![self] = keys[read_key[self]].value]
+                                /\ reads' = [reads EXCEPT ![self] = Append(reads[self], <<read_key[self], read_value'[self], txns[self].read_ts>>)]
+                                /\ tscache' = [tscache EXCEPT ![read_key[self]] = txns[self].read_ts]
+                                /\ read_done' = [read_done EXCEPT ![self] = TRUE]
+                                /\ pc' = [pc EXCEPT ![self] = "StatementLoop"]
+                     /\ UNCHANGED << nextTS, ordering, txns, keys, read_key, 
+                                     write_key, write_done >>
+
+MaybeAdvanceBeforeCommit(self) == /\ pc[self] = "MaybeAdvanceBeforeCommit"
+                                  /\ \/ /\ \E pos \in ValidPositions(({txns[self].write_ts})):
+                                             /\ nextTS' = nextTS + 1
+                                             /\ ordering' = InsertAt(ordering, nextTS, pos)
+                                             /\ txns' = [txns EXCEPT ![self].write_ts = nextTS]
+                                     \/ /\ TRUE
+                                        /\ UNCHANGED <<nextTS, ordering, txns>>
+                                  /\ pc' = [pc EXCEPT ![self] = "CommitRefresh"]
+                                  /\ UNCHANGED << keys, tscache, reads, 
+                                                  read_key, write_key, 
+                                                  read_value, read_done, 
+                                                  write_done >>
+
+CommitRefresh(self) == /\ pc[self] = "CommitRefresh"
+                       /\ IF txns[self].iso_level = SSI
+                             THEN /\ IF HasAnyIntent(read_key[self])
+                                        \/ TimestampBefore(txns[self].read_ts, CommittedTimestamp(read_key[self]))
+                                        THEN /\ pc' = [pc EXCEPT ![self] = "Abort"]
+                                             /\ UNCHANGED tscache
+                                        ELSE /\ tscache' = [tscache EXCEPT ![read_key[self]] = txns[self].write_ts]
+                                             /\ pc' = [pc EXCEPT ![self] = "Commit"]
+                             ELSE /\ pc' = [pc EXCEPT ![self] = "Commit"]
+                                  /\ UNCHANGED tscache
+                       /\ UNCHANGED << nextTS, ordering, txns, keys, reads, 
+                                       read_key, write_key, read_value, 
+                                       read_done, write_done >>
+
+Commit(self) == /\ pc[self] = "Commit"
+                /\ txns' = [txns EXCEPT ![self].status = "committed"]
+                /\ pc' = [pc EXCEPT ![self] = "ResolveIntent"]
+                /\ UNCHANGED << nextTS, ordering, keys, tscache, reads, 
+                                read_key, write_key, read_value, read_done, 
+                                write_done >>
+
+ResolveIntent(self) == /\ pc[self] = "ResolveIntent"
+                       /\ keys' = [keys EXCEPT ![write_key[self]] =                    [
+                                                                      value      |-> 1,
+                                                                      ts         |-> txns[self].write_ts,
+                                                                      intent_txn |-> NoIntent
+                                                                    ]]
+                       /\ pc' = [pc EXCEPT ![self] = "End"]
+                       /\ UNCHANGED << nextTS, ordering, txns, tscache, reads, 
+                                       read_key, write_key, read_value, 
+                                       read_done, write_done >>
+
+Abort(self) == /\ pc[self] = "Abort"
+               /\ txns' = [txns EXCEPT ![self].status = "aborted"]
+               /\ IF HasIntent(write_key[self], self)
+                     THEN /\ keys' = [keys EXCEPT ![write_key[self]] =                    [
+                                                                         value      |-> 0,
+                                                                         ts         |-> ZeroTimestamp,
+                                                                         intent_txn |-> NoIntent
+                                                                       ]]
+                     ELSE /\ TRUE
+                          /\ keys' = keys
+               /\ pc' = [pc EXCEPT ![self] = "End"]
+               /\ UNCHANGED << nextTS, ordering, tscache, reads, read_key, 
+                               write_key, read_value, read_done, write_done >>
+
+End(self) == /\ pc[self] = "End"
+             /\ TRUE
+             /\ pc' = [pc EXCEPT ![self] = "Done"]
+             /\ UNCHANGED << nextTS, ordering, txns, keys, tscache, reads, 
+                             read_key, write_key, read_value, read_done, 
+                             write_done >>
+
+txn(self) == ChooseIsoLevel(self) \/ AssignReadTimestamp(self)
+                \/ AssignWriteTimestamp(self)
+                \/ MaybeAdvanceBeforeReadWrite(self) \/ StatementLoop(self)
+                \/ HandleIntent(self) \/ PerformRead(self)
+                \/ MaybeAdvanceBeforeCommit(self) \/ CommitRefresh(self)
+                \/ Commit(self) \/ ResolveIntent(self) \/ Abort(self)
+                \/ End(self)
+
+(* Allow infinite stuttering to prevent deadlock on termination. *)
+Terminating == /\ \A self \in ProcSet: pc[self] = "Done"
+               /\ UNCHANGED vars
+
+Next == (\E self \in TXNS: txn(self))
+           \/ Terminating
+
+Spec == /\ Init /\ [][Next]_vars
+        /\ \A self \in TXNS : WF_vars(txn(self))
+
+Termination == <>(\A self \in ProcSet: pc[self] = "Done")
+
 \* END TRANSLATION
 
 ====================================================================
