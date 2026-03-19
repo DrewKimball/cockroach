@@ -12,64 +12,36 @@ CONSTANTS
   NoIntent        \* Model value for no intent
 
 (************************************************************************)
-(* This spec models CRDB enforcing a foreign key or unique constraint   *)
-(* across two concurrent transactions. Each transaction performs a      *)
-(* mutation (write) that must be validated by a check or cascade read   *)
-(* on a related key -- for example, inserting a child row and checking  *)
-(* that the parent exists, deleting a parent row and checking for       *)
-(* dependent children, or inserting a unique key and checking for       *)
-(* duplicates. The two transactions conflict:                           *)
-(*   - TXN1 writes K1 and checks K2                                    *)
-(*   - TXN2 writes K2 and checks K1                                    *)
+(* Models two concurrent transactions enforcing a constraint (FK or     *)
+(* unique) via non-locking check/cascade reads. The transactions        *)
+(* conflict: TXN1 writes K1 and checks K2; TXN2 writes K2 and checks   *)
+(* K1. The spec validates three rules:                                  *)
 (*                                                                      *)
-(* Currently, read-committed (RC) transactions take replicated locks    *)
-(* during check/cascade reads to prevent stale reads. This is           *)
-(* expensive: replicated locks require a trip to the leaseholder and    *)
-(* raft application and prevent 1PC. It has also led to correctness     *)
-(* bugs due to predicate locking gaps.                                  *)
+(* 1. Block when a check read encounters a weak-iso intent/lock.        *)
+(* 2. Retry when a check read encounters a newer committed value.       *)
+(* 3. Perform check reads only after placing the triggering mutation's  *)
+(*    intents.                                                          *)
 (*                                                                      *)
-(* This spec validates a proposed alternative: three rules that allow   *)
-(* non-locking RC check and cascade reads while maintaining             *)
-(* correctness. The rules are:                                          *)
-(* 1. All isolation levels block when a check/cascade read encounters   *)
-(*    a weak-isolation intent or FOR UPDATE lock.                       *)
-(* 2. All isolation levels retry when a check/cascade read encounters   *)
-(*    a newer committed value (FailOnMoreRecent on the read itself).   *)
-(* 3. Weak isolation levels perform check/cascade reads only after      *)
-(*    successfully placing the intents for the triggering mutation.     *)
+(* Rule 3 is only enforced for RC here; SSI can read in either order    *)
+(* to model the insert fast path. SSI compensates with a commit-time    *)
+(* FailOnMoreRecent refresh (no upper bound), since the standard        *)
+(* bounded refresh (read_ts, write_ts] can miss a conflicting intent    *)
+(* that resolves above write_ts. Once rule 3 is enforced for all        *)
+(* isolation levels (after buffered writes mature), SSI becomes          *)
+(* equivalent to RC in this model and the RC paths already validate     *)
+(* that case.                                                           *)
 (*                                                                      *)
-(* The spec assumes existing system behavior: reads are refreshed and   *)
-(* the read timestamp advanced when a write gets a WriteTooOld error    *)
-(* (assumption 1). This is modeled inline in the write steps, which     *)
-(* push write_ts above the tscache and step read_ts to write_ts.        *)
+(* SIMPLIFICATION: All intents block all readers (the real system lets  *)
+(* SSI read through SSI intents above read_ts). This is strictly more   *)
+(* conservative, so invariants that hold here also hold in practice.    *)
 (*                                                                      *)
-(* Both transaction types maintain read and write timestamps. Rules 1   *)
-(* and 2 are enforced at check/cascade read time via FailOnMoreRecent.  *)
-(* SSI uses a commit-time refresh with FailOnMoreRecent semantics to    *)
-(* catch conflicts in the window between the read and commit. This is   *)
-(* a change from the current system where the span refresher checks     *)
-(* the bounded range (read_ts, write_ts]; it's needed to correctly      *)
-(* handle the insert fast path where the check read precedes the write. *)
+(* TIMESTAMPS: Unique IDs inserted into a global total ordering.        *)
+(* Non-deterministic insertion lets TLC explore cases where timestamps  *)
+(* are allocated in one order but ordered differently (e.g., txn A      *)
+(* allocates before txn B executes, but A's timestamps sort earlier).   *)
 (*                                                                      *)
-(* SIMPLIFICATION: All intents block all readers. In the real system,   *)
-(* SSI readers can read through SSI intents above their read timestamp. *)
-(* Blocking is strictly more conservative, so any invariant that holds  *)
-(* here also holds in the real system.                                  *)
-(*                                                                      *)
-(* TIMESTAMP MODEL:                                                     *)
-(* We use a partial ordering model for timestamps instead of simple     *)
-(* integers. Each timestamp is represented by a unique ID. When         *)
-(* allocating a new timestamp, we non-deterministically choose where to *)
-(* insert it into a global total ordering (subject to constraints).     *)
-(* This allows us to model scenarios where transaction A allocates its  *)
-(* timestamps, transaction B executes operations, and then transaction  *)
-(* A executes - with A's timestamps being earlier than B's despite B    *)
-(* executing first. This is critical for exploring timestamp cache      *)
-(* interactions and refresh behavior.                                   *)
-(*                                                                      *)
-(* The spec verifies the key invariant: if a transaction commits, the   *)
-(* values it read cannot have been stale (i.e., no value was written    *)
-(* with a timestamp between the read timestamp and commit timestamp).   *)
+(* KEY INVARIANT: A committed txn's reads are non-stale -- no value     *)
+(* was written between read_ts and commit_ts.                           *)
 (************************************************************************)
 
 (*--algorithm readcommittedchecks
@@ -83,17 +55,8 @@ variables
   ordering = <<>>;
 
   \* Transaction state: [status, iso_level, read_ts, write_ts].
-  \* status: "pending" | "committed" | "aborted".
-  \* read_ts: timestamp ID for read timestamp. Both SSI and RC maintain this.
-  \*          For SSI, this is the txn-level read timestamp which must be
-  \*          refreshed (stepped forward to write_ts and checked for conflicts)
-  \*          before commit.
-  \*          For RC, this is allocated at the start of every statement and
-  \*          stepped between statements (advanced without checking for
-  \*          newer values). When a write gets a WriteTooOld error, the
-  \*          read timestamp is refreshed to the new write timestamp.
-  \* write_ts: timestamp ID for write timestamp, can advance during transaction.
-  \*           When status is "committed", this is the commit timestamp.
+  \* read_ts: timestamp for check/cascade reads (set once per txn/stmt).
+  \* write_ts: timestamp for writes; can advance. Becomes commit_ts.
   txns = [t \in {TXN1, TXN2} |-> [
     status    |-> "pending",
     iso_level |-> SSI,  \* will be set per-transaction
@@ -241,11 +204,9 @@ macro maybe_advance_write_ts() begin
   end either;
 end macro;
 
-\* Each transaction process executes one statement consisting of a mutation
-\* (write) and a check/cascade (read). Both SSI and RC transactions maintain
-\* read_ts and write_ts. For RC, read_ts is stepped to write_ts when a
-\* WriteTooOld bumps write_ts (existing behavior). For SSI, read_ts is
-\* refreshed lazily at commit time.
+\* Each transaction executes one statement: a mutation (write) and a
+\* check/cascade (read). The real system eagerly refreshes reads on
+\* WriteTooOld; we skip that since only check/cascade reads are in scope.
 fair process txn \in TXNS
 variables
   \* Which key this txn reads and writes.
@@ -267,9 +228,6 @@ begin
       txns[self].iso_level := RC;
     end either;
 
-  \* Begin transaction/statement - allocate read and write timestamps.
-  \* Both SSI and RC allocate read_ts. For RC, this will be stepped
-  \* forward to write_ts if the write gets a WriteTooOld error.
   AssignReadTimestamp:
     alloc_ts_after(txns[self].read_ts, {});
 
@@ -289,11 +247,7 @@ begin
   StatementLoop:
     while ~(read_done /\ write_done) do
       either
-        \* Mutation write operation.
-        \* If tscache >= write_ts, push write_ts above tscache (WriteTooOld).
-        \* In the real system, the statement would also attempt to refresh
-        \* its reads at this point, but we don't model that since the only
-        \* reads in scope are for constraint validation.
+        \* Mutation write. WriteTooOld pushes write_ts above tscache.
         when ~write_done;
         if TimestampBeforeOrEqual(txns[self].write_ts, tscache[write_key]) then
           alloc_ts_after(txns[self].write_ts, {tscache[write_key]});
@@ -351,21 +305,9 @@ begin
   MaybeAdvanceBeforeCommit:
     maybe_advance_write_ts();
 
-  \* SSI commit-time refresh of check/cascade read spans.
-  \*
-  \* In the current system, the span refresher checks committed values
-  \* in the bounded range (read_ts, write_ts]. This is insufficient
-  \* for check/cascade reads when the check is performed before the
-  \* write (the "insert fast path"): a conflicting intent can resolve
-  \* to a committed value above write_ts before the refresh runs,
-  \* causing the bounded range check to miss it.
-  \*
-  \* The fix: use FailOnMoreRecent semantics when refreshing
-  \* check/cascade read spans. This means blocking on intents and
-  \* failing on any committed value above read_ts, with no upper bound.
-  \* This requires tracking which refresh spans correspond to
-  \* check/cascade reads in the span refresher, so FailOnMoreRecent
-  \* can be applied selectively to those spans.
+  \* SSI commit-time refresh with FailOnMoreRecent (unbounded).
+  \* Needed because SSI can read before writing (insert fast path),
+  \* so the standard bounded refresh (read_ts, write_ts] is insufficient.
   CommitRefresh:
     if txns[self].iso_level = SSI then
       \* Fail if there's an intent or a committed value above read_ts.
