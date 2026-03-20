@@ -1059,7 +1059,7 @@ root
            └── project
                 ├── columns: a:16!null b:17!null child.crdb_region:18!null
                 ├── key: (16)
-                ├── fd: (16)-->(17,18)
+                ├── fd: (16)-->(17,18), (17)-->(18)
                 └── inner-join (lookup child@child_crdb_region_b_idx)
                      ├── columns: a:16!null b:17!null child.crdb_region:18!null crdb_region:21!null k:22!null
                      ├── key columns: [21 22] = [18 17]
@@ -1124,7 +1124,7 @@ root
                 │    └── [/'west'/1 - /'west'/1]
                 ├── flags: avoid-full-scan
                 ├── key: (16)
-                └── fd: ()-->(17), (16)-->(18)
+                └── fd: ()-->(17,18)
 
 # Use the delete cascade fast-path here because the region column is
 # constrained to a single value.
@@ -1193,12 +1193,12 @@ root
            └── project
                 ├── columns: a:16!null b:17!null child.crdb_region:18!null
                 ├── key: (16)
-                ├── fd: (16)-->(17,18)
+                ├── fd: (16)-->(17,18), (17)-->(18)
                 └── inner-join (lookup child@child_crdb_region_b_idx)
                      ├── columns: a:16!null b:17!null child.crdb_region:18!null crdb_region:21!null k:22!null
                      ├── key columns: [21 22] = [18 17]
                      ├── key: (16)
-                     ├── fd: (16)-->(17,18), (22)-->(21), (18)==(21), (21)==(18), (17)==(22), (22)==(17)
+                     ├── fd: (16)-->(17,18), (17)-->(18), (22)-->(21), (18)==(21), (21)==(18), (17)==(22), (22)==(17)
                      ├── with-scan &1
                      │    ├── columns: crdb_region:21!null k:22!null
                      │    ├── mapping:
