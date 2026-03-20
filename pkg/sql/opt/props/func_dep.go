@@ -893,6 +893,12 @@ func (f *FuncDepSet) AddStrictDependency(from, to opt.ColSet) {
 	f.tryToReduceKey(opt.ColSet{} /* notNullCols */)
 }
 
+// AddLaxDependency adds a new lax dependency to the set.
+func (f *FuncDepSet) AddLaxDependency(from, to, notNullCols opt.ColSet) {
+	f.addDependencyWithNotNullCols(from, to, notNullCols, false /* strict */)
+	f.tryToReduceKey(notNullCols)
+}
+
 // AddConstants adds a strict FD to the set that declares each given column as
 // having the same constant value for all rows. If a column is nullable, then
 // its value may be NULL, but then the column must be NULL for all rows. For
@@ -1818,10 +1824,17 @@ func (f *FuncDepSet) inClosureOf(cols, in opt.ColSet, strict bool) bool {
 	return false
 }
 
-// addDependency adds a new dependency into the set. If another FD implies the
-// new FD, then it's not added. If it can be merged with an existing FD, that is
-// done. Otherwise, a brand new FD is added to the set.
+// addDependency is similar to addDependencyWithNotNullCols, but passes an empty
+// notNullCols set.
 func (f *FuncDepSet) addDependency(from, to opt.ColSet, strict bool) {
+	f.addDependencyWithNotNullCols(from, to, opt.ColSet{}, strict)
+}
+
+// addDependencyWithNotNullCols adds a new dependency into the set. If another
+// FD implies the new FD, then it's not added. If it can be merged with an
+// existing FD, that is done. Otherwise, a brand new FD is added to the set.
+// The notNullCols set is used for reducing lax dependencies.
+func (f *FuncDepSet) addDependencyWithNotNullCols(from, to, notNullCols opt.ColSet, strict bool) {
 	// Fast-path for trivial no-op dependency.
 	if to.SubsetOf(from) {
 		return
@@ -1882,6 +1895,35 @@ func (f *FuncDepSet) addDependency(from, to opt.ColSet, strict bool) {
 				// The new FD can at least add its determinant to an existing FD.
 				fd.to = fd.to.Union(to)
 				added = true
+			} else if (strict || !fd.strict) && from.SubsetOf(fd.from) {
+				// The new FD's determinant is a subset of the existing FD's
+				// determinant and is at least as strict. Any dependant columns
+				// covered by the new FD are redundant in the existing FD, since
+				// they are already determined by a smaller set of columns.
+				if !fd.removeToCols(to) {
+					// All dependant columns were redundant; discard the existing FD.
+					continue
+				}
+
+				if to.Intersects(fd.from) && !fd.strict {
+					// The new FD's dependant includes some columns from the
+					// existing FD's determinant. If the existing FD is lax, we can
+					// only remove columns from its determinant if they are known to
+					// be not-null. Example:
+					//   (a,b)~~>(c), (a)-->(b)
+					// If b is nullable, it is valid for (a,b,c) to have these rows:
+					//   (1, NULL, 1)
+					//   (1, NULL, 2)
+					// Thus, we cannot reduce the FD to (a)~~>(c) if b is nullable.
+					reduceCols := to.Intersection(fd.from)
+					reduceCols.IntersectionWith(notNullCols)
+					fd.from = fd.from.Difference(reduceCols)
+					fd.to = fd.to.Union(reduceCols)
+					fd.to.DifferenceWith(fd.from)
+				}
+
+				// It is possible that the result now implies the new FD.
+				added = fd.implies(&newFD)
 			}
 		}
 

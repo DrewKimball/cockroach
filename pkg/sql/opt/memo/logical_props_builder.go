@@ -2043,6 +2043,7 @@ func MakeTableFuncDep(md *opt.Metadata, tabID opt.TableID) *props.FuncDepSet {
 		// Already made.
 		return fd
 	}
+	tableNotNullCols := makeTableNotNullCols(md, tabID)
 
 	// Make now and annotate the metadata table with it for next time.
 	var allCols opt.ColSet
@@ -2131,8 +2132,9 @@ func MakeTableFuncDep(md *opt.Metadata, tabID opt.TableID) *props.FuncDepSet {
 		hasNulls := false
 		for i := 0; i < unique.ColumnCount(); i++ {
 			ord := unique.ColumnOrdinal(tab, i)
-			keyCols.Add(tabID.ColumnID(ord))
-			if tab.Column(ord).IsNullable() {
+			colID := tabID.ColumnID(ord)
+			keyCols.Add(colID)
+			if !tableNotNullCols.Contains(colID) {
 				hasNulls = true
 			}
 		}
@@ -2155,9 +2157,8 @@ func MakeTableFuncDep(md *opt.Metadata, tabID opt.TableID) *props.FuncDepSet {
 	// Add computed columns.
 	for i, n := 0, tab.ColumnCount(); i < n; i++ {
 		if tab.Column(i).IsComputed() {
-			tabMeta := md.TableMeta(tabID)
-			colID := tabMeta.MetaID.ColumnID(i)
-			expr := tabMeta.ComputedCols[colID]
+			colID := tabID.ColumnID(i)
+			expr := md.TableMeta(tabID).ComputedCols[colID]
 			if expr == nil {
 				// The computed columns haven't been added to the metadata.
 				continue

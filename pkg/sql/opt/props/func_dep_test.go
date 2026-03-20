@@ -72,6 +72,38 @@ func TestFuncDeps_ColsAreKey(t *testing.T) {
 	}
 }
 
+func TestFuncDeps_AddLaxDependency(t *testing.T) {
+	// Without notNullCols, a lax dep cannot reduce another lax FD's
+	// determinant. Starting with (a,b)~~>(c), adding (a)~~>(b) without
+	// not-null info leaves (a,b)~~>(c) unreduced, because b could be nullable:
+	//   (1, NULL, 1)
+	//   (1, NULL, 2)
+	// These rows satisfy both (a)~~>(b) and (a,b)~~>(c) but violate (a)~~>(c).
+	fd1 := &props.FuncDepSet{}
+	fd1.AddLaxKey(c(1, 2), c(1, 2, 3))
+	fd1.AddLaxDependency(c(1), c(2), opt.ColSet{})
+	verifyFD(t, fd1, "lax-key(1,2); (1,2)~~>(3), (1)~~>(2)")
+
+	// With notNullCols, the reduction succeeds. When b is not-null and a is
+	// non-null, (a)~~>(b) guarantees b's value, so (a,b) is functionally
+	// equivalent to (a) for non-null a, and (a,b)~~>(c) reduces to (a)~~>(c).
+	fd2 := &props.FuncDepSet{}
+	fd2.AddLaxKey(c(1, 2), c(1, 2, 3))
+	fd2.AddLaxDependency(c(1), c(2), c(2))
+	verifyFD(t, fd2, "lax-key(1,2); (1)~~>(2,3)")
+
+	// tryToReduceKey: when all lax key columns are known not-null, the lax key
+	// is upgraded to strict, and then ReduceCols can reduce it using strict FDs.
+	fd3 := &props.FuncDepSet{}
+	fd3.AddLaxKey(c(1, 2), c(1, 2, 3))
+	fd3.AddStrictDependency(c(1), c(2))
+	verifyFD(t, fd3, "lax-key(1,2); (1,2)~~>(3), (1)-->(2)")
+	// AddLaxDependency with notNullCols={1,2} upgrades lax-key(1,2) to strict,
+	// then ReduceCols uses (1)-->(2) to reduce to key(1).
+	fd3.AddLaxDependency(c(3), c(1), c(1, 2))
+	verifyFD(t, fd3, "key(1); (1)-->(2,3), (3)~~>(1)")
+}
+
 func TestFuncDeps_ComputeClosure(t *testing.T) {
 	// (a)-->(b,c,d)
 	// (b,c,e)-->(f)

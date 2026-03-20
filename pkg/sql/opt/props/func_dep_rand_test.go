@@ -756,6 +756,77 @@ func (o *addStrictDepOp) ApplyToFDs(fd FuncDepSet) FuncDepSet {
 	return out
 }
 
+// addLaxDepOp is a test operation corresponding to AddLaxDependency.
+type addLaxDepOp struct {
+	from, to    opt.ColSet
+	notNullCols opt.ColSet
+	numCols     int
+}
+
+func genAddLaxDep(minFromCols, maxCols int) testOpGenerator {
+	if minFromCols < 1 {
+		minFromCols = 1
+	}
+	return func(tc *testConfig) testOp {
+		from := tc.randColSet(minFromCols, maxCols)
+		to := tc.randColSet(0, maxCols)
+		to.DifferenceWith(from)
+		return &addLaxDepOp{
+			from:    from,
+			to:      to,
+			numCols: tc.numCols,
+		}
+	}
+}
+
+func (o *addLaxDepOp) String() string {
+	return fmt.Sprintf("AddLaxDependency(%s, %s)", o.from, o.to)
+}
+
+func (o *addLaxDepOp) FilterRelation(tr testRelation) testRelation {
+	// Filter out rows where the from~~>to lax FD doesn't hold. Rows with any
+	// NULL in the from columns are kept unconditionally because lax FDs only
+	// apply when the determinant is fully non-null.
+	var out testRelation
+	m := make(map[rowKey]testRow)
+	perm := rand.Perm(len(tr))
+	for _, rowIdx := range perm {
+		r := tr[rowIdx]
+		k, hasNulls := r.key(o.from)
+		if hasNulls {
+			// Rows with null determinant are unconstrained by the lax FD.
+			out = append(out, r)
+			continue
+		}
+		if first, ok := m[k]; ok {
+			shouldFilter := false
+			for col, ok := o.to.Next(0); ok; col, ok = o.to.Next(col + 1) {
+				if first.value(col) != r.value(col) {
+					shouldFilter = true
+					break
+				}
+			}
+			if shouldFilter {
+				continue
+			}
+		} else {
+			m[k] = r
+		}
+		out = append(out, r)
+	}
+	// Compute the actual not-null columns of the filtered relation for use in
+	// ApplyToFDs.
+	o.notNullCols = out.notNullCols(o.numCols)
+	return out
+}
+
+func (o *addLaxDepOp) ApplyToFDs(fd FuncDepSet) FuncDepSet {
+	var out FuncDepSet
+	out.CopyFrom(&fd)
+	out.AddLaxDependency(o.from, o.to, o.notNullCols)
+	return out
+}
+
 // testState corresponds to a chain of applied test operations. The head of a
 // testStates chain has no parent and no op and just corresponds to the initial
 // (empty) FDs and test relation.
@@ -870,6 +941,7 @@ func TestFuncDepOpsRandom(t *testing.T) {
 				genAddEquiv(),
 				genAddSynth(0 /* minCols */, 3 /* maxCols */),
 				genAddStrictDep(0 /* minCols */, 3 /* maxCols */),
+				genAddLaxDep(0 /* minCols */, 3 /* maxCols */),
 			},
 		},
 
@@ -887,6 +959,7 @@ func TestFuncDepOpsRandom(t *testing.T) {
 				genAddEquiv(),
 				genAddSynth(0 /* minCols */, 3 /* maxCols */),
 				genAddStrictDep(0 /* minCols */, 3 /* maxCols */),
+				genAddLaxDep(0 /* minCols */, 3 /* maxCols */),
 			},
 		},
 	}
