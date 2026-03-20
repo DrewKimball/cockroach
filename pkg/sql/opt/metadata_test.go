@@ -546,3 +546,45 @@ func (ep *fakeGetMultiregionConfigPlanner) Optimizer() interface{} {
 func (ep *fakeGetMultiregionConfigPlanner) AutoCommit() bool {
 	return false
 }
+
+func TestMetadataCachedTables(t *testing.T) {
+	evalCtx := eval.MakeTestingEvalContext(cluster.MakeTestingClusterSettings())
+	var f norm.Factory
+	f.Init(context.Background(), &evalCtx, nil /* catalog */)
+	md := f.Metadata()
+
+	tab1 := &testcat.Table{TabID: 1}
+	tab2 := &testcat.Table{TabID: 2}
+
+	// GetCachedTable returns nil for uncached table.
+	require.Nil(t, md.GetCachedTable(1))
+
+	// CacheTable returns true on first cache.
+	require.True(t, md.CacheTable(tab1))
+
+	// CacheTable returns false on duplicate.
+	require.False(t, md.CacheTable(tab1))
+
+	// GetCachedTable returns correct table.
+	require.Equal(t, tab1, md.GetCachedTable(1))
+	require.Nil(t, md.GetCachedTable(2))
+
+	// Cache a second table.
+	require.True(t, md.CacheTable(tab2))
+	require.Equal(t, tab2, md.GetCachedTable(2))
+
+	// CopyFrom copies cached tables.
+	var mdCopy opt.Metadata
+	mdCopy.CopyFrom(md, f.CopyWithoutAssigningPlaceholders)
+	require.Equal(t, tab1, mdCopy.GetCachedTable(1))
+	require.Equal(t, tab2, mdCopy.GetCachedTable(2))
+
+	// Init clears cached tables.
+	md.Init()
+	require.Nil(t, md.GetCachedTable(1))
+	require.Nil(t, md.GetCachedTable(2))
+
+	// After Init, caching works again.
+	require.True(t, md.CacheTable(tab1))
+	require.Equal(t, tab1, md.GetCachedTable(1))
+}
