@@ -78,6 +78,7 @@ func TestSearcher(t *testing.T) {
 		ctx,
 		internalDB,
 		quantizer,
+		42, /* seed */
 		codec,
 		tableDesc,
 		indexDesc.ID,

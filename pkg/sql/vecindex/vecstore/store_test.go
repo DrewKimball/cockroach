@@ -160,6 +160,7 @@ func TestStore(t *testing.T) {
 			ctx,
 			internalDB,
 			quantizer,
+			42, /* seed */
 			codec,
 			tableDesc,
 			indexID,

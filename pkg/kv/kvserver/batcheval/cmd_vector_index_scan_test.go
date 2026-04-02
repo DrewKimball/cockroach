@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/util/hlc"
 	"github.com/cockroachdb/cockroach/pkg/util/leaktest"
 	"github.com/cockroachdb/cockroach/pkg/util/log"
+	"github.com/cockroachdb/cockroach/pkg/util/num32"
 	"github.com/cockroachdb/cockroach/pkg/util/randutil"
 	"github.com/cockroachdb/cockroach/pkg/util/vector"
 	"github.com/stretchr/testify/require"
@@ -42,9 +43,14 @@ func TestVectorIndexScan(t *testing.T) {
 
 	rnd, seed := randutil.NewTestRand()
 	t.Logf("random seed: %v", seed)
+	var tsCounter int64
+	ts := func() hlc.Timestamp {
+		tsCounter++
+		return hlc.Timestamp{WallTime: tsCounter}
+	}
+	var testID int
 	dims := rnd.Intn(100) + 1
 	set := testutils.RandomVectorSet(rnd, dims)
-	centroid := set.Centroid(make(vector.T, dims))
 	indexSeed := rnd.Int63()
 	for _, metric := range []vecpb.DistanceMetric{
 		vecpb.L2SquaredDistance,
@@ -52,30 +58,50 @@ func TestVectorIndexScan(t *testing.T) {
 		vecpb.CosineDistance,
 	} {
 		t.Run(metric.String(), func(t *testing.T) {
+			// Cosine distance requires unit vectors.
+			metricSet := set
+			if metric == vecpb.CosineDistance {
+				metricSet = vector.MakeSet(dims)
+				metricSet.AddSet(set)
+				for i := range metricSet.Count {
+					num32.Normalize(metricSet.At(i))
+				}
+			}
+			centroid := metricSet.Centroid(make(vector.T, dims))
 			for _, quantizer := range []quantize.Quantizer{
 				quantize.NewUnQuantizer(dims, metric),
 				quantize.NewRaBitQuantizer(dims, indexSeed, metric),
 			} {
 				var w workspace.T
 				quantizerName := strings.TrimPrefix(fmt.Sprintf("%T", quantizer), "*quantize.")
-				quantizedSet := quantizer.Quantize(&w, set)
+				quantizedSet := quantizer.Quantize(&w, metricSet)
 				t.Run(quantizerName, func(t *testing.T) {
 					nonLeafLevel := cspann.Level(rnd.Intn(10)) + cspann.SecondLevel
 					for _, level := range []cspann.Level{cspann.LeafLevel, nonLeafLevel} {
 						t.Run(fmt.Sprintf("level=%d", level), func(t *testing.T) {
-							var tsCounter int64
-							ts := func() hlc.Timestamp {
-								tsCounter++
-								return hlc.Timestamp{WallTime: tsCounter}
+							// The handler picks the quantizer based on the partition
+							// key: RootKey uses UnQuantizer, all others use
+							// RaBitQuantizer. Match the partition key to the quantizer.
+							var partitionKey cspann.PartitionKey
+							switch quantizer.(type) {
+							case *quantize.UnQuantizer:
+								partitionKey = cspann.RootKey
+							default:
+								partitionKey = cspann.PartitionKey(randutil.RandUint64n(rnd, 998) + 2)
 							}
-							partitionKey := cspann.PartitionKey(randutil.RandUint64n(rnd, 1000))
-							startKey := putQuantizedVectorSet(
-								t, ctx, eng, quantizedSet, centroid, level, partitionKey, ts,
+							// Use a unique index prefix per subtest to avoid key
+							// collisions in the shared engine.
+							testID++
+							indexPrefix := encoding.EncodeUvarintAscending(nil, uint64(testID))
+							startKey, endKey := putQuantizedVectorSet(
+								t, ctx, eng, quantizedSet, centroid, level, partitionKey, indexPrefix, ts,
 							)
-							endKey := startKey.PrefixEnd()
 							for range 10 {
 								// Generate a random query vector and perform a vector index scan.
 								queryVector := vector.Random(rnd, dims)
+								if metric == vecpb.CosineDistance {
+									num32.Normalize(queryVector)
+								}
 								req := &kvpb.VectorIndexScanRequest{
 									Metric:       metric,
 									PartitionKey: uint64(partitionKey),
@@ -102,6 +128,7 @@ func TestVectorIndexScan(t *testing.T) {
 								require.Equal(t, uint64(set.Count), resp.Count)
 								require.Equal(t, squaredDistances, resp.SquaredDistances)
 								require.Equal(t, errorBounds, resp.ErrorBounds)
+								require.Equal(t, uint32(level), resp.Level)
 								if level == cspann.LeafLevel {
 									require.Zero(t, len(resp.ChildPartitionKeys))
 									require.Equal(t, set.Count, len(resp.ChildPrimaryKeys))
@@ -125,7 +152,7 @@ func TestVectorIndexScan(t *testing.T) {
 }
 
 // putQuantizedVectorSet encodes the given quantized vector set and writes it to
-// the engine. It returns the randomly generated partition key.
+// the engine. It returns the start and end keys for scanning the partition.
 //
 // The key suffix and child key for each vector is the index of the vector
 // within the partition.
@@ -137,10 +164,15 @@ func putQuantizedVectorSet(
 	centroid vector.T,
 	level cspann.Level,
 	partitionKey cspann.PartitionKey,
+	indexPrefix roachpb.Key,
 	ts func() hlc.Timestamp,
-) (encPartitionKey roachpb.Key) {
-	encPartitionKey = encoding.EncodeUint64Ascending(nil, uint64(partitionKey))
-	vectorKeyPrefix := encPartitionKey[:len(encPartitionKey):len(encPartitionKey)]
+) (startKey, endKey roachpb.Key) {
+	mdKey := vecencoding.EncodeMetadataKey(
+		indexPrefix, nil /* encodedPrefixCols */, partitionKey,
+	)
+
+	// Build vector key prefix from the metadata key and level.
+	vectorKeyPrefix := vecencoding.EncodePrefixVectorKey(mdKey, level)
 	vectorKey := func(i int) roachpb.Key {
 		var childKey cspann.ChildKey
 		if level == cspann.LeafLevel {
@@ -150,9 +182,7 @@ func putQuantizedVectorSet(
 		}
 		return vecencoding.EncodeChildKey(vectorKeyPrefix, childKey)
 	}
-	mdKey := vecencoding.EncodeMetadataKey(
-		nil /* indexPrefix */, nil /* encodedPrefixCols */, partitionKey,
-	)
+
 	metadata := cspann.PartitionMetadata{Level: level, Centroid: centroid}
 	metadata.StateDetails.MakeReady()
 	mdVal := vecencoding.EncodeMetadataValue(metadata)
@@ -175,7 +205,10 @@ func putQuantizedVectorSet(
 		)
 		require.NoError(t, err)
 	}
-	return encPartitionKey
+
+	startKey = mdKey
+	endKey = vecencoding.EncodeEndVectorKey(mdKey)
+	return startKey, endKey
 }
 
 func getEncPrimaryKey(i int) []byte {

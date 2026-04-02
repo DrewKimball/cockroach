@@ -137,7 +137,7 @@ func (m *Manager) Get(
 		// TODO(drewk): use the config to populate the index options as well.
 		quantizer := quantize.NewRaBitQuantizer(int(config.Dims), config.Seed, config.DistanceMetric)
 		store, err := vecstore.New(
-			ctx, m.db, quantizer, m.codec, tableID, indexID, config.IsDeterministic)
+			ctx, m.db, quantizer, config.Seed, m.codec, tableID, indexID, config.IsDeterministic)
 		if err != nil {
 			return nil, err
 		}

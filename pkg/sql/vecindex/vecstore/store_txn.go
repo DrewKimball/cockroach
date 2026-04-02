@@ -7,7 +7,9 @@ package vecstore
 
 import (
 	"context"
+	"time"
 
+	"github.com/cockroachdb/cockroach/pkg/clusterversion"
 	"github.com/cockroachdb/cockroach/pkg/kv"
 	"github.com/cockroachdb/cockroach/pkg/kv/kvpb"
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/concurrency/isolation"
@@ -269,6 +271,23 @@ func (tx *Txn) SearchPartitions(
 	queryVector vector.T,
 	searchSet *cspann.SearchSet,
 ) error {
+	if tx.evalCtx != nil &&
+		tx.evalCtx.Settings != nil &&
+		tx.evalCtx.Settings.Version.IsActive(ctx, clusterversion.V26_3_VectorIndexScanPushdown) {
+		return tx.searchPartitionsPushdown(ctx, treeKey, toSearch, queryVector, searchSet)
+	}
+	return tx.searchPartitionsLocal(ctx, treeKey, toSearch, queryVector, searchSet)
+}
+
+// searchPartitionsLocal is the legacy code path that fetches raw encoded
+// vectors from KV and computes distances locally on the SQL node.
+func (tx *Txn) searchPartitionsLocal(
+	ctx context.Context,
+	treeKey cspann.TreeKey,
+	toSearch []cspann.PartitionToSearch,
+	queryVector vector.T,
+	searchSet *cspann.SearchSet,
+) error {
 	b := tx.kv.NewBatch()
 
 	for i := range toSearch {
@@ -311,6 +330,103 @@ func (tx *Txn) SearchPartitions(
 			toSearch[i].StateDetails = partition.Metadata().StateDetails
 			toSearch[i].Count = partition.Search(
 				&tx.codec.workspace, toSearch[i].Key, queryVector, searchSet)
+		}
+	}
+
+	return nil
+}
+
+// searchPartitionsPushdown uses VectorIndexScan requests to push distance
+// estimation down to the KV layer, avoiding transfer of encoded vectors.
+func (tx *Txn) searchPartitionsPushdown(
+	ctx context.Context,
+	treeKey cspann.TreeKey,
+	toSearch []cspann.PartitionToSearch,
+	queryVector vector.T,
+	searchSet *cspann.SearchSet,
+) error {
+	b := tx.kv.NewBatch()
+
+	dims := tx.store.quantizer.GetDims()
+	metric := tx.store.quantizer.GetDistanceMetric()
+
+	for i := range toSearch {
+		metadataKey := vecencoding.EncodeMetadataKey(tx.store.prefix, treeKey, toSearch[i].Key)
+		startKey := metadataKey
+		endKey := vecencoding.EncodeEndVectorKey(metadataKey)
+
+		req := &kvpb.VectorIndexScanRequest{
+			Metric:             metric,
+			PartitionKey:       uint64(toSearch[i].Key),
+			Dims:               uint64(dims),
+			Seed:               tx.store.seed,
+			QueryVector:        queryVector,
+			ExcludeLeafVectors: toSearch[i].ExcludeLeafVectors,
+		}
+		req.SetHeader(kvpb.RequestHeader{Key: startKey, EndKey: endKey})
+		b.AddRawRequest(req)
+	}
+
+	if err := tx.kv.Run(ctx, b); err != nil {
+		return err
+	}
+
+	resp := b.RawResponse()
+	for i := range toSearch {
+		scanResp := resp.Responses[i].GetVectorScan()
+		if scanResp == nil {
+			return errors.AssertionFailedf("expected VectorIndexScanResponse at position %d", i)
+		}
+
+		level := cspann.Level(scanResp.Level)
+		if level == cspann.InvalidLevel {
+			if toSearch[i].Key == cspann.RootKey {
+				// The root partition does not yet have a metadata record.
+				// Construct synthetic metadata with LeafLevel, matching the
+				// behavior of getMetadataFromKVResult for the local path.
+				// The root partition will be lazily created by
+				// GetPartitionMetadata when called with forUpdate=true.
+				toSearch[i].Level = cspann.LeafLevel
+				toSearch[i].StateDetails = cspann.PartitionStateDetails{}
+				toSearch[i].Count = 0
+			} else {
+				// Non-root partition not found.
+				toSearch[i].Level = cspann.InvalidLevel
+				toSearch[i].StateDetails = cspann.PartitionStateDetails{}
+				toSearch[i].Count = 0
+			}
+			continue
+		}
+
+		toSearch[i].Level = level
+		toSearch[i].StateDetails = cspann.PartitionStateDetails{
+			State:   cspann.PartitionState(scanResp.State),
+			Target1: cspann.PartitionKey(scanResp.Target1),
+			Target2: cspann.PartitionKey(scanResp.Target2),
+			Source:  cspann.PartitionKey(scanResp.Source),
+		}
+		if scanResp.StateTimestamp != 0 {
+			toSearch[i].StateDetails.Timestamp = time.Unix(0, scanResp.StateTimestamp).UTC()
+		}
+		toSearch[i].Count = int(scanResp.Count)
+
+		// Add each result from the response to the search set.
+		numResults := len(scanResp.SquaredDistances)
+		for j := range numResults {
+			result := cspann.SearchResult{
+				QueryDistance:      scanResp.SquaredDistances[j],
+				ErrorBound:         scanResp.ErrorBounds[j],
+				ParentPartitionKey: toSearch[i].Key,
+			}
+			if level == cspann.LeafLevel {
+				result.ChildKey.KeyBytes = cspann.KeyBytes(scanResp.ChildPrimaryKeys[j])
+			} else {
+				result.ChildKey.PartitionKey = cspann.PartitionKey(scanResp.ChildPartitionKeys[j])
+			}
+			if j < len(scanResp.ValueBytes) {
+				result.ValueBytes = scanResp.ValueBytes[j]
+			}
+			searchSet.Add(&result)
 		}
 	}
 

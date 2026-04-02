@@ -54,6 +54,10 @@ type Store struct {
 	rootQuantizer quantize.Quantizer
 	quantizer     quantize.Quantizer
 
+	// seed is the random seed used to create the quantizer, needed for
+	// VectorIndexScan requests.
+	seed int64
+
 	// minConsistency can override default INCONSISTENCY usage when estimating
 	// the size of a partition. This is used for testing.
 	minConsistency kvpb.ReadConsistencyType
@@ -75,6 +79,7 @@ func NewWithLeasedDesc(
 	ctx context.Context,
 	db descs.DB,
 	quantizer quantize.Quantizer,
+	seed int64,
 	codec keys.SQLCodec,
 	tableDesc catalog.TableDescriptor,
 	indexID catid.IndexID,
@@ -87,6 +92,7 @@ func NewWithLeasedDesc(
 		indexID:          indexID,
 		rootQuantizer:    quantize.NewUnQuantizer(quantizer.GetDims(), quantizer.GetDistanceMetric()),
 		quantizer:        quantizer,
+		seed:             seed,
 		minConsistency:   kvpb.INCONSISTENT,
 		emptyVec:         make(vector.T, quantizer.GetDims()),
 		TestingTableDesc: tableDesc,
@@ -102,6 +108,7 @@ func New(
 	ctx context.Context,
 	db descs.DB,
 	quantizer quantize.Quantizer,
+	seed int64,
 	defaultCodec keys.SQLCodec,
 	tableID catid.DescID,
 	indexID catid.IndexID,
@@ -115,6 +122,7 @@ func New(
 		indexID:        indexID,
 		rootQuantizer:  quantize.NewUnQuantizer(quantizer.GetDims(), quantizer.GetDistanceMetric()),
 		quantizer:      quantizer,
+		seed:           seed,
 		minConsistency: kvpb.INCONSISTENT,
 		emptyVec:       make(vector.T, quantizer.GetDims()),
 	}

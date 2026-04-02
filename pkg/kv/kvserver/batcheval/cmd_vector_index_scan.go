@@ -7,6 +7,7 @@ package batcheval
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/cockroach/pkg/kv/kvpb"
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/batcheval/result"
@@ -22,12 +23,11 @@ import (
 )
 
 func init() {
-	RegisterReadOnlyCommand(kvpb.VectorIndexScan, DefaultDeclareIsolatedKeys, VectorIndexScan)
+	RegisterReadWriteCommand(kvpb.VectorIndexScan, DefaultDeclareIsolatedKeys, VectorIndexScan)
 }
 
-// TODO(drewk): need to handle the case when we want to ignore leaf vectors.
 func VectorIndexScan(
-	ctx context.Context, reader storage.Reader, cArgs CommandArgs, resp kvpb.Response,
+	ctx context.Context, readWriter storage.ReadWriter, cArgs CommandArgs, resp kvpb.Response,
 ) (result.Result, error) {
 	args := cArgs.Args.(*kvpb.VectorIndexScanRequest)
 	h := cArgs.Header
@@ -62,18 +62,20 @@ func VectorIndexScan(
 	// TODO(drewk,mw5h): We could push the distance calculation logic deeper and
 	// avoid materializing the KVs in intermediate buffers. E.g., we could
 	// implement the results interface.
-	scanRes, err := storage.MVCCScan(ctx, reader, args.Key, args.EndKey, h.Timestamp, opts)
+	scanRes, err := storage.MVCCScan(ctx, readWriter, args.Key, args.EndKey, h.Timestamp, opts)
 	if err != nil {
 		return result.Result{}, err
 	}
 	if len(scanRes.KVs) == 0 {
-		return result.Result{}, cspann.ErrPartitionNotFound
+		// Partition not found. Return a response with Level=0 (InvalidLevel)
+		// rather than an error, so that the caller can handle this per-partition
+		// without failing the entire batch.
+		var res result.Result
+		res.Local.EncounteredIntents = scanRes.Intents
+		return res, nil
 	}
 	reply.NumKeys = scanRes.NumKeys
 	reply.NumBytes = scanRes.NumBytes
-	vectorKVs := scanRes.KVs[1:]
-	numVectors := len(vectorKVs)
-	reply.Count = uint64(numVectors)
 
 	// The metadata row is always the first entry in the partition's KV span.
 	metadataKey := scanRes.KVs[0].Key
@@ -85,6 +87,30 @@ func VectorIndexScan(
 	if err != nil {
 		return result.Result{}, err
 	}
+
+	// Populate partition metadata in the response.
+	reply.Level = uint32(md.Level)
+	reply.State = uint32(md.StateDetails.State)
+	reply.Target1 = uint64(md.StateDetails.Target1)
+	reply.Target2 = uint64(md.StateDetails.Target2)
+	reply.Source = uint64(md.StateDetails.Source)
+	reply.StateTimestamp = md.StateDetails.Timestamp.UnixNano()
+
+	// Filter out leaf vectors if requested.
+	vectorKVs := scanRes.KVs[1:]
+	if args.ExcludeLeafVectors && md.Level == cspann.LeafLevel {
+		vectorKVs = nil
+	}
+
+	numVectors := len(vectorKVs)
+	reply.Count = uint64(numVectors)
+
+	if numVectors == 0 {
+		var res result.Result
+		res.Local.EncounteredIntents = scanRes.Intents
+		return res, nil
+	}
+
 	// The key for each vector is prefixed by the partition key, followed by the
 	// child key.
 	prefixLen := vecencoding.EncodedPrefixVectorKeyLen(metadataKey, md.Level)
@@ -101,7 +127,7 @@ func VectorIndexScan(
 		// At non-leaf levels, index entries point to the next level.
 		reply.ChildPartitionKeys = make([]uint64, numVectors)
 		for i := range vectorKVs {
-			_, childPartitionKey, err := encoding.DecodeUint64Ascending(vectorKVs[i].Key[prefixLen:])
+			_, childPartitionKey, err := encoding.DecodeUvarintAscending(vectorKVs[i].Key[prefixLen:])
 			if err != nil {
 				return result.Result{}, err
 			}
@@ -129,14 +155,18 @@ func VectorIndexScan(
 	// immediately after decoding each vector, rather than after decoding all
 	// vectors.
 	set := quantizer.NewSet(numVectors, md.Centroid)
+	reply.ValueBytes = make([][]byte, numVectors)
 	for i := range vectorKVs {
 		encVal, err := getEncodedVal(vectorKVs[i].Value.RawBytes)
 		if err != nil {
 			return result.Result{}, err
 		}
-		_, err = vecstore.DecodeVectorToSet(quantizer, set, encVal)
+		remainder, err := vecstore.DecodeVectorToSet(quantizer, set, encVal)
 		if err != nil {
 			return result.Result{}, err
+		}
+		if len(remainder) > 0 {
+			reply.ValueBytes[i] = remainder
 		}
 	}
 	var w workspace.T
@@ -145,4 +175,13 @@ func VectorIndexScan(
 	var res result.Result
 	res.Local.EncounteredIntents = scanRes.Intents
 	return res, nil
+}
+
+// DecodeVectorIndexScanResponseTimestamp decodes the state timestamp from a
+// VectorIndexScanResponse into a time.Time.
+func DecodeVectorIndexScanResponseTimestamp(nanos int64) time.Time {
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos).UTC()
 }

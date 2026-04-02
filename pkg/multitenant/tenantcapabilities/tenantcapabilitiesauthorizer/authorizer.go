@@ -264,6 +264,7 @@ var reqMethodToCap = map[kvpb.Method]methodCapability{
 	kvpb.ReverseScan:        noCapCheckNeeded,
 	kvpb.RevertRange:        noCapCheckNeeded,
 	kvpb.Scan:               noCapCheckNeeded,
+	kvpb.VectorIndexScan:    noCapCheckNeeded,
 
 	// The following have dynamic capabilities, depending on the type of request
 	// and the request's contents.

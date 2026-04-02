@@ -716,6 +716,16 @@ func (r *ExciseResponse) combine(_ context.Context, c combinable, _ *BatchReques
 
 var _ combinable = &ExciseResponse{}
 
+// combine implements the combinable interface. VectorIndexScan requests span an
+// entire partition which should always fall within a single range. If the
+// DistSender splits this request across ranges, we return an error so the
+// caller can fall back to the Get+Scan code path for that partition.
+func (r *VectorIndexScanResponse) combine(_ context.Context, _ combinable, _ *BatchRequest) error {
+	return errors.New("VectorIndexScanResponse cannot be combined across ranges")
+}
+
+var _ combinable = &VectorIndexScanResponse{}
+
 // Header implements the Request interface.
 func (rh RequestHeader) Header() RequestHeader {
 	return rh
@@ -880,8 +890,8 @@ func (*ScanRequest) Method() Method { return Scan }
 // Method implements the Request interface.
 func (*ReverseScanRequest) Method() Method { return ReverseScan }
 
-// Method implements the Request interface. TODO
-func (*VectorIndexScanRequest) Method() Method { return ReverseScan }
+// Method implements the Request interface.
+func (*VectorIndexScanRequest) Method() Method { return VectorIndexScan }
 
 // Method implements the Request interface.
 func (*CheckConsistencyRequest) Method() Method { return CheckConsistency }

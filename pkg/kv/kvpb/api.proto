@@ -859,6 +859,10 @@ message VectorIndexScanRequest {
   int64 seed = 5;
   // QueryVector is the vector to search for in the vector index.
   repeated float query_vector = 6;
+  // ExcludeLeafVectors, when true, causes the scan to skip vectors at the leaf
+  // level. This is used during insert operations on the root partition, where
+  // leaf vectors are not needed.
+  bool exclude_leaf_vectors = 7;
 }
 
 // A VectorIndexScanResponse is the return value from the VectorIndexScan()
@@ -876,11 +880,29 @@ message VectorIndexScanResponse {
   // SquaredDistances is the list of estimated squared distance between the
   // vectors within the searched partition and the query vector.
   repeated float squared_distances = 4;
-	// ErrorBounds is a list of probabilistic bounds on the error of the distance
-	// estimates.
+  // ErrorBounds is a list of probabilistic bounds on the error of the distance
+  // estimates.
   repeated float error_bounds = 5;
   // Count is the number of vectors in the searched partition.
   uint64 count = 6;
+  // Level is the partition's level in the K-means tree. Leaf partitions have
+  // level 1, and levels increase toward the root.
+  uint32 level = 7;
+  // State is the partition's state (e.g. Ready, Splitting, Merging).
+  uint32 state = 8;
+  // Target1 is the first target partition key for split/merge state details.
+  uint64 target1 = 9;
+  // Target2 is the second target partition key for split/merge state details.
+  uint64 target2 = 10;
+  // Source is the source partition key for update state details.
+  uint64 source = 11;
+  // StateTimestamp is the time of the last state transition, in nanoseconds
+  // since the Unix epoch.
+  int64 state_timestamp = 12;
+  // ValueBytes is a list of opaque bytes stored alongside each quantized
+  // vector (e.g. STORING columns). One entry per vector, in the same order as
+  // the other repeated fields. Entries may be empty.
+  repeated bytes value_bytes = 13;
 }
 
 enum ChecksumMode {
