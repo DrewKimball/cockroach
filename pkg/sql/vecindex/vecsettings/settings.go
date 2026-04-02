@@ -48,6 +48,17 @@ var StalledOpTimeoutSetting = settings.RegisterDurationSetting(
 	settings.WithPublic,
 )
 
+// PushdownEnabled controls whether vector index searches push distance
+// estimation down to the KV layer via VectorIndexScan requests, rather than
+// fetching raw encoded vectors and computing distances on the SQL node.
+var PushdownEnabled = settings.RegisterBoolSetting(
+	settings.ApplicationLevel,
+	"sql.vecindex.pushdown.enabled",
+	"when true, vector index searches push distance estimation to the KV layer",
+	true,
+	settings.WithPublic,
+)
+
 // VectorIndexEnabled is used to enable and disable vector indexes.
 var VectorIndexEnabled = settings.RegisterBoolSetting(
 	settings.ApplicationLevel,

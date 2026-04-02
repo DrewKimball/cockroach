@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/span"
 	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/cspann"
 	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/vecencoding"
+	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/vecsettings"
 	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/vecstore/vecstorepb"
 	"github.com/cockroachdb/cockroach/pkg/util/buildutil"
 	"github.com/cockroachdb/cockroach/pkg/util/intsets"
@@ -273,6 +274,7 @@ func (tx *Txn) SearchPartitions(
 ) error {
 	if tx.evalCtx != nil &&
 		tx.evalCtx.Settings != nil &&
+		vecsettings.PushdownEnabled.Get(&tx.evalCtx.Settings.SV) &&
 		tx.evalCtx.Settings.Version.IsActive(ctx, clusterversion.V26_3_VectorIndexScanPushdown) {
 		return tx.searchPartitionsPushdown(ctx, treeKey, toSearch, queryVector, searchSet)
 	}

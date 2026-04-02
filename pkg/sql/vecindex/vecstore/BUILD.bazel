@@ -32,6 +32,7 @@ go_library(
         "//pkg/sql/vecindex/cspann/quantize",
         "//pkg/sql/vecindex/cspann/workspace",
         "//pkg/sql/vecindex/vecencoding",
+        "//pkg/sql/vecindex/vecsettings",
         "//pkg/sql/vecindex/vecstore/vecstorepb",
         "//pkg/util/buildutil",
         "//pkg/util/intsets",
