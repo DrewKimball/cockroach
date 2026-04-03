@@ -387,6 +387,65 @@ func DecodeChildKey(encChildKey []byte, level cspann.Level) (cspann.ChildKey, er
 	}
 }
 
+// DecodeRaBitQVector decodes a single RaBitQ vector entry and returns the
+// per-vector data directly, without appending to a set. It returns the
+// remainder of the input buffer.
+func DecodeRaBitQVector(
+	encVector []byte, codeWidth int, metric vecpb.DistanceMetric,
+) (
+	codeCount uint32,
+	centroidDistance float32,
+	quantizedDotProduct float32,
+	centroidDotProduct float32,
+	code []uint64,
+	remainder []byte,
+	err error,
+) {
+	encVector, codeCount, err = encoding.DecodeUint32Ascending(encVector)
+	if err != nil {
+		return 0, 0, 0, 0, nil, nil, err
+	}
+	encVector, centroidDistance, err = encoding.DecodeUntaggedFloat32Value(encVector)
+	if err != nil {
+		return 0, 0, 0, 0, nil, nil, err
+	}
+	encVector, quantizedDotProduct, err = encoding.DecodeUntaggedFloat32Value(encVector)
+	if err != nil {
+		return 0, 0, 0, 0, nil, nil, err
+	}
+	if metric != vecpb.L2SquaredDistance {
+		encVector, centroidDotProduct, err = encoding.DecodeUntaggedFloat32Value(encVector)
+		if err != nil {
+			return 0, 0, 0, 0, nil, nil, err
+		}
+	}
+	code = make([]uint64, codeWidth)
+	for j := range codeWidth {
+		var codeWord uint64
+		encVector, codeWord, err = encoding.DecodeUint64Ascending(encVector)
+		if err != nil {
+			return 0, 0, 0, 0, nil, nil, err
+		}
+		code[j] = codeWord
+	}
+	return codeCount, centroidDistance, quantizedDotProduct,
+		centroidDotProduct, code, encVector, nil
+}
+
+// DecodeUnquantizedVector decodes a single unquantized vector entry and returns
+// the vector directly, without appending to a set. It returns the remainder of
+// the input buffer.
+func DecodeUnquantizedVector(encVector []byte) (v vector.T, remainder []byte, err error) {
+	// Skip past the centroid distance, which was encoded as a 4-byte float32
+	// value in a previous version.
+	encVector = encVector[4:]
+	remainder, v, err = vector.Decode(encVector)
+	if err != nil {
+		return nil, nil, err
+	}
+	return v, remainder, nil
+}
+
 func DecodePartitionKey(encodedPartitionKey []byte) (cspann.PartitionKey, []byte, error) {
 	remainingBytes, partitionKey, err := encoding.DecodeUvarintAscending(encodedPartitionKey)
 	if err != nil {

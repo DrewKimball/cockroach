@@ -16,9 +16,10 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/cspann/quantize"
 	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/cspann/workspace"
 	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/vecencoding"
-	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/vecstore"
+	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/vecpb"
 	"github.com/cockroachdb/cockroach/pkg/storage"
 	"github.com/cockroachdb/cockroach/pkg/util/encoding"
+	"github.com/cockroachdb/cockroach/pkg/util/num32"
 	"github.com/cockroachdb/errors"
 )
 
@@ -135,42 +136,87 @@ func VectorIndexScan(
 		}
 	}
 
-	var quantizer quantize.Quantizer
 	reply.SquaredDistances = make([]float32, numVectors)
 	reply.ErrorBounds = make([]float32, numVectors)
+	reply.ValueBytes = make([][]byte, numVectors)
+
+	// TODO(drewk,mw5h): if/when we support storing columns, there may be
+	// multiple leaf entries per indexed row due to column families. For now we
+	// can assume one leaf entry per row.
 	switch cspann.PartitionKey(args.PartitionKey) {
 	case cspann.InvalidKey:
-		return result.Result{}, errors.AssertionFailedf("invalid partition key in vector index scan")
+		return result.Result{}, errors.AssertionFailedf(
+			"invalid partition key in vector index scan")
+
 	case cspann.RootKey:
-		// The root partition does not quantize vectors.
-		quantizer = quantize.NewUnQuantizer(int(args.Dims), args.Metric)
+		// The root partition stores unquantized vectors. Decode each vector
+		// and compute exact distance.
+		for i := range vectorKVs {
+			encVal, err := getEncodedVal(vectorKVs[i].Value.RawBytes)
+			if err != nil {
+				return result.Result{}, err
+			}
+			v, remainder, err := vecencoding.DecodeUnquantizedVector(encVal)
+			if err != nil {
+				return result.Result{}, err
+			}
+			if len(remainder) > 0 {
+				reply.ValueBytes[i] = remainder
+			}
+			reply.SquaredDistances[i] = vecpb.MeasureDistance(
+				args.Metric, v, args.QueryVector)
+			reply.ErrorBounds[i] = 0
+		}
+
 	default:
-		quantizer = quantize.NewRaBitQuantizer(int(args.Dims), args.Seed, args.Metric)
+		// Non-root partitions use RaBitQ quantization. Precompute query-side
+		// values once, then estimate distance per vector without buffering.
+		raBitQ := quantize.NewRaBitQuantizer(
+			int(args.Dims), args.Seed, args.Metric).(*quantize.RaBitQuantizer)
+		centroidNorm := num32.Norm(md.Centroid)
+		var w workspace.T
+		precomputed, isCentroid := raBitQ.PrecomputeQuery(
+			&w, md.Centroid, args.QueryVector, centroidNorm)
+		codeWidth := quantize.RaBitQCodeSetWidth(int(args.Dims))
+		for i := range vectorKVs {
+			encVal, err := getEncodedVal(vectorKVs[i].Value.RawBytes)
+			if err != nil {
+				return result.Result{}, err
+			}
+			codeCount, centroidDistance, quantizedDotProduct,
+				centroidDotProduct, code, remainder, err :=
+				vecencoding.DecodeRaBitQVector(encVal, codeWidth, args.Metric)
+			if err != nil {
+				return result.Result{}, err
+			}
+			if len(remainder) > 0 {
+				reply.ValueBytes[i] = remainder
+			}
+			if isCentroid {
+				// Query vector equals the centroid. Compute distance from
+				// pre-stored per-vector values, matching GetCentroidDistances.
+				switch args.Metric {
+				case vecpb.L2SquaredDistance:
+					reply.SquaredDistances[i] = centroidDistance * centroidDistance
+				case vecpb.InnerProductDistance:
+					reply.SquaredDistances[i] = -centroidDotProduct
+				case vecpb.CosineDistance:
+					if centroidNorm != 0 {
+						reply.SquaredDistances[i] = 1 - centroidDotProduct/centroidNorm
+					} else {
+						reply.SquaredDistances[i] = 1
+					}
+				}
+				reply.ErrorBounds[i] = 0
+			} else {
+				reply.SquaredDistances[i], reply.ErrorBounds[i] =
+					raBitQ.EstimateSingleDistance(
+						&precomputed, code, codeCount,
+						centroidDistance, quantizedDotProduct,
+						centroidDotProduct)
+			}
+		}
 	}
-	// TODO(drewk,mw5h): if/when we support storing columns, there may be multiple
-	// leaf entries per indexed row due to column families. For now we can assume
-	// one leaf entry per row.
-	//
-	// TODO(drewk,mw5h): we could reuse memory by estimating the distance
-	// immediately after decoding each vector, rather than after decoding all
-	// vectors.
-	set := quantizer.NewSet(numVectors, md.Centroid)
-	reply.ValueBytes = make([][]byte, numVectors)
-	for i := range vectorKVs {
-		encVal, err := getEncodedVal(vectorKVs[i].Value.RawBytes)
-		if err != nil {
-			return result.Result{}, err
-		}
-		remainder, err := vecstore.DecodeVectorToSet(quantizer, set, encVal)
-		if err != nil {
-			return result.Result{}, err
-		}
-		if len(remainder) > 0 {
-			reply.ValueBytes[i] = remainder
-		}
-	}
-	var w workspace.T
-	quantizer.EstimateDistances(&w, set, args.QueryVector, reply.SquaredDistances, reply.ErrorBounds)
 
 	var res result.Result
 	res.Local.EncounteredIntents = scanRes.Intents

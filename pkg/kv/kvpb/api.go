@@ -717,11 +717,13 @@ func (r *ExciseResponse) combine(_ context.Context, c combinable, _ *BatchReques
 var _ combinable = &ExciseResponse{}
 
 // combine implements the combinable interface. VectorIndexScan requests span an
-// entire partition which should always fall within a single range. If the
-// DistSender splits this request across ranges, we return an error so the
-// caller can fall back to the Get+Scan code path for that partition.
+// entire partition which should always fall within a single range. With
+// DisallowSplitRequests set on the batch, the truncation helper skips
+// split requests, so combine should never fire.
 func (r *VectorIndexScanResponse) combine(_ context.Context, _ combinable, _ *BatchRequest) error {
-	return errors.New("VectorIndexScanResponse cannot be combined across ranges")
+	return errors.AssertionFailedf(
+		"VectorIndexScan should not be split; " +
+			"batch should use DisallowSplitRequests")
 }
 
 var _ combinable = &VectorIndexScanResponse{}

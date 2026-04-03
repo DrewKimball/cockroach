@@ -275,7 +275,7 @@ func (tx *Txn) SearchPartitions(
 	if tx.evalCtx != nil &&
 		tx.evalCtx.Settings != nil &&
 		vecsettings.PushdownEnabled.Get(&tx.evalCtx.Settings.SV) &&
-		tx.evalCtx.Settings.Version.IsActive(ctx, clusterversion.V26_3_VectorIndexScanPushdown) {
+		tx.evalCtx.Settings.Version.IsActive(ctx, clusterversion.V26_3_Start) {
 		return tx.searchPartitionsPushdown(ctx, treeKey, toSearch, queryVector, searchSet)
 	}
 	return tx.searchPartitionsLocal(ctx, treeKey, toSearch, queryVector, searchSet)
@@ -352,6 +352,18 @@ func (tx *Txn) searchPartitionsPushdown(
 	dims := tx.store.quantizer.GetDims()
 	metric := tx.store.quantizer.GetDistanceMetric()
 
+	// Set DisallowSplitRequests if any non-root partition is being searched.
+	// The handler requires the metadata KV (which contains the centroid) to
+	// be in the same range as the vectors, so splitting would fail. Skipped
+	// requests are retried via the local Get+Scan path below. The root
+	// partition is unquantized and doesn't need this protection.
+	for i := range toSearch {
+		if toSearch[i].Key != cspann.RootKey {
+			b.Header.DisallowSplitRequests = true
+			break
+		}
+	}
+
 	for i := range toSearch {
 		metadataKey := vecencoding.EncodeMetadataKey(tx.store.prefix, treeKey, toSearch[i].Key)
 		startKey := metadataKey
@@ -374,10 +386,17 @@ func (tx *Txn) searchPartitionsPushdown(
 	}
 
 	resp := b.RawResponse()
+	var fallbackIndices []int
 	for i := range toSearch {
 		scanResp := resp.Responses[i].GetVectorScan()
 		if scanResp == nil {
 			return errors.AssertionFailedf("expected VectorIndexScanResponse at position %d", i)
+		}
+
+		// Check if this request was skipped due to a range split.
+		if scanResp.ResumeReason == kvpb.RESUME_DISALLOWED_SPLIT {
+			fallbackIndices = append(fallbackIndices, i)
+			continue
 		}
 
 		level := cspann.Level(scanResp.Level)
@@ -429,6 +448,20 @@ func (tx *Txn) searchPartitionsPushdown(
 				result.ValueBytes = scanResp.ValueBytes[j]
 			}
 			searchSet.Add(&result)
+		}
+	}
+
+	if len(fallbackIndices) > 0 {
+		fallback := make([]cspann.PartitionToSearch, len(fallbackIndices))
+		for j, idx := range fallbackIndices {
+			fallback[j] = toSearch[idx]
+		}
+		if err := tx.searchPartitionsLocal(
+			ctx, treeKey, fallback, queryVector, searchSet); err != nil {
+			return err
+		}
+		for j, idx := range fallbackIndices {
+			toSearch[idx] = fallback[j]
 		}
 	}
 

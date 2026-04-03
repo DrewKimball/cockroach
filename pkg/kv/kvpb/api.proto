@@ -90,6 +90,10 @@ enum ResumeReason {
   // allotted CPU time. It is the callers responsibility to resume from the
   // returned resume key.
   RESUME_ELASTIC_CPU_LIMIT = 5;
+
+  // The request would have been split across range boundaries but the batch
+  // had DisallowSplitRequests set. The request was not executed.
+  RESUME_DISALLOWED_SPLIT = 6;
 }
 
 // RequestHeader is supplied with every storage node request.
@@ -3104,9 +3108,15 @@ message Header {
   // Used by the ASH sampler to choose the right encoding.
   uint32 workload_type = 41 [(gogoproto.customname) = "WorkloadType"];
 
+  // DisallowSplitRequests, if set, causes the DistSender to skip (rather
+  // than split) any request that would span multiple ranges. Skipped
+  // requests get a ResumeSpan covering their full span with reason
+  // RESUME_DISALLOWED_SPLIT. Non-split requests execute normally.
+  bool disallow_split_requests = 42;
+
   reserved 7, 10, 12, 14, 20, 24;
 
-  // Next ID: 42
+  // Next ID: 43
 }
 
 message WriteOptions {

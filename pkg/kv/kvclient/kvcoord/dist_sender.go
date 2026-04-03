@@ -1981,6 +1981,9 @@ func (ds *DistSender) divideAndSendBatchToRanges(
 	if err != nil {
 		return nil, kvpb.NewError(err)
 	}
+	if ba.DisallowSplitRequests {
+		truncationHelper.SetDisallowSplit()
+	}
 	// Iterate over the ranges that the batch touches. The iteration is done in
 	// key order - the order of requests in the batch is not relevant for the
 	// iteration. Each iteration sends for evaluation one sub-batch to one range.
@@ -2009,7 +2012,28 @@ func (ds *DistSender) divideAndSendBatchToRanges(
 		curRangeBatch := ba.ShallowCopy()
 		var positions []int
 		curRangeBatch.Requests, positions, seekKey, err = truncationHelper.Truncate(curRangeRS)
+		// Set ResumeSpan responses for requests skipped due to DisallowSplitRequests.
+		if splitPositions := truncationHelper.SplitPositions(); len(splitPositions) > 0 {
+			var scratchBA kvpb.BatchRequest
+			scratchBA.Requests = make([]kvpb.RequestUnion, 1)
+			for _, origPos := range splitPositions {
+				req := ba.Requests[origPos].GetInner()
+				scratchBA.Requests[0].MustSetInner(req)
+				reply := scratchBA.CreateReply().Responses[0].GetInner()
+				reqHeader := req.Header()
+				reply.SetHeader(kvpb.ResponseHeader{
+					ResumeSpan:   &roachpb.Span{Key: reqHeader.Key, EndKey: reqHeader.EndKey},
+					ResumeReason: kvpb.RESUME_DISALLOWED_SPLIT,
+				})
+				br.Responses[origPos].MustSetInner(reply)
+			}
+		}
 		if len(positions) == 0 && err == nil {
+			if len(truncationHelper.SplitPositions()) > 0 {
+				// All requests in this range were skipped due to split
+				// disallowing. Continue to the next range.
+				continue
+			}
 			// This shouldn't happen in the wild, but some tests exercise it.
 			err = errors.Newf("truncation resulted in empty batch on %s: %s", rs, ba)
 		}

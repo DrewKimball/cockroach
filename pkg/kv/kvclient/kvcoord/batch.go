@@ -123,6 +123,13 @@ type BatchTruncationHelper struct {
 	startIdx int
 	// helper is only initialized and used if mustPreserveOrder is true.
 	helper orderRestorationHelper
+
+	// disallowSplit, if true, causes requests that would be split to be
+	// skipped and their positions recorded in splitPositions.
+	disallowSplit bool
+	// splitPositions records the original batch positions of requests
+	// skipped during the last Truncate() call.
+	splitPositions []int
 }
 
 // Len implements the sort.Interface interface.
@@ -226,8 +233,21 @@ func (h *BatchTruncationHelper) Release() {
 		positions:       h.positions[:0],
 		isRange:         h.isRange[:0],
 		helper:          h.helper,
+		splitPositions:  h.splitPositions[:0],
 	}
 	batchTruncationHelperPool.Put(h)
+}
+
+// SetDisallowSplit configures the helper to skip (rather than split) any
+// request that would span multiple ranges.
+func (h *BatchTruncationHelper) SetDisallowSplit() {
+	h.disallowSplit = true
+}
+
+// SplitPositions returns original batch positions of requests skipped
+// during the last Truncate() because they would have been split.
+func (h *BatchTruncationHelper) SplitPositions() []int {
+	return h.splitPositions
 }
 
 // Init sets up the helper for the provided requests. It can be called multiple
@@ -381,6 +401,7 @@ func (h *BatchTruncationHelper) MemUsage() int64 {
 func (h *BatchTruncationHelper) Truncate(
 	rs roachpb.RSpan,
 ) ([]kvpb.RequestUnion, []int, roachpb.RKey, error) {
+	h.splitPositions = h.splitPositions[:0]
 	var truncReqs []kvpb.RequestUnion
 	var positions []int
 	var err error
@@ -599,6 +620,13 @@ func (h *BatchTruncationHelper) truncateAsc(rs roachpb.RSpan) ([]kvpb.RequestUni
 				continue
 			}
 		} else {
+			if h.disallowSplit {
+				// Skip this request — mark fully processed and record position.
+				headers[i] = kvpb.RequestHeader{} //gcassert:bce
+				positions[i] = -1                 //gcassert:bce
+				h.splitPositions = append(h.splitPositions, pos)
+				continue
+			}
 			header.EndKey = ek
 			// Adjust the start key of the header so that it contained only the
 			// unprocessed suffix of the request.
@@ -790,6 +818,13 @@ func (h *BatchTruncationHelper) truncateDesc(rs roachpb.RSpan) ([]kvpb.RequestUn
 				continue
 			}
 		} else {
+			if h.disallowSplit {
+				// Skip this request — mark fully processed and record position.
+				headers[i] = kvpb.RequestHeader{} //gcassert:bce
+				positions[i] = -1                 //gcassert:bce
+				h.splitPositions = append(h.splitPositions, pos)
+				continue
+			}
 			header.Key = sk
 			// Adjust the end key of the header so that it contained only the
 			// unprocessed prefix of the request.
