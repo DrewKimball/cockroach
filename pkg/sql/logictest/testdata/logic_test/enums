@@ -2115,6 +2115,148 @@ WHERE stat->>'columns' = '["a"]'
     "row_count": 5
 }
 
+subtest end
+
+subtest enum_histogram_drop_last_boundary
+
+# Drop the last bucket boundary value. Exercises the tail carry-forward path in
+# DecodeBuckets where carried range counts are redistributed to a new final
+# bucket via getMaxVal, and the NumEq estimate fires because the new max is not
+# adjacent to the remaining bucket.
+
+statement ok
+CREATE TYPE drop_last_e AS ENUM ('a', 'b', 'c', 'd', 'e')
+
+statement ok
+CREATE TABLE t_drop_last (x drop_last_e) WITH (sql_stats_histogram_buckets_count = 2)
+
+# 3×a, 2×b, 2×c, 2×d, 3×e = 12 rows → histogram [a: eq=3, r=0] [e: eq=3, r=6, dr=3]
+statement ok
+INSERT INTO t_drop_last VALUES
+  ('a'),('a'),('a'),('b'),('b'),('c'),('c'),('d'),('d'),('e'),('e'),('e')
+
+statement ok
+CREATE STATISTICS s1 FROM t_drop_last
+
+let $hist_id
+SELECT histogram_id FROM [SHOW STATISTICS FOR TABLE t_drop_last]
+WHERE statistics_name = 's1' AND column_names = '{x}'
+
+query TIRI colnames,nosort
+SHOW HISTOGRAM $hist_id
+----
+upper_bound  range_rows  distinct_range_rows  equal_rows
+'a'          0           0                    3
+'e'          6           3                    3
+
+# Delete rows for 'e' and drop it.
+statement count 3
+DELETE FROM t_drop_last WHERE x = 'e'
+
+statement ok
+ALTER TYPE drop_last_e DROP VALUE 'e'
+
+# Check stale histogram: e's range counts should be carried forward to a new
+# final bucket at 'd' (the new max). NumEq on 'd' should be estimated via
+# uniform distribution (NumRange/DistinctRange) since 'd' is not adjacent to 'a'.
+let $hist_id
+SELECT histogram_id FROM [SHOW STATISTICS FOR TABLE t_drop_last]
+WHERE statistics_name = 's1' AND column_names = '{x}'
+
+query TIRI colnames,nosort
+SHOW HISTOGRAM $hist_id
+----
+upper_bound  range_rows  distinct_range_rows  equal_rows
+'a'          0           0                    3
+'d'          4           2                    2
+
+statement ok
+DROP TABLE t_drop_last
+
+statement ok
+DROP TYPE drop_last_e
+
+subtest end
+
+subtest enum_histogram_drop_all_boundaries
+
+# Drop ALL bucket boundary values. Exercises full histogram reconstruction
+# where both original buckets are skipped and DecodeBuckets must build an
+# entirely new histogram from carried counts via getMinVal/getMaxVal.
+
+statement ok
+CREATE TYPE drop_all_e AS ENUM ('a', 'b', 'c', 'd', 'e')
+
+statement ok
+CREATE TABLE t_drop_all (x drop_all_e) WITH (sql_stats_histogram_buckets_count = 2)
+
+# 2×a, 1×b, 1×c, 1×d, 2×e = 7 rows → histogram [a: eq=2, r=0] [e: eq=2, r=3, dr=3]
+statement ok
+INSERT INTO t_drop_all VALUES
+  ('a'),('a'),('b'),('c'),('d'),('e'),('e')
+
+statement ok
+CREATE STATISTICS s2 FROM t_drop_all
+
+let $hist_id
+SELECT histogram_id FROM [SHOW STATISTICS FOR TABLE t_drop_all]
+WHERE statistics_name = 's2' AND column_names = '{x}'
+
+query TIRI colnames,nosort
+SHOW HISTOGRAM $hist_id
+----
+upper_bound  range_rows  distinct_range_rows  equal_rows
+'a'          0           0                    2
+'e'          3           3                    2
+
+# Delete rows for 'a' and 'e', then drop both.
+statement count 2
+DELETE FROM t_drop_all WHERE x = 'a'
+
+statement count 2
+DELETE FROM t_drop_all WHERE x = 'e'
+
+statement ok
+ALTER TYPE drop_all_e DROP VALUE 'a'
+
+statement ok
+ALTER TYPE drop_all_e DROP VALUE 'e'
+
+# Check stale histogram after both boundaries dropped.
+let $hist_id
+SELECT histogram_id FROM [SHOW STATISTICS FOR TABLE t_drop_all]
+WHERE statistics_name = 's2' AND column_names = '{x}'
+
+query TIRI colnames,nosort
+SHOW HISTOGRAM $hist_id
+----
+upper_bound  range_rows  distinct_range_rows  equal_rows
+'b'          0           0                    1
+'d'          2           2                    0
+
+# Refresh statistics and verify clean histogram.
+statement ok
+CREATE STATISTICS s2_fresh FROM t_drop_all
+
+let $hist_id
+SELECT histogram_id FROM [SHOW STATISTICS FOR TABLE t_drop_all]
+WHERE statistics_name = 's2_fresh' AND column_names = '{x}'
+
+query TIRI colnames,nosort
+SHOW HISTOGRAM $hist_id
+----
+upper_bound  range_rows  distinct_range_rows  equal_rows
+'b'          0           0                    1
+'d'          1           1                    1
+
+statement ok
+DROP TABLE t_drop_all
+
+statement ok
+DROP TYPE drop_all_e
+
+subtest end
+
 # Regression test for #158154. Don't add transitive column dependencies to
 # routines that build check constraints for enum columns.
 subtest regression_158154

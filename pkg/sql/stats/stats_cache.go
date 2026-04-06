@@ -1037,13 +1037,19 @@ func (h *HistogramData) DecodeBuckets(
 				}
 				// If there are no other values between the maximum value and the final
 				// upper bound, steal the carried range count for NumEq of the new
-				// bucket.
+				// bucket. Otherwise, estimate NumEq assuming a uniform distribution
+				// of rows across the distinct values in the range.
 				if len(buckets) > 0 {
 					if prevVal, ok := maxVal.Prev(ctx, compareCtx); ok {
 						if cmp, err := prevVal.Compare(ctx, compareCtx, finalVal); err == nil && cmp == 0 {
 							newFinalBucket.NumEq = carriedNumRange
 							newFinalBucket.NumRange = 0
 							newFinalBucket.DistinctRange = 0
+						} else if carriedDistinctRange > 0 {
+							numEqEstimate := min(carriedNumRange/carriedDistinctRange, carriedNumRange)
+							newFinalBucket.NumEq = numEqEstimate
+							newFinalBucket.NumRange -= numEqEstimate
+							newFinalBucket.DistinctRange--
 						}
 					}
 				}
@@ -1074,12 +1080,18 @@ func (h *HistogramData) DecodeBuckets(
 				}
 				// If there are no other values between the minimum value and the first
 				// upper bound, steal the range counts from the first bucket for NumEq
-				// of the new bucket.
+				// of the new bucket. Otherwise, estimate NumEq assuming a uniform
+				// distribution of rows across the distinct values in the range.
 				if nextVal, ok := minVal.Next(ctx, compareCtx); ok {
 					if cmp, err := nextVal.Compare(ctx, compareCtx, firstVal); err == nil && cmp == 0 {
 						newFirstBucket.NumEq = firstBucket.NumRange
 						firstBucket.NumRange = 0
 						firstBucket.DistinctRange = 0
+					} else if firstBucket.DistinctRange > 0 {
+						numEqEstimate := min(firstBucket.NumRange/firstBucket.DistinctRange, firstBucket.NumRange)
+						newFirstBucket.NumEq = numEqEstimate
+						firstBucket.NumRange -= numEqEstimate
+						firstBucket.DistinctRange--
 					}
 				}
 				buckets = append([]cat.HistogramBucket{newFirstBucket}, buckets...)

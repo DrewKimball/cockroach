@@ -581,8 +581,20 @@ func TestDecodeHistogramBucketsEnum(t *testing.T) {
 				{1, 1, 1, enumEncoded["d"]},
 			},
 			expected: []HistogramData_Bucket{
-				{0, 0, 0, enumPhysRep["b"]},
-				{1, 1, 1, enumPhysRep["d"]},
+				{1, 0, 0, enumPhysRep["b"]},
+				{1, 0, 0, enumPhysRep["d"]},
+			},
+		},
+		{
+			name: "remove-first-add-min-estimate",
+			enum: []string{"b", "c", "d"},
+			buckets: []HistogramData_Bucket{
+				{10, 0, 0, enumEncoded["a"]},
+				{5, 6, 2, enumEncoded["d"]},
+			},
+			expected: []HistogramData_Bucket{
+				{3, 0, 0, enumPhysRep["b"]},
+				{5, 3, 1, enumPhysRep["d"]},
 			},
 		},
 		{
@@ -619,8 +631,8 @@ func TestDecodeHistogramBucketsEnum(t *testing.T) {
 				{1, 1, 1, enumEncoded["d"]},
 			},
 			expected: []HistogramData_Bucket{
-				{0, 0, 0, enumPhysRep["a"]},
-				{1, 1, 1, enumPhysRep["d"]},
+				{1, 0, 0, enumPhysRep["a"]},
+				{1, 0, 0, enumPhysRep["d"]},
 			},
 		},
 		{
@@ -648,7 +660,7 @@ func TestDecodeHistogramBucketsEnum(t *testing.T) {
 			},
 		},
 		{
-			name: "remove-middle-carry-add-max",
+			name: "remove-middle-carry-add-max-estimate",
 			enum: []string{"a", "b", "d"},
 			buckets: []HistogramData_Bucket{
 				{1, 0, 0, enumEncoded["a"]},
@@ -656,7 +668,7 @@ func TestDecodeHistogramBucketsEnum(t *testing.T) {
 			},
 			expected: []HistogramData_Bucket{
 				{1, 0, 0, enumPhysRep["a"]},
-				{0, 1, 1, enumPhysRep["d"]},
+				{1, 0, 0, enumPhysRep["d"]},
 			},
 		},
 		{
@@ -686,7 +698,7 @@ func TestDecodeHistogramBucketsEnum(t *testing.T) {
 			},
 		},
 		{
-			name: "remove-last-carry-add-max",
+			name: "remove-last-carry-add-max-estimate",
 			enum: []string{"a", "b", "c"},
 			buckets: []HistogramData_Bucket{
 				{1, 0, 0, enumEncoded["a"]},
@@ -694,7 +706,19 @@ func TestDecodeHistogramBucketsEnum(t *testing.T) {
 			},
 			expected: []HistogramData_Bucket{
 				{1, 0, 0, enumPhysRep["a"]},
-				{0, 1, 1, enumPhysRep["c"]},
+				{1, 0, 0, enumPhysRep["c"]},
+			},
+		},
+		{
+			name: "remove-last-carry-add-max-estimate-multi",
+			enum: []string{"a", "b", "c"},
+			buckets: []HistogramData_Bucket{
+				{10, 0, 0, enumEncoded["a"]},
+				{1, 6, 2, enumEncoded["d"]},
+			},
+			expected: []HistogramData_Bucket{
+				{10, 0, 0, enumPhysRep["a"]},
+				{3, 3, 1, enumPhysRep["c"]},
 			},
 		},
 		{
