@@ -35,9 +35,11 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/sql/sqlstats/ssmemstorage"
 	"github.com/cockroachdb/cockroach/pkg/testutils"
 	"github.com/cockroachdb/cockroach/pkg/testutils/serverutils"
+	"github.com/cockroachdb/cockroach/pkg/testutils/skip"
 	"github.com/cockroachdb/cockroach/pkg/testutils/sqlutils"
 	"github.com/cockroachdb/cockroach/pkg/util"
 	"github.com/cockroachdb/cockroach/pkg/util/ctxgroup"
+	"github.com/cockroachdb/cockroach/pkg/util/grunning"
 	"github.com/cockroachdb/cockroach/pkg/util/leaktest"
 	"github.com/cockroachdb/cockroach/pkg/util/log"
 	"github.com/cockroachdb/cockroach/pkg/util/mon"
@@ -1436,6 +1438,53 @@ func TestSQLStatsLatencyInfo(t *testing.T) {
 				max, stopwatch.Elapsed().Seconds())
 		})
 	}
+}
+
+// TestSQLStatsCPUTime verifies that the corrected SQL CPU time is recorded in
+// both statement and transaction statistics. The query is CPU-bound and does no
+// KV work, so the recorded SQL CPU time (raw goroutine grunning minus the
+// portion spent in KV calls) must be positive.
+func TestSQLStatsCPUTime(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+	defer log.Scope(t).Close(t)
+
+	// SQL CPU time is measured via grunning, which only reports nonzero values
+	// on supported platforms.
+	if !grunning.Supported {
+		skip.IgnoreLint(t, "grunning not supported on this platform")
+	}
+
+	ctx := context.Background()
+	s, sqlConn, _ := serverutils.StartServer(t, base.TestServerArgs{})
+	defer s.Stopper().Stop(ctx)
+
+	testConn := sqlutils.MakeSQLRunner(sqlConn)
+	obsConn := sqlutils.MakeSQLRunner(s.SQLConn(t))
+
+	appName := t.Name()
+	const fingerprint = "SELECT count(*) FROM ROWS FROM (generate_series(_, _))"
+	testConn.Exec(t, "SET application_name = $1", appName)
+	// A CPU-bound query over generate_series performs real SQL work without any
+	// KV access, guaranteeing a positive corrected SQL CPU time.
+	testConn.Exec(t, "SELECT count(*) FROM generate_series(1, 100000)")
+
+	sqlstatstestutil.WaitForStatementEntriesAtLeast(t, obsConn, 1,
+		sqlstatstestutil.StatementFilter{App: appName, Query: fingerprint, ExecCount: 1})
+
+	var stmtCPU float64
+	obsConn.QueryRow(t, `
+		SELECT statistics->'statistics'->'sqlCPUTimeNanos'->>'mean'
+		  FROM crdb_internal.statement_statistics
+		 WHERE app_name = $1 AND metadata->>'query' = $2`,
+		appName, fingerprint).Scan(&stmtCPU)
+	require.Positivef(t, stmtCPU, "expected positive statement SQL CPU time, got %f", stmtCPU)
+
+	var txnCPU float64
+	obsConn.QueryRow(t, `
+		SELECT statistics->'statistics'->'sqlCPUTimeNanos'->>'mean'
+		  FROM crdb_internal.transaction_statistics
+		 WHERE app_name = $1`, appName).Scan(&txnCPU)
+	require.Positivef(t, txnCPU, "expected positive transaction SQL CPU time, got %f", txnCPU)
 }
 
 func TestSQLStatsRegions(t *testing.T) {

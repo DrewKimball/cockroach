@@ -1832,8 +1832,9 @@ type connExecutor struct {
 		bytesRead int64
 		// rowsWritten tracks the number of rows written (modified) by all
 		// statements in this txn so far.
-		rowsWritten    int64
-		kvCPUTimeNanos time.Duration
+		rowsWritten     int64
+		kvCPUTimeNanos  time.Duration
+		sqlCPUTimeNanos time.Duration
 
 		// rowsWrittenLogged and rowsReadLogged indicates whether we have
 		// already logged an event about reaching written/read rows setting,

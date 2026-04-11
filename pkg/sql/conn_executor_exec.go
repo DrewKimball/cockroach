@@ -3196,6 +3196,7 @@ func (ex *connExecutor) dispatchToExecutionEngine(
 	// corrected SQL CPU time is computed on demand via stats.sqlCPUTime(),
 	// which subtracts localKVCPUTime.
 	stats.rawSQLCPUTime += cpuStopWatch.Stop()
+	ex.extraTxnState.sqlCPUTimeNanos += stats.sqlCPUTime()
 
 	if ppInfo := getPausablePortalInfo(planner); ppInfo != nil && !ppInfo.dispatchToExecutionEngine.cleanup.isComplete {
 		// We need to ensure that we're using the planner bound to the first-time
@@ -3640,6 +3641,11 @@ func (s *topLevelQueryStats) add(other *topLevelQueryStats) {
 // sqlCPUTime returns the corrected SQL CPU time: raw goroutine grunning
 // minus the portion spent inside KV calls. Returns zero if the result would
 // be negative (which can happen when grunning measurements race).
+//
+// This is only meaningful once the query has finished executing and the
+// gateway's grunning has been folded in (i.e. after execWithDistSQLEngine
+// returns and rawSQLCPUTime is updated with the gateway stopwatch). Calling
+// it earlier yields a partial, uncorrected value.
 func (s *topLevelQueryStats) sqlCPUTime() time.Duration {
 	if d := s.rawSQLCPUTime - s.localKVCPUTime; d > 0 {
 		return d
@@ -4512,6 +4518,7 @@ func (ex *connExecutor) onTxnRestart(ctx context.Context) {
 		ex.extraTxnState.bytesRead = 0
 		ex.extraTxnState.rowsWritten = 0
 		ex.extraTxnState.kvCPUTimeNanos = 0
+		ex.extraTxnState.sqlCPUTimeNanos = 0
 
 		if ex.server.cfg.TestingKnobs.BeforeRestart != nil {
 			ex.server.cfg.TestingKnobs.BeforeRestart(ctx, ex.state.mu.autoRetryReason)
@@ -4545,6 +4552,7 @@ func (ex *connExecutor) recordTransactionStart(txnID uuid.UUID) {
 	ex.extraTxnState.idleLatency = 0
 	ex.extraTxnState.rowsRead = 0
 	ex.extraTxnState.kvCPUTimeNanos = 0
+	ex.extraTxnState.sqlCPUTimeNanos = 0
 	ex.extraTxnState.bytesRead = 0
 	ex.extraTxnState.rowsWritten = 0
 	ex.extraTxnState.rowsWrittenLogged = false
@@ -4658,6 +4666,7 @@ func (ex *connExecutor) recordTransactionFinish(
 		RowsWritten:             ex.extraTxnState.rowsWritten,
 		BytesRead:               ex.extraTxnState.bytesRead,
 		KVCPUTimeNanos:          ex.extraTxnState.kvCPUTimeNanos,
+		SQLCPUTimeNanos:         ex.extraTxnState.sqlCPUTimeNanos,
 		Priority:                ex.state.mu.priority,
 		// TODO(107318): add isolation level
 		// TODO(107318): add qos
